@@ -57,6 +57,38 @@ const COL_SUPERVISOR = 17; // Q
 // Qué cuotas te interesa ver en el tablero (avance a mirar = cuota+1)
 const CUOTAS_TABLERO = [3, 5, 7, 9, 12];
 
+// Objetivos de mora / incentivo por cuota (Jul-Sep 2026, esquema "80/20").
+// Por ahora se aplica el mismo objetivo a toda la cartera, sin distinguir
+// tipo de plan (70/30, 80/20, 90/10, etc.) — ver README.
+// t1/i1: mora por debajo de t1 -> incentivo i1.
+// t2/i2: mora entre t1 y t2 (inclusive) -> incentivo i2.
+// Mora por encima de t2 -> incentivo 0.
+const OBJETIVOS_INCENTIVO = {
+  3: { t1: 0.35, i1: 0.0035, t2: 0.41, i2: 0.0020 },
+  5: { t1: 0.30, i1: 0.0065, t2: 0.36, i2: 0.0045 },
+  7: { t1: 0.32, i1: 0.0070, t2: 0.38, i2: 0.0040 },
+  9: { t1: 0.45, i1: 0.0070, t2: 0.51, i2: 0.0040 },
+  12: { t1: 0.48, i1: 0.0080, t2: 0.54, i2: 0.0040 },
+};
+
+/**
+ * Devuelve { franja, incentivo } para una cuota y un % de mora dados,
+ * según OBJETIVOS_INCENTIVO. Si la cuota no tiene objetivo configurado,
+ * o no hay % de mora (fila "sin datos"), devuelve franja/incentivo vacíos.
+ */
+function calcularIncentivo(cuota, pctMora) {
+  const obj = OBJETIVOS_INCENTIVO[cuota];
+  if (!obj || typeof pctMora !== 'number') return { franja: '', incentivo: '' };
+
+  if (pctMora < obj.t1) {
+    return { franja: '< ' + (obj.t1 * 100) + '%', incentivo: obj.i1 };
+  }
+  if (pctMora <= obj.t2) {
+    return { franja: (obj.t1 * 100) + ' a ' + (obj.t2 * 100) + '%', incentivo: obj.i2 };
+  }
+  return { franja: '> ' + (obj.t2 * 100) + '%', incentivo: 0 };
+}
+
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
   'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -274,7 +306,8 @@ function actualizarTablero() {
 
   const encabezados = ['Cuota', 'Fecha foto', 'Período real', 'Avance',
     'Cartera total', 'Cartera activa', 'Pagos Adjudicados', 'Pagos Ahorristas',
-    'TOTAL PAGOS', 'Impagos', 'Rescindidos', 'res+irre+imp', '% de mora'];
+    'TOTAL PAGOS', 'Impagos', 'Rescindidos', 'res+irre+imp', '% de mora',
+    'Franja objetivo', '% Incentivo'];
   hojaTab.getRange(1, 1, 1, encabezados.length).setValues([encabezados]);
 
   const hist = hojaHist.getRange(2, 1, hojaHist.getLastRow() - 1, ENCABEZADOS_HISTORIAL.length).getValues();
@@ -284,7 +317,7 @@ function actualizarTablero() {
     // última foto (fecha más reciente) para ese avance
     const candidatas = hist.filter(function (f) { return f[2] === avanceObjetivo; });
     if (candidatas.length === 0) {
-      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', ''];
+      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', '', '', ''];
     }
     candidatas.sort(function (a, b) { return new Date(b[0]) - new Date(a[0]); });
     const r = candidatas[0];
@@ -293,11 +326,15 @@ function actualizarTablero() {
     // "Período real" se muestra como "Cuota N MES" (ej. "Cuota 3 AGOSTO") en vez
     // de la fecha cruda, para que no se confunda con el valor de "Avance".
     const etiquetaPeriodo = 'Cuota ' + cuota + ' ' + soloMesAnterior(r[0]).toUpperCase();
-    return [cuota, r[0], etiquetaPeriodo, r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], r[11]];
+    const pctMora = r[11];
+    const inc = calcularIncentivo(cuota, pctMora);
+    return [cuota, r[0], etiquetaPeriodo, r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], pctMora,
+      inc.franja, inc.incentivo];
   });
 
   hojaTab.getRange(2, 1, filas.length, encabezados.length).setValues(filas);
   hojaTab.getRange(2, 13, filas.length, 1).setNumberFormat('0.00%');
+  hojaTab.getRange(2, 15, filas.length, 1).setNumberFormat('0.00%');
 }
 
 /**

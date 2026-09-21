@@ -104,6 +104,33 @@ tardío daría un número distinto al que fue el corte real. Por eso:
 ### 4) Cuotas que se siguen en el Tablero
 3, 5, 7, 9 y 12 (configurable en `CUOTAS_TABLERO`).
 
+### 4bis) Objetivos de mora / incentivo (Jul-Sep 2026, esquema "80/20")
+El Tablero suma dos columnas más, calculadas a partir de `OBJETIVOS_INCENTIVO`
+en `tablero_mora.gs`:
+- **Franja objetivo**: en qué franja de mora cayó esa cuota (ej. "< 35%",
+  "35 a 41%", "> 41%").
+- **% Incentivo**: el incentivo que corresponde a esa franja.
+
+Reglas por cuota (mora < t1 → i1; entre t1 y t2 inclusive → i2; mora > t2 →
+incentivo 0%):
+
+| Cuota | < t1 | Incentivo | t1 a t2 | Incentivo |
+|---|---|---|---|---|
+| 3  | < 35% | 0.35% | 35 a 41% | 0.20% |
+| 5  | < 30% | 0.65% | 30 a 36% | 0.45% |
+| 7  | < 32% | 0.70% | 32 a 38% | 0.40% |
+| 9  | < 45% | 0.70% | 45 a 51% | 0.40% |
+| 12 | < 48% | 0.80% | 48 a 54% | 0.40% |
+
+Decisiones tomadas con Gabi (21/09/2026):
+- **Por ahora se aplica el mismo objetivo a toda la cartera**, sin separar
+  por tipo de plan (70/30, 80/20, 90/10, etc.), aunque la tabla original
+  esté etiquetada "80/20". Si más adelante aparecen tablas de objetivo
+  distintas por tipo de plan, hay que filtrar `Tablero`/`Historial_Mora`
+  por "Tipo de Plan" antes de aplicar cada tabla.
+- **Mora por encima del límite superior de la franja = incentivo 0%** (no
+  se sigue pagando el incentivo de la franja más baja).
+
 ### 5) Detalle_Planes: de los números del Tablero a los planes concretos
 El Tablero da agregados (cuántos rescindidos, cuántos en mora, etc.) para
 las 5 cuotas de interés, pero para trabajar la cartera (llamar, reclamar,
