@@ -28,6 +28,10 @@
  *    manualmente cuando quieras.
  * 4) Menú "Mora" > "Actualizar tablero" para refrescar la hoja "Tablero"
  *    con las 5 cuotas, usando la última foto disponible de cada avance.
+ * 5) Menú "Mora" > "Actualizar detalle de planes" para refrescar la hoja
+ *    "Detalle_Planes": un listado (uno por plan) con filtro nativo de
+ *    Sheets por Avance y por clasificación de mora, para poder ver a qué
+ *    planes puntuales corresponde cada número del Tablero.
  */
 
 // --- CONFIGURACIÓN ---
@@ -35,11 +39,20 @@ const HOJA_BASE = 'BASE';
 const HOJA_HISTORIAL = 'Historial_Mora';
 const HOJA_TABLERO = 'Tablero';
 const HOJA_LOG = 'Log_Snapshot';
+const HOJA_DETALLE = 'Detalle_Planes';
 const PROP_ULTIMO_HASH = 'ULTIMO_HASH_BASE';
 
 const COL_AVANCE = 14; // N
 const COL_ESTADO = 15; // O
 const COL_C2 = 18;     // R = primera cuota del rango (C2)
+
+// Columnas identificatorias del plan, para el detalle por plan.
+const COL_SOLICITUD = 2;  // B
+const COL_GRUPO = 3;      // C
+const COL_CLIENTE = 8;    // H — "NyAP-Razon Social"
+const COL_TELEFONO = 9;   // I
+const COL_VENDEDOR = 16;  // P
+const COL_SUPERVISOR = 17; // Q
 
 // Qué cuotas te interesa ver en el tablero (avance a mirar = cuota+1)
 const CUOTAS_TABLERO = [3, 5, 7, 9, 12];
@@ -58,6 +71,7 @@ function onOpen() {
     .createMenu('Mora')
     .addItem('Sacar foto ahora', 'snapshotDiario')
     .addItem('Actualizar tablero', 'actualizarTablero')
+    .addItem('Actualizar detalle de planes', 'actualizarDetallePlanes')
     .addItem('Instalar snapshot automático diario', 'instalarTriggerDiario')
     .addToUi();
 }
@@ -284,4 +298,98 @@ function actualizarTablero() {
 
   hojaTab.getRange(2, 1, filas.length, encabezados.length).setValues(filas);
   hojaTab.getRange(2, 13, filas.length, 1).setNumberFormat('0.00%');
+}
+
+/**
+ * Clasifica UNA fila de BASE según la misma regla de "mes atrasado" que usa
+ * calcularPorAvance (rango C2..C(avance-1)), pero devolviendo una sola
+ * etiqueta por plan en vez de un conteo agregado:
+ * - 'Rescindido': hay al menos una 'R' en el rango.
+ * - 'Mora irregular': no hay 'R', pero hay al menos una 'I' en el rango.
+ * - 'Pagado al día': todas las columnas del rango son 'P'.
+ * - 'Sin cuotas para analizar': avance=2 (cuota 1, todavía no hay rango que
+ *   mirar — evita el caso trivial de un rango vacío "cumpliendo" todoP).
+ * - 'Sin clasificar': combinación rara (huecos en el rango, etc.), para no
+ *   perder la fila silenciosamente.
+ * El Estado (Ahorrista/Adjudicado/Rescindido/Renunciado/Cancelado) es un
+ * dato aparte de BASE y se devuelve tal cual — un plan puede figurar como
+ * "Renunciado" en Estado y "Pagado al día" en esta clasificación a la vez.
+ */
+function clasificarFila(fila) {
+  const offsetAvance = COL_AVANCE - 1;
+  const offsetC2 = COL_C2 - 1;
+  const avance = fila[offsetAvance];
+
+  if (typeof avance !== 'number' || avance < 2) return null;
+
+  const ncols = avance - 2; // C2..C(avance-1)
+  if (ncols <= 0) return 'Sin cuotas para analizar';
+
+  const rango = fila.slice(offsetC2, offsetC2 + ncols);
+  const tieneR = rango.some(function (v) { return v === 'R'; });
+  const tieneI = rango.some(function (v) { return v === 'I'; });
+  const todoP = rango.length > 0 && rango.every(function (v) { return v === 'P'; });
+
+  if (tieneR) return 'Rescindido';
+  if (tieneI) return 'Mora irregular';
+  if (todoP) return 'Pagado al día';
+  return 'Sin clasificar';
+}
+
+/**
+ * Refresca la hoja "Detalle_Planes": un listado, un plan por fila, leído en
+ * vivo de BASE (no del historial — acá interesa quiénes son HOY, no una
+ * foto vieja), con la clasificación de mora de cada uno y un filtro nativo
+ * de Sheets ya armado para poder filtrar por Avance y por Clasificación/
+ * Estado (Mora irregular, Rescindido, Renunciado, etc.).
+ */
+function actualizarDetallePlanes() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojaBase = ss.getSheetByName(HOJA_BASE);
+  if (!hojaBase) throw new Error('No encuentro la hoja "' + HOJA_BASE + '"');
+
+  const lastRow = hojaBase.getLastRow();
+  const lastCol = Math.max(COL_C2 + 13, hojaBase.getLastColumn());
+  const datos = hojaBase.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const offsetSolicitud = COL_SOLICITUD - 1;
+  const offsetGrupo = COL_GRUPO - 1;
+  const offsetCliente = COL_CLIENTE - 1;
+  const offsetTelefono = COL_TELEFONO - 1;
+  const offsetVendedor = COL_VENDEDOR - 1;
+  const offsetSupervisor = COL_SUPERVISOR - 1;
+  const offsetAvance = COL_AVANCE - 1;
+  const offsetEstado = COL_ESTADO - 1;
+
+  const encabezados = ['Solicitud', 'Grupo', 'Cliente', 'Teléfono', 'Vendedor',
+    'Supervisor', 'Avance', 'Cuota analizada', 'Estado', 'Clasificación mora'];
+
+  const filas = [];
+  for (let i = 0; i < datos.length; i++) {
+    const fila = datos[i];
+    const avance = fila[offsetAvance];
+    const clasificacion = clasificarFila(fila);
+    if (clasificacion === null) continue; // sin Avance numérico válido
+
+    filas.push([
+      fila[offsetSolicitud], fila[offsetGrupo], fila[offsetCliente],
+      fila[offsetTelefono], fila[offsetVendedor], fila[offsetSupervisor],
+      avance, avance - 1, fila[offsetEstado], clasificacion,
+    ]);
+  }
+
+  let hojaDet = ss.getSheetByName(HOJA_DETALLE);
+  if (!hojaDet) hojaDet = ss.insertSheet(HOJA_DETALLE);
+  hojaDet.clear();
+
+  hojaDet.getRange(1, 1, 1, encabezados.length).setValues([encabezados]);
+  if (filas.length > 0) {
+    hojaDet.getRange(2, 1, filas.length, encabezados.length).setValues(filas);
+  }
+  hojaDet.setFrozenRows(1);
+
+  const rangoCompleto = hojaDet.getRange(1, 1, filas.length + 1, encabezados.length);
+  const filtroExistente = hojaDet.getFilter();
+  if (filtroExistente) filtroExistente.remove();
+  rangoCompleto.createFilter();
 }

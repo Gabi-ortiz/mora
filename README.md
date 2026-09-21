@@ -24,6 +24,11 @@ cuadro de análisis en el mismo archivo, hoja "Hoja 2" para la base).
   edita a mano. Tampoco existe todavía, la crea "Actualizar tablero".
 - **Log_Snapshot**: una línea por corrida del trigger diario, diga si hubo
   cambios en BASE o no. Tampoco existe todavía.
+- **Detalle_Planes**: un plan por fila, leído en vivo de BASE (no del
+  historial), con filtro nativo de Sheets ya armado para poder filtrar por
+  Avance y ver qué planes puntuales caen en cada estado (Mora irregular,
+  Rescindido, Renunciado, etc.). Se regenera con "Actualizar detalle de
+  planes" — no se edita a mano. Tampoco existe todavía.
 
 ## Estructura de la hoja BASE (confirmada contra el archivo actual)
 - Columna **N** (14): "Avance" — cuántas cuotas van de ese plan (entero,
@@ -99,6 +104,25 @@ tardío daría un número distinto al que fue el corte real. Por eso:
 ### 4) Cuotas que se siguen en el Tablero
 3, 5, 7, 9 y 12 (configurable en `CUOTAS_TABLERO`).
 
+### 5) Detalle_Planes: de los números del Tablero a los planes concretos
+El Tablero da agregados (cuántos rescindidos, cuántos en mora, etc.) para
+las 5 cuotas de interés, pero para trabajar la cartera (llamar, reclamar,
+etc.) hace falta saber QUIÉNES son. Para eso está Detalle_Planes:
+- Lee BASE en vivo (no el historial) — acá interesa la situación actual de
+  cada plan, no una foto vieja.
+- Clasifica cada plan con la misma regla de "mes atrasado" que usa el
+  Tablero (rango C2..C(avance-1)): Rescindido / Mora irregular / Pagado al
+  día / Sin cuotas para analizar (avance=2, todavía no hay rango que mirar).
+- Muestra también el Estado tal cual está en BASE (Ahorrista / Adjudicado /
+  Rescindido / Renunciado / Cancelado) en una columna aparte — un plan puede
+  ser "Renunciado" en Estado y "Pagado al día" en la clasificación de mora
+  al mismo tiempo, son dos cosas distintas.
+- Trae el filtro de Sheets ya activado (ícono de embudo en el encabezado):
+  filtrás por columna "Avance" para pararte en la misma cuota que estás
+  mirando en el Tablero (recordá: avance = cuota + 1), y después por
+  "Clasificación mora" (Rescindido / Mora irregular) o por "Estado"
+  (Renunciado) para ver la lista de planes de ese grupo puntual.
+
 ## Script actual
 Ver `tablero_mora.gs` en este repo — es la versión funcionando, probada e
 instalada como Apps Script bound al archivo anterior, con la configuración
@@ -110,10 +134,12 @@ ya confirmada contra el archivo nuevo. Para instalarlo:
 4. Menú "Mora" > "Instalar snapshot automático diario" (una sola vez).
 5. Menú "Mora" > "Sacar foto ahora" para la primera foto.
 6. Menú "Mora" > "Actualizar tablero" para generar el Tablero por primera vez.
+7. Menú "Mora" > "Actualizar detalle de planes" para generar Detalle_Planes.
 
 De ahí en más el trigger diario (~4am) se encarga de sacar la foto solo
-cuando hay cambios reales en BASE; "Actualizar tablero" se puede correr
-cuando se quiera para refrescar la vista con la última foto disponible.
+cuando hay cambios reales en BASE; "Actualizar tablero" y "Actualizar
+detalle de planes" se pueden correr cuando se quiera (no dependen del
+trigger) para refrescar cada vista.
 
 ## Historial de decisiones de diseño (para no repreguntar)
 - Se probó y descartó comparar "avance actual" contra "avance actual - 1"
