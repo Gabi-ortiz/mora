@@ -105,11 +105,12 @@ tardío daría un número distinto al que fue el corte real. Por eso:
 3, 5, 7, 9 y 12 (configurable en `CUOTAS_TABLERO`).
 
 ### 4bis) Objetivos de mora / incentivo (Jul-Sep 2026, esquema "80/20")
-El Tablero suma dos columnas más, calculadas a partir de `OBJETIVOS_INCENTIVO`
-en `tablero_mora.gs`:
-- **Franja objetivo**: en qué franja de mora cayó esa cuota (ej. "< 35%",
-  "35 a 41%", "> 41%").
-- **% Incentivo**: el incentivo que corresponde a esa franja.
+El Tablero suma una columna **% Incentivo**, calculada a partir de
+`OBJETIVOS_INCENTIVO` en `tablero_mora.gs`: el incentivo que corresponde a
+la franja de mora en la que cayó esa cuota. (Hubo una columna "Franja
+objetivo" con el texto de la franja, se sacó por pedido de Gabi porque
+mareaba — la franja se puede inferir del propio % de mora contra la tabla
+de abajo.)
 
 Reglas por cuota (mora < t1 → i1; entre t1 y t2 inclusive → i2; mora > t2 →
 incentivo 0%):
@@ -144,12 +145,12 @@ Planes a bajar = techo(res+irre+imp − objetivo_en_planes), mínimo 0
 ```
 
 Dos columnas en el Tablero:
-- **Planes a bajar (mejor franja)**: cuántos planes faltan recuperar para
-  que la mora quede por debajo de `t1` (ej. < 35% en Cuota 3). Si ya está
-  ahí, da 0.
-- **Planes a bajar (2da franja)**: lo mismo pero contra `t2` (ej. 41% en
-  Cuota 3) — o sea, lo mínimo para al menos no quedar afuera de todo
-  incentivo. Si ya está en la mejor franja o en la segunda, da 0.
+- **Planes a bajar (A)**: cuántos planes faltan recuperar para que la mora
+  quede por debajo de `t1` (ej. < 35% en Cuota 3, la mejor franja). Si ya
+  está ahí, da 0.
+- **Planes a bajar (B)**: lo mismo pero contra `t2` (ej. 41% en Cuota 3,
+  la segunda franja) — o sea, lo mínimo para al menos no quedar afuera de
+  todo incentivo. Si ya está en la mejor franja o en la segunda, da 0.
 
 Sirve para ir trabajando la cartera mes a mes con un número concreto de
 planes a recuperar por cuota, en vez de solo mirar el % de mora.

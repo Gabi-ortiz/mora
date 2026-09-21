@@ -326,8 +326,7 @@ function actualizarTablero() {
   const encabezados = ['Cuota', 'Fecha foto', 'Período real', 'Avance',
     'Cartera total', 'Cartera activa', 'Pagos Adjudicados', 'Pagos Ahorristas',
     'TOTAL PAGOS', 'Impagos', 'Rescindidos', 'res+irre+imp', '% de mora',
-    'Franja objetivo', '% Incentivo',
-    'Planes a bajar (mejor franja)', 'Planes a bajar (2da franja)'];
+    '% Incentivo', 'Planes a bajar (A)', 'Planes a bajar (B)'];
   hojaTab.getRange(1, 1, 1, encabezados.length).setValues([encabezados]);
 
   const hist = hojaHist.getRange(2, 1, hojaHist.getLastRow() - 1, ENCABEZADOS_HISTORIAL.length).getValues();
@@ -337,7 +336,7 @@ function actualizarTablero() {
     // última foto (fecha más reciente) para ese avance
     const candidatas = hist.filter(function (f) { return f[2] === avanceObjetivo; });
     if (candidatas.length === 0) {
-      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', '', '', '', '', ''];
+      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', '', '', '', ''];
     }
     candidatas.sort(function (a, b) { return new Date(b[0]) - new Date(a[0]); });
     const r = candidatas[0];
@@ -352,12 +351,12 @@ function actualizarTablero() {
     const inc = calcularIncentivo(cuota, pctMora);
     const bajar = calcularPlanesABajar(carteraTotal, resIrreImp, cuota);
     return [cuota, r[0], etiquetaPeriodo, r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], pctMora,
-      inc.franja, inc.incentivo, bajar.aMejorFranja, bajar.aSegundaFranja];
+      inc.incentivo, bajar.aMejorFranja, bajar.aSegundaFranja];
   });
 
   hojaTab.getRange(2, 1, filas.length, encabezados.length).setValues(filas);
   hojaTab.getRange(2, 13, filas.length, 1).setNumberFormat('0.00%');
-  hojaTab.getRange(2, 15, filas.length, 1).setNumberFormat('0.00%');
+  hojaTab.getRange(2, 14, filas.length, 1).setNumberFormat('0.00%');
 }
 
 /**
