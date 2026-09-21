@@ -89,6 +89,25 @@ function calcularIncentivo(cuota, pctMora) {
   return { franja: '> ' + (obj.t2 * 100) + '%', incentivo: 0 };
 }
 
+/**
+ * Cuántos planes hay que "levantar" (pasar de Mora irregular/Rescindido a
+ * Pagado) para que la mora de esa cuota entre en cada franja de objetivo.
+ * Misma cuenta que usaba el archivo manual de Fiat en su columna "Bajar":
+ * objetivo_en_planes = carteraTotal * umbral; brecha = resIrreImp - objetivo.
+ * Si la brecha es <= 0 ya se está dentro de esa franja (se muestra 0).
+ */
+function calcularPlanesABajar(carteraTotal, resIrreImp, cuota) {
+  const obj = OBJETIVOS_INCENTIVO[cuota];
+  if (!obj || !carteraTotal) return { aMejorFranja: '', aSegundaFranja: '' };
+
+  const objetivoT1 = carteraTotal * obj.t1;
+  const objetivoT2 = carteraTotal * obj.t2;
+  return {
+    aMejorFranja: Math.max(0, Math.ceil(resIrreImp - objetivoT1)),
+    aSegundaFranja: Math.max(0, Math.ceil(resIrreImp - objetivoT2)),
+  };
+}
+
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
   'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -307,7 +326,8 @@ function actualizarTablero() {
   const encabezados = ['Cuota', 'Fecha foto', 'Período real', 'Avance',
     'Cartera total', 'Cartera activa', 'Pagos Adjudicados', 'Pagos Ahorristas',
     'TOTAL PAGOS', 'Impagos', 'Rescindidos', 'res+irre+imp', '% de mora',
-    'Franja objetivo', '% Incentivo'];
+    'Franja objetivo', '% Incentivo',
+    'Planes a bajar (mejor franja)', 'Planes a bajar (2da franja)'];
   hojaTab.getRange(1, 1, 1, encabezados.length).setValues([encabezados]);
 
   const hist = hojaHist.getRange(2, 1, hojaHist.getLastRow() - 1, ENCABEZADOS_HISTORIAL.length).getValues();
@@ -317,7 +337,7 @@ function actualizarTablero() {
     // última foto (fecha más reciente) para ese avance
     const candidatas = hist.filter(function (f) { return f[2] === avanceObjetivo; });
     if (candidatas.length === 0) {
-      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', '', '', ''];
+      return [cuota, '(sin datos)', '', avanceObjetivo, '', '', '', '', '', '', '', '', '', '', '', '', ''];
     }
     candidatas.sort(function (a, b) { return new Date(b[0]) - new Date(a[0]); });
     const r = candidatas[0];
@@ -326,10 +346,13 @@ function actualizarTablero() {
     // "Período real" se muestra como "Cuota N MES" (ej. "Cuota 3 AGOSTO") en vez
     // de la fecha cruda, para que no se confunda con el valor de "Avance".
     const etiquetaPeriodo = 'Cuota ' + cuota + ' ' + soloMesAnterior(r[0]).toUpperCase();
+    const carteraTotal = r[3];
+    const resIrreImp = r[10];
     const pctMora = r[11];
     const inc = calcularIncentivo(cuota, pctMora);
+    const bajar = calcularPlanesABajar(carteraTotal, resIrreImp, cuota);
     return [cuota, r[0], etiquetaPeriodo, r[2], r[3], r[4], r[5], r[6], r[7], r[8], r[9], r[10], pctMora,
-      inc.franja, inc.incentivo];
+      inc.franja, inc.incentivo, bajar.aMejorFranja, bajar.aSegundaFranja];
   });
 
   hojaTab.getRange(2, 1, filas.length, encabezados.length).setValues(filas);

@@ -131,6 +131,29 @@ Decisiones tomadas con Gabi (21/09/2026):
 - **Mora por encima del límite superior de la franja = incentivo 0%** (no
   se sigue pagando el incentivo de la franja más baja).
 
+### 4ter) "Planes a bajar": cuántos planes hay que recuperar para cambiar de franja
+Además de en qué franja está parada cada cuota HOY, el Tablero muestra
+cuántos planes (de los que hoy están en Rescindido/Mora irregular) hace
+falta "levantar" (cobrarles / regularizarlos) para entrar en cada franja de
+premio. Es la misma cuenta que usaba el archivo manual de Fiat en su
+columna "Bajar":
+
+```
+objetivo_en_planes = Cartera total × umbral de la franja (t1 o t2)
+Planes a bajar = techo(res+irre+imp − objetivo_en_planes), mínimo 0
+```
+
+Dos columnas en el Tablero:
+- **Planes a bajar (mejor franja)**: cuántos planes faltan recuperar para
+  que la mora quede por debajo de `t1` (ej. < 35% en Cuota 3). Si ya está
+  ahí, da 0.
+- **Planes a bajar (2da franja)**: lo mismo pero contra `t2` (ej. 41% en
+  Cuota 3) — o sea, lo mínimo para al menos no quedar afuera de todo
+  incentivo. Si ya está en la mejor franja o en la segunda, da 0.
+
+Sirve para ir trabajando la cartera mes a mes con un número concreto de
+planes a recuperar por cuota, en vez de solo mirar el % de mora.
+
 ### 5) Detalle_Planes: de los números del Tablero a los planes concretos
 El Tablero da agregados (cuántos rescindidos, cuántos en mora, etc.) para
 las 5 cuotas de interés, pero para trabajar la cartera (llamar, reclamar,
