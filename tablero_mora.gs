@@ -118,10 +118,20 @@ function calcularPlanesABajar(carteraTotal, resIrreImp, cuota) {
 const MESES_ES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio',
   'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+// Columnas 4-12: mes vencido (rango C2..C(avance-1)) — es lo único que
+// consume actualizarTablero(), no tocar el orden ni el significado.
+// Columnas 13-21: avance real (rango C2..C(avance), el mismo Avance que
+// trae BASE) — estado actual del avance, mismo criterio que usa
+// Detalle_Planes (clasificarFilaCompleta). Sirven para responder "estado
+// actual mes a mes de cada avance" y para cruzar contra Detalle_Planes sin
+// que el desfasaje de Fiat meta ruido en la comparación.
 const ENCABEZADOS_HISTORIAL = [
-  'Fecha', 'MesAnalisis', 'Avance', 'CarteraTotal', 'CarteraActiva',
-  'PagosAdjudicados', 'PagosAhorristas', 'TotalPagos',
+  'Fecha', 'MesAnalisis', 'Avance',
+  'CarteraTotal', 'CarteraActiva', 'PagosAdjudicados', 'PagosAhorristas', 'TotalPagos',
   'Impagos(MoraIrregular)', 'Rescindidos', 'ResIrreImp', 'PctMora',
+  'CarteraTotal_AvanceReal', 'CarteraActiva_AvanceReal', 'PagosAdjudicados_AvanceReal',
+  'PagosAhorristas_AvanceReal', 'TotalPagos_AvanceReal', 'Impagos_AvanceReal',
+  'Rescindidos_AvanceReal', 'ResIrreImp_AvanceReal', 'PctMora_AvanceReal',
 ];
 
 function onOpen() {
@@ -231,10 +241,14 @@ function snapshotDiario() {
 
   const filasNuevas = avances.map(function (avance) {
     const r = calcularPorAvance(datos, avance);
+    const mv = r.mesVencido;
+    const real = r.avanceReal;
     return [
-      hoyStr, mesAnalisis, avance, r.carteraTotal, r.carteraActiva,
-      r.pagosAdjudicados, r.pagosAhorristas, r.totalPagos,
-      r.impagos, r.rescindidos, r.resIrreImp, r.pctMora,
+      hoyStr, mesAnalisis, avance,
+      mv.carteraTotal, mv.carteraActiva, mv.pagosAdjudicados, mv.pagosAhorristas, mv.totalPagos,
+      mv.impagos, mv.rescindidos, mv.resIrreImp, mv.pctMora,
+      real.carteraTotal, real.carteraActiva, real.pagosAdjudicados, real.pagosAhorristas, real.totalPagos,
+      real.impagos, real.rescindidos, real.resIrreImp, real.pctMora,
     ];
   });
 
@@ -269,47 +283,59 @@ function borrarFotosDeFecha(hojaHist, fechaStr) {
 }
 
 /**
- * Calcula los agregados de mora para un valor de "Avance" puntual,
- * a partir de la matriz completa de BASE (ya leída con getValues()).
+ * Calcula los agregados de mora para un valor de "Avance" puntual, a partir
+ * de la matriz completa de BASE (ya leída con getValues()), en las DOS
+ * convenciones que necesita Historial_Mora:
+ * - mesVencido: rango C2..C(avance-1) — lo que usa el Tablero, coincide con
+ *   el reporte de Fiat (mide a mes vencido).
+ * - avanceReal: rango C2..C(avance) — el estado actual del plan con su
+ *   propio Avance (el mismo número que trae BASE), mismo criterio que usa
+ *   Detalle_Planes.
+ * Ambas se calculan sobre el mismo grupo de filas (Avance === avance), solo
+ * cambia cuántas columnas de C2 en adelante se miran.
  */
 function calcularPorAvance(datos, avance) {
-  const ncols = avance - 2; // C2..C(avance-1)
   const offsetC2 = COL_C2 - 1;
   const offsetAvance = COL_AVANCE - 1;
   const offsetEstado = COL_ESTADO - 1;
 
-  let carteraTotal = 0, rescindidos = 0, irregulares = 0;
-  let pagosAdjudicados = 0, pagosAhorristas = 0;
+  const filasAvance = datos.filter(function (fila) { return fila[offsetAvance] === avance; });
+  const carteraTotal = filasAvance.length;
 
-  for (let i = 0; i < datos.length; i++) {
-    const fila = datos[i];
-    if (fila[offsetAvance] !== avance) continue;
-    carteraTotal++;
+  function agregar(ncols) {
+    let rescindidos = 0, irregulares = 0, pagosAdjudicados = 0, pagosAhorristas = 0;
 
-    const rango = fila.slice(offsetC2, offsetC2 + ncols);
-    const tieneR = rango.some(function (v) { return v === 'R'; });
-    const tieneI = rango.some(function (v) { return v === 'I'; });
-    const todoP = rango.every(function (v) { return v === 'P'; });
+    filasAvance.forEach(function (fila) {
+      const rango = ncols > 0 ? fila.slice(offsetC2, offsetC2 + ncols) : [];
+      const tieneR = rango.some(function (v) { return v === 'R'; });
+      const tieneI = rango.some(function (v) { return v === 'I'; });
+      const todoP = rango.length > 0 && rango.every(function (v) { return v === 'P'; });
 
-    if (tieneR) rescindidos++;
-    if (tieneI) irregulares++;
-    if (todoP) {
-      const estado = fila[offsetEstado];
-      if (estado === 'Adjudicado') pagosAdjudicados++;
-      else if (estado === 'Ahorrista') pagosAhorristas++;
-    }
+      if (tieneR) rescindidos++;
+      if (tieneI) irregulares++;
+      if (todoP) {
+        const estado = fila[offsetEstado];
+        if (estado === 'Adjudicado') pagosAdjudicados++;
+        else if (estado === 'Ahorrista') pagosAhorristas++;
+      }
+    });
+
+    const carteraActiva = carteraTotal - rescindidos;
+    const totalPagos = pagosAdjudicados + pagosAhorristas;
+    const resIrreImp = rescindidos + irregulares;
+    const pctMora = carteraTotal > 0 ? resIrreImp / carteraTotal : 0;
+
+    return {
+      carteraTotal: carteraTotal, carteraActiva: carteraActiva,
+      pagosAdjudicados: pagosAdjudicados, pagosAhorristas: pagosAhorristas,
+      totalPagos: totalPagos, impagos: irregulares, rescindidos: rescindidos,
+      resIrreImp: resIrreImp, pctMora: pctMora,
+    };
   }
 
-  const carteraActiva = carteraTotal - rescindidos;
-  const totalPagos = pagosAdjudicados + pagosAhorristas;
-  const resIrreImp = rescindidos + irregulares;
-  const pctMora = carteraTotal > 0 ? resIrreImp / carteraTotal : 0;
-
   return {
-    carteraTotal: carteraTotal, carteraActiva: carteraActiva,
-    pagosAdjudicados: pagosAdjudicados, pagosAhorristas: pagosAhorristas,
-    totalPagos: totalPagos, impagos: irregulares, rescindidos: rescindidos,
-    resIrreImp: resIrreImp, pctMora: pctMora,
+    mesVencido: agregar(avance - 2),  // C2..C(avance-1)
+    avanceReal: agregar(avance - 1),  // C2..C(avance)
   };
 }
 

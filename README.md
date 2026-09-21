@@ -104,6 +104,28 @@ tardío daría un número distinto al que fue el corte real. Por eso:
   disponible en Historial_Mora para el avance que corresponde a cada cuota
   de interés (avance = cuota + 1).
 
+### 3bis) Historial_Mora guarda DOS mediciones por avance/fecha
+Decisión con Gabi (21/09/2026): Historial_Mora es el registro de "estado
+actual mes a mes de cada avance" (el pedido original), así que su dato
+principal tiene que ser el **avance real** — el mismo número que trae
+BASE, igual criterio que Detalle_Planes —, no el mes vencido de Fiat. Pero
+el Tablero SÍ necesita seguir midiendo mes vencido (validado contra el
+archivo manual, no tocar). Por eso cada fila de Historial_Mora trae ambos
+bloques, calculados sobre el mismo grupo de planes (mismo Avance), solo
+cambia el rango de columnas C2.. que se mira:
+- **Columnas 4 a 12** (`CarteraTotal`, `CarteraActiva`, ... `PctMora`):
+  **mes vencido**, rango C2..C(avance-1). Es lo único que lee
+  `actualizarTablero()` — no se tocó su posición ni su fórmula.
+- **Columnas 13 a 21** (sufijo `_AvanceReal`): **avance real**, rango
+  C2..C(avance) — mismo criterio que `clasificarFilaCompleta()` en
+  Detalle_Planes.
+
+Para cruzar Detalle_Planes contra un resumen, hay que compararlo contra
+las columnas `_AvanceReal` de Historial_Mora para ESE MISMO Avance — no
+contra el Tablero, que a propósito mide el avance siguiente con un rango
+de columnas distinto (por eso no van a coincidir los totales entre
+Detalle_Planes y el Tablero, y eso no es un bug).
+
 ### 4) Cuotas que se siguen en el Tablero
 3, 5, 7, 9 y 12 (configurable en `CUOTAS_TABLERO`).
 
