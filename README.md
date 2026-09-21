@@ -24,11 +24,14 @@ cuadro de análisis en el mismo archivo, hoja "Hoja 2" para la base).
   edita a mano. Tampoco existe todavía, la crea "Actualizar tablero".
 - **Log_Snapshot**: una línea por corrida del trigger diario, diga si hubo
   cambios en BASE o no. Tampoco existe todavía.
-- **Detalle_Planes**: un plan por fila, leído en vivo de BASE (no del
-  historial), con filtro nativo de Sheets ya armado para poder filtrar por
-  Avance y ver qué planes puntuales caen en cada estado (Mora irregular,
-  Rescindido, Renunciado, etc.). Se regenera con "Actualizar detalle de
-  planes" — no se edita a mano. Tampoco existe todavía.
+- **Detalle_Planes**: desplegable en **B1** para elegir UN Avance puntual
+  (fila 1), y debajo (desde fila 2) un listado — un plan por fila, leído en
+  vivo de BASE (no del historial) — solo de los planes con ese Avance, con
+  filtro nativo de Sheets ya armado para además filtrar por Clasificación/
+  Estado (Mora irregular, Rescindido, Renunciado, etc.) dentro de ese
+  avance. Al cambiar el desplegable se recalcula sola (trigger `onEdit`,
+  no hace falta ir al menú). Se puede regenerar también a mano con
+  "Actualizar detalle de planes". Tampoco existe todavía.
 
 ## Estructura de la hoja BASE (confirmada contra el archivo actual)
 - Columna **N** (14): "Avance" — cuántas cuotas van de ese plan (entero,
@@ -161,18 +164,34 @@ las 5 cuotas de interés, pero para trabajar la cartera (llamar, reclamar,
 etc.) hace falta saber QUIÉNES son. Para eso está Detalle_Planes:
 - Lee BASE en vivo (no el historial) — acá interesa la situación actual de
   cada plan, no una foto vieja.
-- Clasifica cada plan con la misma regla de "mes atrasado" que usa el
-  Tablero (rango C2..C(avance-1)): Rescindido / Mora irregular / Pagado al
-  día / Sin cuotas para analizar (avance=2, todavía no hay rango que mirar).
+- **B1 es un desplegable** con todos los valores de Avance presentes en
+  BASE. Elegís UNO y la tabla de abajo (desde la fila 2) muestra solo los
+  planes que están hoy en ese Avance — no hace falta usar el filtro nativo
+  para esto, cambiar el desplegable ya filtra (dispara `onEdit`, que llama
+  sola a `actualizarDetallePlanes()`).
+- **Clasifica cada plan por el plan COMPLETO, con el avance real** (rango
+  C2..C(avance), incluye la cuota del mes en curso) — a propósito
+  DISTINTO del Tablero, que mira C2..C(avance-1) porque Fiat mide a mes
+  vencido. Acá interesa la foto de hoy para trabajar la cartera, no la que
+  va a reportar Fiat con un mes de atraso. Decisión con Gabi (21/09/2026):
+  la columna del avance actual siempre tiene P/I/R cargado (nunca queda en
+  blanco), así que no hace falta un caso especial para "cuota en curso sin
+  cargar".
+  - Clasificación: Rescindido / Mora irregular / Pagado al día / Sin
+    clasificar (combinación rara).
 - Muestra también el Estado tal cual está en BASE (Ahorrista / Adjudicado /
   Rescindido / Renunciado / Cancelado) en una columna aparte — un plan puede
   ser "Renunciado" en Estado y "Pagado al día" en la clasificación de mora
   al mismo tiempo, son dos cosas distintas.
-- Trae el filtro de Sheets ya activado (ícono de embudo en el encabezado):
-  filtrás por columna "Avance" para pararte en la misma cuota que estás
-  mirando en el Tablero (recordá: avance = cuota + 1), y después por
-  "Clasificación mora" (Rescindido / Mora irregular) o por "Estado"
-  (Renunciado) para ver la lista de planes de ese grupo puntual.
+- Trae además el filtro nativo de Sheets ya activado (ícono de embudo en la
+  fila de encabezados, fila 2) para, dentro del avance ya elegido en B1,
+  filtrar por "Clasificación mora" (Rescindido / Mora irregular) o por
+  "Estado" (Renunciado) y ver la lista puntual de planes de ese grupo.
+
+**Importante**: la clasificación de Detalle_Planes (avance real) y la del
+Tablero (avance-1, mes vencido) miden rangos distintos a propósito — para
+el mismo Avance, el % de mora de uno y otro no tienen por qué coincidir.
+No es un error.
 
 ## Script actual
 Ver `tablero_mora.gs` en este repo — es la versión funcionando, probada e
@@ -204,3 +223,7 @@ trigger) para refrescar cada vista.
 - En el Tablero, "Período real" se muestra como etiqueta legible tipo
   "Cuota 3 AGOSTO" (derivada de la fecha de la foto), no como fecha cruda,
   para no confundir con la columna "Avance".
+- Detalle_Planes NO usa el desfasaje avance-1: clasifica cada plan contra
+  su avance real completo (C2..C(avance)). Es intencional — el Tablero
+  mide lo que va a reportar Fiat (mes vencido), Detalle_Planes es para
+  trabajar la cartera con la foto de hoy. Ver sección 5.

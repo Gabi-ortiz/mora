@@ -54,6 +54,13 @@ const COL_TELEFONO = 9;   // I
 const COL_VENDEDOR = 16;  // P
 const COL_SUPERVISOR = 17; // Q
 
+// Celda con el desplegable de Avance en Detalle_Planes (fila 1), y filas
+// donde arrancan encabezados/datos de esa hoja (fila 1 queda para el
+// desplegable).
+const CELDA_AVANCE_DETALLE = 'B1';
+const FILA_HEADERS_DETALLE = 2;
+const FILA_DATOS_DETALLE = 3;
+
 // Qué cuotas te interesa ver en el tablero (avance a mirar = cuota+1)
 const CUOTAS_TABLERO = [3, 5, 7, 9, 12];
 
@@ -360,30 +367,30 @@ function actualizarTablero() {
 }
 
 /**
- * Clasifica UNA fila de BASE según la misma regla de "mes atrasado" que usa
- * calcularPorAvance (rango C2..C(avance-1)), pero devolviendo una sola
- * etiqueta por plan en vez de un conteo agregado:
+ * Clasifica UNA fila de BASE mirando el plan COMPLETO hasta su avance real
+ * (rango C2..C(avance), incluyendo la cuota del mes en curso) — a
+ * diferencia de calcularPorAvance/el Tablero, que miran C2..C(avance-1)
+ * porque Fiat mide a mes vencido. Acá interesa la foto completa de HOY,
+ * no la que va a reportar Fiat con un mes de atraso (confirmado con Gabi:
+ * la columna del avance actual siempre tiene P/I/R cargado, nunca queda
+ * en blanco).
  * - 'Rescindido': hay al menos una 'R' en el rango.
  * - 'Mora irregular': no hay 'R', pero hay al menos una 'I' en el rango.
  * - 'Pagado al día': todas las columnas del rango son 'P'.
- * - 'Sin cuotas para analizar': avance=2 (cuota 1, todavía no hay rango que
- *   mirar — evita el caso trivial de un rango vacío "cumpliendo" todoP).
  * - 'Sin clasificar': combinación rara (huecos en el rango, etc.), para no
  *   perder la fila silenciosamente.
  * El Estado (Ahorrista/Adjudicado/Rescindido/Renunciado/Cancelado) es un
  * dato aparte de BASE y se devuelve tal cual — un plan puede figurar como
  * "Renunciado" en Estado y "Pagado al día" en esta clasificación a la vez.
  */
-function clasificarFila(fila) {
+function clasificarFilaCompleta(fila) {
   const offsetAvance = COL_AVANCE - 1;
   const offsetC2 = COL_C2 - 1;
   const avance = fila[offsetAvance];
 
   if (typeof avance !== 'number' || avance < 2) return null;
 
-  const ncols = avance - 2; // C2..C(avance-1)
-  if (ncols <= 0) return 'Sin cuotas para analizar';
-
+  const ncols = avance - 1; // C2..C(avance), incluye la cuota en curso
   const rango = fila.slice(offsetC2, offsetC2 + ncols);
   const tieneR = rango.some(function (v) { return v === 'R'; });
   const tieneI = rango.some(function (v) { return v === 'I'; });
@@ -396,11 +403,27 @@ function clasificarFila(fila) {
 }
 
 /**
- * Refresca la hoja "Detalle_Planes": un listado, un plan por fila, leído en
- * vivo de BASE (no del historial — acá interesa quiénes son HOY, no una
- * foto vieja), con la clasificación de mora de cada uno y un filtro nativo
- * de Sheets ya armado para poder filtrar por Avance y por Clasificación/
- * Estado (Mora irregular, Rescindido, Renunciado, etc.).
+ * Lista, sin repetidos y ordenada, los valores de Avance presentes en BASE
+ * (>= 2), para armar el desplegable de Detalle_Planes.
+ */
+function obtenerAvancesDisponibles(datos) {
+  const offsetAvance = COL_AVANCE - 1;
+  return Array.from(new Set(
+    datos.map(function (f) { return f[offsetAvance]; })
+      .filter(function (v) { return typeof v === 'number' && v >= 2; })
+  )).sort(function (a, b) { return a - b; });
+}
+
+/**
+ * Refresca la hoja "Detalle_Planes": un desplegable en B1 para elegir UN
+ * Avance puntual (fila 1), y debajo (desde la fila 2) un listado — un plan
+ * por fila, leído en vivo de BASE (no del historial, acá interesa quiénes
+ * son HOY) — solo de los planes con ese Avance, clasificados con el plan
+ * COMPLETO (clasificarFilaCompleta, no el mes vencido del Tablero). Trae
+ * filtro nativo de Sheets ya armado para poder filtrar además por
+ * Clasificación/Estado (Mora irregular, Rescindido, Renunciado, etc.)
+ * dentro de ese avance. Al cambiar el desplegable, onEdit() vuelve a
+ * llamar esta misma función sola.
  */
 function actualizarDetallePlanes() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -410,6 +433,36 @@ function actualizarDetallePlanes() {
   const lastRow = hojaBase.getLastRow();
   const lastCol = Math.max(COL_C2 + 13, hojaBase.getLastColumn());
   const datos = hojaBase.getRange(2, 1, lastRow - 1, lastCol).getValues();
+
+  const avancesDisponibles = obtenerAvancesDisponibles(datos);
+  if (avancesDisponibles.length === 0) {
+    SpreadsheetApp.getUi().alert('No encontré valores de Avance válidos en "' + HOJA_BASE + '".');
+    return;
+  }
+
+  let hojaDet = ss.getSheetByName(HOJA_DETALLE);
+  if (!hojaDet) hojaDet = ss.insertSheet(HOJA_DETALLE);
+
+  // Conservar el avance que ya estaba elegido (si sigue existiendo en BASE)
+  // antes de limpiar la hoja; si no hay uno válido, arranca en el más bajo.
+  const valorPrevio = hojaDet.getRange(CELDA_AVANCE_DETALLE).getValue();
+  const avanceSeleccionado = avancesDisponibles.indexOf(valorPrevio) !== -1
+    ? valorPrevio
+    : avancesDisponibles[0];
+
+  const filtroExistente = hojaDet.getFilter();
+  if (filtroExistente) filtroExistente.remove();
+  hojaDet.clear();
+
+  hojaDet.getRange('A1').setValue('Avance a analizar:').setFontWeight('bold');
+  const celdaAvance = hojaDet.getRange(CELDA_AVANCE_DETALLE);
+  celdaAvance.setDataValidation(
+    SpreadsheetApp.newDataValidation()
+      .requireValueInList(avancesDisponibles.map(String))
+      .setAllowInvalid(false)
+      .build()
+  );
+  celdaAvance.setValue(avanceSeleccionado);
 
   const offsetSolicitud = COL_SOLICITUD - 1;
   const offsetGrupo = COL_GRUPO - 1;
@@ -421,34 +474,44 @@ function actualizarDetallePlanes() {
   const offsetEstado = COL_ESTADO - 1;
 
   const encabezados = ['Solicitud', 'Grupo', 'Cliente', 'Teléfono', 'Vendedor',
-    'Supervisor', 'Avance', 'Cuota analizada', 'Estado', 'Clasificación mora'];
+    'Supervisor', 'Avance', 'Rango evaluado', 'Estado', 'Clasificación mora'];
+  hojaDet.getRange(FILA_HEADERS_DETALLE, 1, 1, encabezados.length).setValues([encabezados]);
 
   const filas = [];
   for (let i = 0; i < datos.length; i++) {
     const fila = datos[i];
     const avance = fila[offsetAvance];
-    const clasificacion = clasificarFila(fila);
+    if (avance !== avanceSeleccionado) continue;
+
+    const clasificacion = clasificarFilaCompleta(fila);
     if (clasificacion === null) continue; // sin Avance numérico válido
 
     filas.push([
       fila[offsetSolicitud], fila[offsetGrupo], fila[offsetCliente],
       fila[offsetTelefono], fila[offsetVendedor], fila[offsetSupervisor],
-      avance, avance - 1, fila[offsetEstado], clasificacion,
+      avance, 'C2 a C' + avance, fila[offsetEstado], clasificacion,
     ]);
   }
 
-  let hojaDet = ss.getSheetByName(HOJA_DETALLE);
-  if (!hojaDet) hojaDet = ss.insertSheet(HOJA_DETALLE);
-  hojaDet.clear();
-
-  hojaDet.getRange(1, 1, 1, encabezados.length).setValues([encabezados]);
   if (filas.length > 0) {
-    hojaDet.getRange(2, 1, filas.length, encabezados.length).setValues(filas);
+    hojaDet.getRange(FILA_DATOS_DETALLE, 1, filas.length, encabezados.length).setValues(filas);
   }
-  hojaDet.setFrozenRows(1);
+  hojaDet.setFrozenRows(FILA_HEADERS_DETALLE);
 
-  const rangoCompleto = hojaDet.getRange(1, 1, filas.length + 1, encabezados.length);
-  const filtroExistente = hojaDet.getFilter();
-  if (filtroExistente) filtroExistente.remove();
-  rangoCompleto.createFilter();
+  const rangoConHeaders = hojaDet.getRange(FILA_HEADERS_DETALLE, 1, filas.length + 1, encabezados.length);
+  rangoConHeaders.createFilter();
+}
+
+/**
+ * Simple trigger: cuando alguien cambia el desplegable de Avance (B1) en
+ * Detalle_Planes, recalcula sola la tabla de abajo para ese avance. No
+ * requiere instalar nada — Apps Script lo detecta solo por el nombre
+ * "onEdit".
+ */
+function onEdit(e) {
+  if (!e || !e.range) return;
+  const hoja = e.range.getSheet();
+  if (hoja.getName() !== HOJA_DETALLE) return;
+  if (e.range.getA1Notation() !== CELDA_AVANCE_DETALLE) return;
+  actualizarDetallePlanes();
 }
