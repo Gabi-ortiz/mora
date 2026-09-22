@@ -23,5 +23,5 @@ Todas las hojas usan fórmulas: cuando se actualiza `BASE`, los tableros se reca
 ## Reglas
 - **Rescindido**: `Estado` = Rescindido o Renunciado.
 - **Mora**: al menos una `I` en las cuotas evaluadas. **Al día**: ninguna `I`.
-- **% mora** = en mora / cartera total (al día + mora + rescindidos).
+- **% mora** = (en mora + rescindidos) / cartera total (al día + mora + rescindidos).
 - **Tramo A** si % mora < umbral A; **Tramo B** si está entre "desde" y "hasta" (inclusive); si no, sin cobro.

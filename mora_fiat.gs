@@ -14,7 +14,7 @@
  *   - RESCINDIDO: columna Estado = Rescindido o Renunciado (sin importar las cuotas).
  *   - MORA: al menos una "I" en las cuotas evaluadas.
  *   - AL DIA: sin "I" en las cuotas evaluadas (incluye Cancelado, cuotas con "C").
- *   - % mora = planes en mora / cartera total (al día + mora + rescindidos).
+ *   - % mora = (planes en mora + rescindidos) / cartera total (al día + mora + rescindidos).
  *   - Medición FIAT (mes vencido): plan en avance N hoy se mide como cuota N-1,
  *     evaluando C2..C(N-1). Cuotas medidas: 3, 5, 7, 9 y 12.
  */
@@ -135,7 +135,7 @@ function crearTableroFiat_(ss) {
     '="Período medido: "&PROPER(TEXT(EOMONTH(TODAY(),-1),"mmmm yyyy"))&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"');
 
   const enc = ['CUOTA MEDIDA', 'AVANCE EN BASE HOY', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS',
-    '% MORA', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)'];
+    '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)'];
   estiloHeader_(sh.getRange(4, 1, 1, enc.length).setValues([enc]));
   sh.setRowHeight(4, 45);
 
@@ -150,12 +150,12 @@ function crearTableroFiat_(ss) {
       `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"AL DIA")`,
       `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"MORA")`,
       `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"RESCINDIDO")`,
-      `=IFERROR(E${r}/C${r},0)`,
+      `=IFERROR((E${r}+F${r})/C${r},0)`,
       `=VLOOKUP(A${r},${P},2,0)`,
       `=VLOOKUP(A${r},${P},4,0)`,
       `=IF(C${r}=0,"SIN DATOS",IF(ROUND(G${r},6)<H${r},"A",IF(ROUND(G${r},6)<=I${r},"B","SIN COBRO")))`,
       `=IF(J${r}="A",VLOOKUP(A${r},${P},5,0),IF(J${r}="B",VLOOKUP(A${r},${P},6,0),0))`,
-      `=IF(C${r}=0,0,MAX(0,E${r}-(CEILING(ROUND(H${r}*C${r},6),1)-1)))`,
+      `=IF(C${r}=0,0,MAX(0,E${r}+F${r}-(CEILING(ROUND(H${r}*C${r},6),1)-1)))`,
     ]);
   }
   sh.getRange(5, 1, filas.length, enc.length).setValues(filas);
@@ -165,7 +165,7 @@ function crearTableroFiat_(ss) {
   sh.getRange('D10').setFormula('=SUM(D5:D9)');
   sh.getRange('E10').setFormula('=SUM(E5:E9)');
   sh.getRange('F10').setFormula('=SUM(F5:F9)');
-  sh.getRange('G10').setFormula('=IFERROR(E10/C10,0)');
+  sh.getRange('G10').setFormula('=IFERROR((E10+F10)/C10,0)');
   sh.getRange('J10').setValue('INCENTIVO TOTAL');
   sh.getRange('K10').setFormula('=SUM(K5:K9)');
   sh.getRange('A10:L10').setFontWeight('bold').setBackground('#d9e1f2');
@@ -205,7 +205,7 @@ function crearTableroActual_(ss) {
   av, CALC!I2:I, e, CALC!K2:K, v, CALC!M2:M, p, PARAMETROS!A3:F7,
   lst, SORT(UNIQUE(FILTER(av, ISNUMBER(av), av>0))),
   REDUCE(
-    {"AVANCE","CARTERA TOTAL","AL DÍA","EN MORA","RESCINDIDOS","% MORA","EN MORA SOLO POR CUOTA DEL MES","MORA VENCIDA","% MORA VENCIDA","PRÓX. MEDICIÓN FIAT","TRAMO A: MENOR A","PLANES A REGULARIZAR P/ TRAMO A","PLANES A REGULARIZAR P/ TRAMO B"},
+    {"AVANCE","CARTERA TOTAL","AL DÍA","EN MORA","RESCINDIDOS","% MORA (MORA + RESC.)","EN MORA SOLO POR CUOTA DEL MES","MORA VENCIDA","% MORA VENCIDA (VENCIDA + RESC.)","PRÓX. MEDICIÓN FIAT","TRAMO A: MENOR A","PLANES A REGULARIZAR P/ TRAMO A","PLANES A REGULARIZAR P/ TRAMO B"},
     lst,
     LAMBDA(acc, a, LET(
       tot, COUNTIF(av, a),
@@ -217,10 +217,10 @@ function crearTableroActual_(ss) {
       ua, IF(mide, VLOOKUP(a, p, 2, 0), ""),
       ub, IF(mide, VLOOKUP(a, p, 4, 0), ""),
       VSTACK(acc, HSTACK(
-        a, tot, ald, mo, rs, IFERROR(mo/tot, 0), mo-ven, ven, IFERROR(ven/tot, 0),
+        a, tot, ald, mo, rs, IFERROR((mo+rs)/tot, 0), mo-ven, ven, IFERROR((ven+rs)/tot, 0),
         IF(mide, "Cuota "&a, ""), ua,
-        IF(mide, MAX(0, mo-(CEILING(ROUND(ua*tot,6),1)-1)), ""),
-        IF(mide, MAX(0, mo-FLOOR(ROUND(ub*tot,6),1)), "")
+        IF(mide, MAX(0, mo+rs-(CEILING(ROUND(ua*tot,6),1)-1)), ""),
+        IF(mide, MAX(0, mo+rs-FLOOR(ROUND(ub*tot,6),1)), "")
       ))
     ))
   )
