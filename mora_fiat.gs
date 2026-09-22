@@ -5,6 +5,7 @@
  * Crea (o recrea) las hojas de abajo con FÓRMULAS VIVAS: cuando se actualiza
  * la hoja BASE, todos los tableros se recalculan solos. La hoja BASE no se toca.
  * La hoja PARAMETROS (tabla de incentivos) solo se crea la primera vez: editala ahí.
+ * La hoja Historial diario nunca se borra: cada día se le agrega la foto del Tablero Estado Actual.
  *
  * Columnas de BASE que se usan:
  *   A RESPONSABLE | B SOLICITUD | C GRUPO | D Orden | H NyAP | I TELEFONO
@@ -26,7 +27,10 @@ const HOJAS = {
   ACTUAL: 'Tablero Estado Actual',
   DET_FIAT: 'Detalle Mora FIAT',
   GESTION: 'Gestión Mes',
+  HIST: 'Historial diario',
 };
+
+const HORA_FOTO_DIARIA = 20; // hora (0-23) en que se guarda sola la foto del día en el historial
 
 // Cuota | Tramo A: mora menor a | Tramo B desde | Tramo B hasta | % pago A | % pago B
 const TABLA_INCENTIVO = [
@@ -44,6 +48,7 @@ function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('Mora FIAT')
     .addItem('Construir / reconstruir tableros', 'construirTableros')
+    .addItem('Guardar foto de hoy en el historial', 'guardarHistorial')
     .addToUi();
 }
 
@@ -57,6 +62,9 @@ function construirTableros() {
   crearTableroActual_(ss);
   crearDetalleFiat_(ss);
   crearGestionMes_(ss);
+  crearHistorial_(ss);
+  activarHistorialDiario_();
+  guardarHistorial();
 
   ss.setActiveSheet(ss.getSheetByName(HOJAS.FIAT));
 }
@@ -259,4 +267,70 @@ function crearGestionMes_(ss) {
     '=VSTACK(CALC!A1:P1, IFERROR(SORT(FILTER(CALC!A2:P, CALC!K2:K="MORA", ISNUMBER(MATCH(CALC!I2:I, {3;5;7;9;12}, 0))), 9, TRUE, 6, TRUE), "Sin planes en mora"))');
   estiloHeader_(sh.getRange('A3:P3'));
   sh.setFrozenRows(3);
+}
+
+// ---------------------------------------------------------------- HISTORIAL DIARIO
+const ENC_HISTORIAL = ['FECHA', 'AVANCE', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS', '% MORA (MORA + RESC.)',
+  'PRÓX. MEDICIÓN FIAT', 'TRAMO A: MENOR A', 'PLANES A REGULARIZAR P/ TRAMO A', 'PLANES A REGULARIZAR P/ TRAMO B'];
+
+/** Crea la hoja solo si no existe: el historial nunca se borra. */
+function crearHistorial_(ss) {
+  if (ss.getSheetByName(HOJAS.HIST)) return;
+  const sh = ss.insertSheet(HOJAS.HIST);
+  estiloHeader_(sh.getRange(1, 1, 1, ENC_HISTORIAL.length).setValues([ENC_HISTORIAL]));
+  sh.setRowHeight(1, 45);
+  sh.setFrozenRows(1);
+  sh.setColumnWidths(1, ENC_HISTORIAL.length, 110);
+}
+
+/** Crea (una sola vez) el disparador que guarda la foto todos los días. */
+function activarHistorialDiario_() {
+  const existe = ScriptApp.getProjectTriggers().some(function (t) {
+    return t.getHandlerFunction() === 'guardarHistorial';
+  });
+  if (!existe) {
+    ScriptApp.newTrigger('guardarHistorial').timeBased().everyDays(1).atHour(HORA_FOTO_DIARIA).create();
+  }
+}
+
+/**
+ * Copia el Tablero Estado Actual al Historial diario con la fecha de hoy.
+ * Si ya había una foto de hoy, la reemplaza (queda una sola foto por día, la última).
+ */
+function guardarHistorial() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const tab = ss.getSheetByName(HOJAS.ACTUAL);
+  if (!tab) throw new Error('No existe la hoja ' + HOJAS.ACTUAL + '. Ejecutá construirTableros primero.');
+  crearHistorial_(ss);
+  const hist = ss.getSheetByName(HOJAS.HIST);
+
+  SpreadsheetApp.flush();
+  const filas = Math.max(tab.getLastRow() - 4, 1);
+  const datos = tab.getRange(5, 1, filas, ENC_HISTORIAL.length - 1).getValues()
+    .filter(function (r) { return r[0] !== '' && r[0] !== null; });
+  if (!datos.length) return;
+
+  const tz = ss.getSpreadsheetTimeZone();
+  const hoy = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd');
+
+  // Borra la foto de hoy si ya existía
+  const ultima = hist.getLastRow();
+  if (ultima > 1) {
+    const fechas = hist.getRange(2, 1, ultima - 1, 1).getValues();
+    for (let i = fechas.length - 1; i >= 0; i--) {
+      const f = fechas[i][0];
+      if (f instanceof Date && Utilities.formatDate(f, tz, 'yyyy-MM-dd') === hoy) hist.deleteRow(i + 2);
+    }
+  }
+
+  const fecha = Utilities.parseDate(hoy, tz, 'yyyy-MM-dd');
+  const nuevas = datos.map(function (r) { return [fecha].concat(r); });
+  const desde = hist.getLastRow() + 1;
+  hist.getRange(desde, 1, nuevas.length, ENC_HISTORIAL.length).setValues(nuevas).setHorizontalAlignment('center');
+  hist.getRange(desde, 1, nuevas.length, 1).setNumberFormat('dd/mm/yyyy');
+  hist.getRange(desde, 7, nuevas.length, 1).setNumberFormat('0.0%');
+  hist.getRange(desde, 9, nuevas.length, 1).setNumberFormat('0%');
+  // Línea separadora entre días
+  hist.getRange(desde, 1, 1, ENC_HISTORIAL.length)
+    .setBorder(true, null, null, null, null, null, '#1f3864', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
 }
