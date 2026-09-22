@@ -19,7 +19,7 @@ Todas las hojas usan fórmulas: cuando se actualiza `BASE`, los tableros se reca
 | Tablero Estado Actual | Por avance: al día, mora, rescindidos, mora vencida vs. solo la cuota del mes, y proyección de la próxima medición |
 | Detalle Mora FIAT | Planes que quedaron en mora en la medición del mes vencido |
 | Gestión Mes | Planes en mora hoy en avance 3/5/7/9/12 (los que FIAT mide el mes próximo) |
-| Historial diario | Foto diaria del Tablero Estado Actual (automática a las 20 hs + menú "Guardar foto de hoy"). Nunca se borra; una foto por día |
+| Historial diario | Foto diaria del Tablero Estado Actual (automática a las 20 hs, lunes a viernes sin feriados + menú "Guardar foto de hoy"). Nunca se borra; una foto por día |
 
 ## Reglas
 - **Rescindido**: `Estado` = Rescindido o Renunciado.

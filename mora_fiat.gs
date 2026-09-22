@@ -5,7 +5,7 @@
  * Crea (o recrea) las hojas de abajo con FÓRMULAS VIVAS: cuando se actualiza
  * la hoja BASE, todos los tableros se recalculan solos. La hoja BASE no se toca.
  * La hoja PARAMETROS (tabla de incentivos) solo se crea la primera vez: editala ahí.
- * La hoja Historial diario nunca se borra: cada día se le agrega la foto del Tablero Estado Actual.
+ * La hoja Historial diario nunca se borra: cada día hábil se le agrega la foto del Tablero Estado Actual.
  *
  * Columnas de BASE que se usan:
  *   A RESPONSABLE | B SOLICITUD | C GRUPO | D Orden | H NyAP | I TELEFONO
@@ -30,7 +30,14 @@ const HOJAS = {
   HIST: 'Historial diario',
 };
 
-const HORA_FOTO_DIARIA = 20; // hora (0-23) en que se guarda sola la foto del día en el historial
+const HORA_FOTO_DIARIA = 20; // hora (0-23) en que se guarda sola la foto del día en el historial (solo días hábiles)
+
+// Feriados (formato 'aaaa-mm-dd'): esos días no se guarda la foto automática. Agregá los que falten.
+const FERIADOS = [
+  '2026-10-12',
+  '2026-12-08',
+  '2026-12-25',
+];
 
 // Cuota | Tramo A: mora menor a | Tramo B desde | Tramo B hasta | % pago A | % pago B
 const TABLA_INCENTIVO = [
@@ -283,14 +290,27 @@ function crearHistorial_(ss) {
   sh.setColumnWidths(1, ENC_HISTORIAL.length, 110);
 }
 
-/** Crea (una sola vez) el disparador que guarda la foto todos los días. */
+/** Deja un único disparador diario que llama a fotoDiariaAutomatica (reemplaza versiones anteriores). */
 function activarHistorialDiario_() {
-  const existe = ScriptApp.getProjectTriggers().some(function (t) {
-    return t.getHandlerFunction() === 'guardarHistorial';
+  let existe = false;
+  ScriptApp.getProjectTriggers().forEach(function (t) {
+    const fn = t.getHandlerFunction();
+    if (fn === 'guardarHistorial') ScriptApp.deleteTrigger(t); // disparador de la versión anterior
+    if (fn === 'fotoDiariaAutomatica') existe = true;
   });
   if (!existe) {
-    ScriptApp.newTrigger('guardarHistorial').timeBased().everyDays(1).atHour(HORA_FOTO_DIARIA).create();
+    ScriptApp.newTrigger('fotoDiariaAutomatica').timeBased().everyDays(1).atHour(HORA_FOTO_DIARIA).create();
   }
+}
+
+/** La ejecuta el disparador todos los días: guarda la foto solo de lunes a viernes y si no es feriado. */
+function fotoDiariaAutomatica() {
+  const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
+  const ahora = new Date();
+  const diaSemana = Number(Utilities.formatDate(ahora, tz, 'u')); // 1 = lunes ... 7 = domingo
+  const hoy = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
+  if (diaSemana >= 6 || FERIADOS.indexOf(hoy) !== -1) return;
+  guardarHistorial();
 }
 
 /**
