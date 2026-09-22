@@ -4,6 +4,7 @@
  * Ejecutar una sola vez: construirTableros()
  * Crea (o recrea) las hojas de abajo con FÓRMULAS VIVAS: cuando se actualiza
  * la hoja BASE, todos los tableros se recalculan solos. La hoja BASE no se toca.
+ * La hoja PARAMETROS (tabla de incentivos) solo se crea la primera vez: editala ahí.
  *
  * Columnas de BASE que se usan:
  *   A RESPONSABLE | B SOLICITUD | C GRUPO | D Orden | H NyAP | I TELEFONO
@@ -12,7 +13,7 @@
  * Reglas:
  *   - RESCINDIDO: columna Estado = Rescindido o Renunciado (sin importar las cuotas).
  *   - MORA: al menos una "I" en las cuotas evaluadas.
- *   - AL DIA: sin "I" en las cuotas evaluadas.
+ *   - AL DIA: sin "I" en las cuotas evaluadas (incluye Cancelado, cuotas con "C").
  *   - % mora = planes en mora / cartera total (al día + mora + rescindidos).
  *   - Medición FIAT (mes vencido): plan en avance N hoy se mide como cuota N-1,
  *     evaluando C2..C(N-1). Cuotas medidas: 3, 5, 7, 9 y 12.
@@ -79,7 +80,9 @@ function titulo_(sh, texto, subtitulo) {
 
 // ---------------------------------------------------------------- PARAMETROS
 function crearParametros_(ss) {
-  const sh = hojaNueva_(ss, HOJAS.PARAM);
+  // Si ya existe se respeta: así no se pierden los cambios que se hagan a mano en la tabla.
+  if (ss.getSheetByName(HOJAS.PARAM)) return;
+  const sh = ss.insertSheet(HOJAS.PARAM);
   titulo_(sh, 'Tabla de incentivos por mora (editable)');
   const enc = ['CUOTA', 'TRAMO A: MORA MENOR A', 'TRAMO B: DESDE', 'TRAMO B: HASTA', '% PAGO A', '% PAGO B'];
   estiloHeader_(sh.getRange(2, 1, 1, enc.length).setValues([enc]));
