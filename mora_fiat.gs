@@ -203,22 +203,21 @@ function crearTableroActual_(ss) {
     '="Foto al "&TEXT(TODAY(),"dd/mm/yyyy")&"  —  la cuota del avance actual vence a fin de mes. Los avances 3, 5, 7, 9 y 12 son los que FIAT mide el mes próximo."');
 
   const f = `=LET(
-  av, CALC!I2:I, e, CALC!K2:K, v, CALC!M2:M, p, PARAMETROS!A3:F7,
+  av, CALC!I2:I, e, CALC!K2:K, p, PARAMETROS!A3:F7,
   lst, SORT(UNIQUE(FILTER(av, ISNUMBER(av), av>0))),
   REDUCE(
-    {"AVANCE","CARTERA TOTAL","AL DÍA","EN MORA","RESCINDIDOS","% MORA (MORA + RESC.)","EN MORA SOLO POR CUOTA DEL MES","MORA VENCIDA","% MORA VENCIDA (VENCIDA + RESC.)","PRÓX. MEDICIÓN FIAT","TRAMO A: MENOR A","PLANES A REGULARIZAR P/ TRAMO A","PLANES A REGULARIZAR P/ TRAMO B"},
+    {"AVANCE","CARTERA TOTAL","AL DÍA","EN MORA","RESCINDIDOS","% MORA (MORA + RESC.)","PRÓX. MEDICIÓN FIAT","TRAMO A: MENOR A","PLANES A REGULARIZAR P/ TRAMO A","PLANES A REGULARIZAR P/ TRAMO B"},
     lst,
     LAMBDA(acc, a, LET(
       tot, COUNTIF(av, a),
       ald, COUNTIFS(av, a, e, "AL DIA"),
       mo, COUNTIFS(av, a, e, "MORA"),
       rs, COUNTIFS(av, a, e, "RESCINDIDO"),
-      ven, COUNTIFS(av, a, e, "MORA", v, ">0"),
       mide, ISNUMBER(MATCH(a, {3;5;7;9;12}, 0)),
       ua, IF(mide, VLOOKUP(a, p, 2, 0), ""),
       ub, IF(mide, VLOOKUP(a, p, 4, 0), ""),
       VSTACK(acc, HSTACK(
-        a, tot, ald, mo, rs, IFERROR((mo+rs)/tot, 0), mo-ven, ven, IFERROR((ven+rs)/tot, 0),
+        a, tot, ald, mo, rs, IFERROR((mo+rs)/tot, 0),
         IF(mide, "Cuota "&a, ""), ua,
         IF(mide, MAX(0, mo+rs-(CEILING(ROUND(ua*tot,6),1)-1)), ""),
         IF(mide, MAX(0, mo+rs-FLOOR(ROUND(ub*tot,6),1)), "")
@@ -227,20 +226,19 @@ function crearTableroActual_(ss) {
   )
 )`;
   sh.getRange('A4').setFormula(f);
-  estiloHeader_(sh.getRange('A4:M4'));
+  estiloHeader_(sh.getRange('A4:J4'));
   sh.setRowHeight(4, 60);
   sh.getRange('F5:F100').setNumberFormat('0.0%');
-  sh.getRange('I5:I100').setNumberFormat('0.0%');
-  sh.getRange('K5:K100').setNumberFormat('0%');
-  sh.getRange('A5:M100').setHorizontalAlignment('center');
+  sh.getRange('H5:H100').setNumberFormat('0%');
+  sh.getRange('A5:J100').setHorizontalAlignment('center');
 
   // Resalta las filas que FIAT mide el mes próximo
   const reglas = sh.getConditionalFormatRules();
   reglas.push(SpreadsheetApp.newConditionalFormatRule()
-    .whenFormulaSatisfied('=$J5<>""').setBackground('#fff2cc').setRanges([sh.getRange('A5:M100')]).build());
+    .whenFormulaSatisfied('=$G5<>""').setBackground('#fff2cc').setRanges([sh.getRange('A5:J100')]).build());
   sh.setConditionalFormatRules(reglas);
 
-  sh.setColumnWidths(1, 13, 110);
+  sh.setColumnWidths(1, 10, 110);
   sh.setFrozenRows(4);
 }
 
