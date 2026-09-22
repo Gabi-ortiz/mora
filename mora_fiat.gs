@@ -32,7 +32,7 @@ const HOJAS = {
 const TABLA_INCENTIVO = [
   [3, 0.35, 0.35, 0.41, 0.0035, 0.0020],
   [5, 0.30, 0.30, 0.36, 0.0065, 0.0045],
-  [7, 0.32, 0.32, 0.38, 0.0070, 0.0045],
+  [7, 0.32, 0.32, 0.38, 0.0070, 0.0040],
   [9, 0.45, 0.45, 0.51, 0.0070, 0.0040],
   [12, 0.48, 0.48, 0.54, 0.0080, 0.0040],
 ];
@@ -135,7 +135,7 @@ function crearTableroFiat_(ss) {
     '="Período medido: "&PROPER(TEXT(EOMONTH(TODAY(),-1),"mmmm yyyy"))&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"');
 
   const enc = ['CUOTA MEDIDA', 'AVANCE EN BASE HOY', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS',
-    '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)'];
+    '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)', 'FALTÓ P/ TRAMO B (planes)'];
   estiloHeader_(sh.getRange(4, 1, 1, enc.length).setValues([enc]));
   sh.setRowHeight(4, 45);
 
@@ -156,6 +156,7 @@ function crearTableroFiat_(ss) {
       `=IF(C${r}=0,"SIN DATOS",IF(ROUND(G${r},6)<H${r},"A",IF(ROUND(G${r},6)<=I${r},"B","SIN COBRO")))`,
       `=IF(J${r}="A",VLOOKUP(A${r},${P},5,0),IF(J${r}="B",VLOOKUP(A${r},${P},6,0),0))`,
       `=IF(C${r}=0,0,MAX(0,E${r}+F${r}-(CEILING(ROUND(H${r}*C${r},6),1)-1)))`,
+      `=IF(C${r}=0,0,MAX(0,E${r}+F${r}-FLOOR(ROUND(I${r}*C${r},6),1)))`,
     ]);
   }
   sh.getRange(5, 1, filas.length, enc.length).setValues(filas);
@@ -168,7 +169,7 @@ function crearTableroFiat_(ss) {
   sh.getRange('G10').setFormula('=IFERROR((E10+F10)/C10,0)');
   sh.getRange('J10').setValue('INCENTIVO TOTAL');
   sh.getRange('K10').setFormula('=SUM(K5:K9)');
-  sh.getRange('A10:L10').setFontWeight('bold').setBackground('#d9e1f2');
+  sh.getRange('A10:M10').setFontWeight('bold').setBackground('#d9e1f2');
 
   sh.getRange('A12').setValue('Máximo posible tramo A:');
   sh.getRange('C12').setFormula('=PARAMETROS!E8').setNumberFormat('0.00%');
@@ -177,11 +178,11 @@ function crearTableroFiat_(ss) {
 
   sh.getRange('G5:I10').setNumberFormat('0.0%');
   sh.getRange('K5:K10').setNumberFormat('0.00%');
-  sh.getRange('A5:L10').setHorizontalAlignment('center');
-  sh.getRange('A4:L10').setBorder(true, true, true, true, true, true);
+  sh.getRange('A5:M10').setHorizontalAlignment('center');
+  sh.getRange('A4:M10').setBorder(true, true, true, true, true, true);
 
   colorTramos_(sh, sh.getRange('J5:J9'));
-  sh.setColumnWidths(1, 12, 110);
+  sh.setColumnWidths(1, 13, 110);
   sh.setFrozenRows(4);
 }
 
