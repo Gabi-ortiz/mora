@@ -10,13 +10,19 @@
  * constantes (HOJA_BASE, COL_AVANCE, COL_ESTADO, COL_C2, CUOTAS_TABLERO), así
  * que las posiciones de columnas de BASE se configuran en un solo lugar.
  *
- * BASE llega por IMPORTRANGE y no se escribe nunca: todo lo del CRM vive en
- * hojas propias (CRM_*), ligado al plan por Solicitud.
+ * BASE llega por IMPORTRANGE y no se escribe nunca. Todo lo del CRM
+ * (usuarios, casos, gestiones, auditoría) vive en hojas CRM_* de un archivo
+ * aparte (CRM_ID_ARCHIVO_DATOS), ligado al plan por Solicitud, para que
+ * nadie con acceso a la planilla del tablero pueda ver ni tocar esos datos.
  *
  * Instalación: ver sección "CRM" del README.
  */
 
 // --- CONFIGURACIÓN CRM ---
+// Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
+// /edit en la URL). BASE se sigue leyendo de la planilla a la que está
+// pegado este script.
+const CRM_ID_ARCHIVO_DATOS = '1p_jxBNqhtRCax3qak0PlN-uEh-772HkkJ4VW0NOgZ_Y';
 const CRM_HOJA_USUARIOS = 'CRM_Usuarios';
 const CRM_HOJA_CASOS = 'CRM_Casos';
 const CRM_HOJA_GESTIONES = 'CRM_Gestiones';
@@ -116,7 +122,8 @@ function doGet() {
  * borra datos y no toca las claves de los usuarios que ya existen.
  */
 function crmInicializar() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
+  const movidas = crmMoverHojasViejas_(ss);
   const hoja = crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
   // Por si la hoja se creó con una versión anterior (sin columnas de clave).
   hoja.getRange(1, 1, 1, CRM_ENC_USUARIOS.length).setValues([CRM_ENC_USUARIOS]).setFontWeight('bold');
@@ -136,7 +143,40 @@ function crmInicializar() {
     if (!u.tieneClave) hoja.getRange(i + 2, 6, 1, 3).setValues([crmClaveInicial_()]);
   });
   crmAuditar_(ss, Session.getEffectiveUser().getEmail(), 'Inicializar CRM', 'Hojas y usuarios iniciales verificados');
-  SpreadsheetApp.getUi().alert('CRM listo. Ahora publicalo: Implementar > Nueva implementación > Aplicación web (ver README).');
+  SpreadsheetApp.getUi().alert('CRM listo. Los datos se guardan en el archivo "' + ss.getName() + '".' +
+    (movidas.length ? '\n\nSe copiaron ahí las hojas ' + movidas.join(', ') +
+      ' que estaban en esta planilla: ya las podés borrar de acá.' : '') +
+    '\n\nSi todavía no lo hiciste, publicalo: Implementar > Nueva implementación > Aplicación web (ver README).');
+}
+
+/**
+ * Si las hojas CRM_* se habían creado en la planilla del tablero (versión
+ * anterior), copia su contenido al archivo de datos, solo cuando allá la
+ * hoja todavía está vacía. No borra nada: devuelve los nombres copiados
+ * para avisar que se pueden eliminar a mano.
+ */
+function crmMoverHojasViejas_(ssDatos) {
+  const ssVieja = SpreadsheetApp.getActiveSpreadsheet();
+  if (ssVieja.getId() === ssDatos.getId()) return [];
+  const movidas = [];
+  [CRM_HOJA_USUARIOS, CRM_HOJA_CASOS, CRM_HOJA_GESTIONES, CRM_HOJA_AUDITORIA].forEach(function (nombre) {
+    const vieja = ssVieja.getSheetByName(nombre);
+    if (!vieja || vieja.getLastRow() < 2) return;
+    const nueva = ssDatos.getSheetByName(nombre);
+    if (nueva && nueva.getLastRow() > 1) return; // ya tiene datos: no pisar
+    const valores = vieja.getRange(1, 1, vieja.getLastRow(), vieja.getLastColumn()).getValues();
+    const destino = nueva || ssDatos.insertSheet(nombre);
+    destino.getRange(1, 1, valores.length, valores[0].length).setValues(valores);
+    destino.getRange(1, 1, 1, valores[0].length).setFontWeight('bold');
+    destino.setFrozenRows(1);
+    movidas.push(nombre);
+  });
+  return movidas;
+}
+
+/** Archivo de datos del CRM (hojas CRM_*). */
+function crmDatos_() {
+  return SpreadsheetApp.openById(CRM_ID_ARCHIVO_DATOS);
 }
 
 // ---------------------------------------------------------------------------
@@ -203,7 +243,7 @@ function crmEsActiva(codigo) {
 /** Datos iniciales: quién soy y las listas del formulario. */
 function crmInicio(token) {
   const u = crmUsuarioActual_(token);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   return {
     usuario: u,
     esSupervisor: u.rol === CRM_ROL_SUPERVISOR,
@@ -319,7 +359,7 @@ function crmRegistrarGestion(token, solicitud, datos) {
 /** Supervisor: reasigna uno o varios planes a un responsable. */
 function crmReasignar(token, solicitudes, email) {
   const u = crmExigirSupervisor_(token);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   const destino = crmLeerUsuarios_(ss).filter(function (x) { return x.email === email && x.activo; })[0];
   if (!destino) throw new Error('Usuario destino inexistente o inactivo.');
 
@@ -339,13 +379,13 @@ function crmReasignar(token, solicitudes, email) {
 /** Supervisor: lista de usuarios. */
 function crmListarUsuarios(token) {
   crmExigirSupervisor_(token);
-  return crmLeerUsuarios_(SpreadsheetApp.getActiveSpreadsheet());
+  return crmLeerUsuarios_(crmDatos_());
 }
 
 /** Supervisor: alta o modificación de un usuario (clave = email). */
 function crmGuardarUsuario(token, datos) {
   const u = crmExigirSupervisor_(token);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   const email = String(datos.email || '').trim().toLowerCase();
   if (!crmEmailValido_(email)) throw new Error('El email tiene que ser @' + CRM_DOMINIO + '.');
   if ([CRM_ROL_SUPERVISOR, CRM_ROL_RESPONSABLE].indexOf(datos.rol) < 0) throw new Error('Rol inválido.');
@@ -461,7 +501,7 @@ function crmLogin(email, clave) {
     throw new Error('Demasiados intentos fallidos. Esperá 15 minutos o pedí a un supervisor que blanquee tu clave.');
   }
 
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   const fila = crmFilaUsuario_(ss, email);
   const ok = fila && fila.activo && fila.hash && crmHashClave_(clave, fila.sal) === fila.hash;
   if (!ok) {
@@ -482,7 +522,7 @@ function crmLogout(token) {
 /** Cambio de clave del propio usuario (obligatorio tras alta o blanqueo). */
 function crmCambiarClave(token, actual, nueva) {
   const u = crmUsuarioActual_(token, true);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   const fila = crmFilaUsuario_(ss, u.email);
   if (crmHashClave_(actual, fila.sal) !== fila.hash) throw new Error('La clave actual no es correcta.');
   nueva = String(nueva || '');
@@ -498,7 +538,7 @@ function crmCambiarClave(token, actual, nueva) {
 /** Supervisor: vuelve la clave de un usuario a la inicial y obliga a cambiarla. */
 function crmBlanquearClave(token, email) {
   const u = crmExigirSupervisor_(token);
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = crmDatos_();
   const fila = crmFilaUsuario_(ss, String(email || '').toLowerCase());
   if (!fila) throw new Error('Usuario inexistente.');
   crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).getRange(fila.fila, 6, 1, 3).setValues([crmClaveInicial_()]);
@@ -561,8 +601,8 @@ function crmBool_(v) {
 
 /** Lee BASE + CRM_Casos + gestiones del mes y arma los planes resueltos. */
 function crmContexto_() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const hojaBase = ss.getSheetByName(HOJA_BASE);
+  const ss = crmDatos_();
+  const hojaBase = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_BASE);
   if (!hojaBase) throw new Error('No encuentro la hoja "' + HOJA_BASE + '"');
   const valores = hojaBase.getDataRange().getValues();
   const encabezados = valores[0];
@@ -663,7 +703,7 @@ function crmUsuarioActual_(token, permitirClaveInicial) {
   const epoca = ses ? Number(cache.get('epoca_' + ses.email) || 0) : 0;
   if (!ses || ses.t < epoca) throw new Error('SESION: tu sesión venció, volvé a ingresar.');
   const email = ses.email;
-  const u = crmLeerUsuarios_(SpreadsheetApp.getActiveSpreadsheet())
+  const u = crmLeerUsuarios_(crmDatos_())
     .filter(function (x) { return x.email === email && x.activo; })[0];
   if (!u || !crmEmailValido_(u.email)) throw new Error('SESION: tu usuario no está habilitado en el CRM.');
   if (u.debeCambiarClave && !permitirClaveInicial) throw new Error('SESION: tenés que cambiar la clave.');

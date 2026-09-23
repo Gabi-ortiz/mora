@@ -204,6 +204,15 @@ Dentro de cada prioridad se ordena por última gestión (los nunca
 gestionados primero).
 
 ### Hojas que crea (no editar a mano salvo CRM_Usuarios si hace falta)
+Van en un **archivo aparte, solo para datos del CRM**:
+https://docs.google.com/spreadsheets/d/1p_jxBNqhtRCax3qak0PlN-uEh-772HkkJ4VW0NOgZ_Y
+(configurado en `CRM_ID_ARCHIVO_DATOS`). Así, quien tenga acceso a la
+planilla del tablero no ve claves, gestiones ni puede cambiarse el rol.
+Ese archivo tiene que ser del mismo dueño que el script y no hace falta
+compartirlo con nadie. Si las hojas CRM_* ya existían en la planilla del
+tablero, "CRM: inicializar" las copia al archivo nuevo (sin pisar datos) y
+avisa para borrarlas a mano.
+
 - **CRM_Usuarios**: Email, Nombre, Rol, AliasBase, Activo.
 - **CRM_Casos**: una fila por plan gestionado/reasignado con el estado
   vigente (estado del caso, último contacto, próximo contacto, promesa).
@@ -223,8 +232,9 @@ todo en uno):
 
 1. Crear/pegar los tres archivos como en la tabla y guardar.
 2. Recargar la planilla → menú "Mora" > "CRM: inicializar hojas y
-   usuarios" (pide autorización la primera vez). Crea las hojas CRM_* y
-   los 5 usuarios iniciales con la clave Turin3800.
+   usuarios" (pide autorización la primera vez, y de nuevo si se agrega
+   acceso al archivo de datos). Crea las hojas CRM_* en el archivo de
+   datos y los 5 usuarios iniciales con la clave Turin3800.
 3. Implementar > Nueva implementación > engranaje > "Aplicación web":
    - Ejecutar como: **Yo**.
    - Quién tiene acceso: **Cualquier persona** si el dueño del script es
