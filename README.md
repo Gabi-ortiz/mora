@@ -13,7 +13,7 @@ Todas las hojas usan fórmulas: cuando se actualiza `BASE`, los tableros se reca
 ## Hojas que se crean
 | Hoja | Qué muestra |
 |---|---|
-| PARAMETROS | Tabla de umbrales y % de incentivo por cuota (editable) + fechas de cambio de avance (columna H, se carga a mano cada mes) |
+| PARAMETROS | Tabla de umbrales y % de incentivo por cuota (editable) + fechas de cambio de avance (columna H, se detectan solas cuando la mayoría de los planes suma +1; se pueden corregir a mano) |
 | CALC | Una fila por plan: estado actual, cuotas impagas, cuota que mide FIAT y estado FIAT |
 | Tablero Medición FIAT | Cuotas 3/5/7/9/12 del mes vencido (avance hoy 4/6/8/10/13, evaluando C2..C(N-1)), % mora, tramo e incentivo |
 | Tablero Estado Actual | Por avance: al día, mora, rescindidos, mora vencida vs. solo la cuota del mes, y proyección de la próxima medición |

@@ -6,8 +6,9 @@
  * la hoja BASE, todos los tableros se recalculan solos. La hoja BASE no se toca.
  * La hoja PARAMETROS (tabla de incentivos) solo se crea la primera vez: editala ahí.
  * La hoja Historial diario nunca se borra: cada día hábil se le agrega la foto del Tablero Estado Actual.
- * En PARAMETROS (columna H) se carga a mano la fecha en que la BASE cambia de avance cada mes:
- * de ahí salen el "período medido" de FIAT y el "avance vigente desde" de los tableros.
+ * En PARAMETROS (columna H) queda la fecha en que la BASE cambia de avance cada mes: el script la
+ * detecta sola (cuando la mayoría de los planes suma +1 al avance) y también se puede cargar/corregir a mano.
+ * De ahí salen el "período medido" de FIAT y el "avance vigente desde" de los tableros.
  *
  * Columnas de BASE que se usan:
  *   A RESPONSABLE | B SOLICITUD | C GRUPO | D Orden | H NyAP | I TELEFONO
@@ -30,6 +31,7 @@ const HOJAS = {
   DET_FIAT: 'Detalle Mora FIAT',
   GESTION: 'Gestión Mes',
   HIST: 'Historial diario',
+  AV_PREVIO: '_AVANCE_PREVIO', // hoja oculta: último avance visto de cada solicitud
 };
 
 const HORA_FOTO_DIARIA = 20; // hora (0-23) en que se guarda sola la foto del día en el historial (solo días hábiles)
@@ -58,7 +60,10 @@ function onOpen() {
     .createMenu('Mora FIAT')
     .addItem('Construir / reconstruir tableros', 'construirTableros')
     .addItem('Guardar foto de hoy en el historial', 'guardarHistorial')
+    .addItem('Detectar cambio de avance ahora', 'detectarCambioAvance')
     .addToUi();
+  // Al abrir el archivo también se revisa si la BASE cambió de avance
+  try { detectarCambioAvance(); } catch (e) { console.log('detectarCambioAvance: ' + e); }
 }
 
 function construirTableros() {
@@ -67,6 +72,7 @@ function construirTableros() {
 
   crearParametros_(ss);
   asegurarCalendarioAvance_(ss);
+  detectarCambioAvance();
   crearCalc_(ss);
   crearTableroFiat_(ss);
   crearTableroActual_(ss);
@@ -157,6 +163,86 @@ function ultimoCambioAvance_(ss) {
     if (d instanceof Date && d <= hoy && (!ultima || d > ultima)) ultima = d;
   });
   return ultima;
+}
+
+// ---------------------------------------------------------------- DETECCIÓN AUTOMÁTICA DEL CAMBIO DE AVANCE
+const MIN_PLANES_COMPARABLES = 20;   // mínimo de solicitudes en común para decidir
+const PROPORCION_CAMBIO = 0.5;       // si al menos la mitad sumó +1 al avance => cambió el mes
+
+/**
+ * Compara el avance de cada solicitud de BASE con el último guardado (hoja oculta _AVANCE_PREVIO).
+ * Si la mayoría sumó +1, carga la fecha de hoy en PARAMETROS!H (una sola vez por mes).
+ * Se ejecuta al abrir el archivo, todos los días con el disparador y desde el menú.
+ */
+function detectarCambioAvance() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const base = ss.getSheetByName('BASE');
+  const param = ss.getSheetByName(HOJAS.PARAM);
+  if (!base || !param) return;
+
+  // Avance actual por solicitud (B = SOLICITUD, N = Avance)
+  const ultimaFila = base.getLastRow();
+  if (ultimaFila < 2) return;
+  const actual = {};
+  const filasActuales = [];
+  base.getRange(2, 2, ultimaFila - 1, 13).getValues().forEach(function (r) {
+    const sol = String(r[0]).trim();
+    const av = Number(r[12]);
+    if (sol && !isNaN(av) && r[12] !== '') {
+      actual[sol] = av;
+      filasActuales.push([sol, av]);
+    }
+  });
+  if (!filasActuales.length) return;
+
+  // Avance guardado la vez anterior
+  let prev = ss.getSheetByName(HOJAS.AV_PREVIO);
+  if (!prev) {
+    prev = ss.insertSheet(HOJAS.AV_PREVIO);
+    prev.hideSheet();
+  }
+  const anterior = {};
+  if (prev.getLastRow() > 0) {
+    prev.getRange(1, 1, prev.getLastRow(), 2).getValues().forEach(function (r) {
+      if (r[0] !== '') anterior[String(r[0])] = Number(r[1]);
+    });
+  }
+
+  // ¿La mayoría de las solicitudes en común sumó +1?
+  let comunes = 0, suben = 0;
+  Object.keys(actual).forEach(function (sol) {
+    if (sol in anterior) {
+      comunes++;
+      if (actual[sol] === anterior[sol] + 1) suben++;
+    }
+  });
+
+  if (comunes >= MIN_PLANES_COMPARABLES && suben / comunes >= PROPORCION_CAMBIO) {
+    registrarCambioAvance_(ss, param);
+  }
+
+  // Guarda la foto actual para la próxima comparación
+  prev.clearContents();
+  prev.getRange(1, 1, filasActuales.length, 2).setValues(filasActuales);
+}
+
+/** Carga la fecha de hoy en PARAMETROS!H salvo que ya haya una fecha de este mes. */
+function registrarCambioAvance_(ss, param) {
+  const tz = ss.getSpreadsheetTimeZone();
+  const ahora = new Date();
+  const mesActual = Utilities.formatDate(ahora, tz, 'yyyy-MM');
+  const fechas = param.getRange('H3:H200').getValues();
+  let primeraVacia = -1;
+  for (let i = 0; i < fechas.length; i++) {
+    const d = fechas[i][0];
+    if (d instanceof Date && Utilities.formatDate(d, tz, 'yyyy-MM') === mesActual) return; // ya cargada
+    if (d === '' && primeraVacia === -1) primeraVacia = i;
+  }
+  if (primeraVacia === -1) return;
+  const celda = param.getRange(3 + primeraVacia, 8);
+  celda.setValue(Utilities.parseDate(Utilities.formatDate(ahora, tz, 'yyyy-MM-dd'), tz, 'yyyy-MM-dd'));
+  celda.setNote('Detectado automáticamente el ' + Utilities.formatDate(ahora, tz, 'dd/MM/yyyy HH:mm') +
+    '. Si el cambio fue otro día, corregí la fecha.');
 }
 
 // ---------------------------------------------------------------- CALC (una fila por plan)
@@ -354,12 +440,13 @@ function activarHistorialDiario_() {
   }
 }
 
-/** La ejecuta el disparador todos los días: guarda la foto solo de lunes a viernes y si no es feriado. */
+/** La ejecuta el disparador todos los días: revisa el cambio de avance y guarda la foto solo de lunes a viernes (no feriados). */
 function fotoDiariaAutomatica() {
   const tz = SpreadsheetApp.getActiveSpreadsheet().getSpreadsheetTimeZone();
   const ahora = new Date();
   const diaSemana = Number(Utilities.formatDate(ahora, tz, 'u')); // 1 = lunes ... 7 = domingo
   const hoy = Utilities.formatDate(ahora, tz, 'yyyy-MM-dd');
+  detectarCambioAvance(); // todos los días, incluso fines de semana
   if (diaSemana >= 6 || FERIADOS.indexOf(hoy) !== -1) return;
   guardarHistorial();
 }
