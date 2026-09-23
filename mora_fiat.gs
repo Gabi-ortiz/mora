@@ -121,20 +121,26 @@ function crearParametros_(ss) {
 
 // ---------------------------------------------------------------- CALENDARIO DE CAMBIO DE AVANCE
 // Tabla en PARAMETROS!H:I. Se carga a mano la fecha en que la BASE pasa al avance siguiente (+1).
-// Ej.: 21/09/2026 => desde ese día la BASE muestra el avance de septiembre y FIAT mide agosto.
+// Ej.: 21/09/2026 => desde ese día la BASE muestra el avance de septiembre = período de medición septiembre.
 const FECHA_INICIAL_AVANCE = [2026, 8, 21]; // 21/09/2026 (mes base 0)
 
 /** Agrega la tabla de fechas a PARAMETROS si todavía no existe (no toca lo cargado). */
 function asegurarCalendarioAvance_(ss) {
   const sh = ss.getSheetByName(HOJAS.PARAM);
-  if (sh.getRange('H2').getValue() !== '') return;
+  // La columna I se recalcula siempre (período = mes de la fecha de cambio de avance)
+  const formulaPeriodo = '=ARRAYFORMULA(IF(H3:H200="","",PROPER(TEXT(H3:H200,"mmmm yyyy"))))';
+  if (sh.getRange('H2').getValue() !== '') {
+    sh.getRange('I2').setValue('PERÍODO DE MEDICIÓN FIAT');
+    sh.getRange('I3').setFormula(formulaPeriodo);
+    return;
+  }
   sh.getRange('H1').setValue('Fechas de cambio de avance (cargar cada mes)').setFontWeight('bold').setFontColor(COLOR_TITULO);
-  estiloHeader_(sh.getRange('H2:I2').setValues([['FECHA CAMBIO DE AVANCE', 'PERÍODO QUE MIDE FIAT']]));
+  estiloHeader_(sh.getRange('H2:I2').setValues([['FECHA CAMBIO DE AVANCE', 'PERÍODO DE MEDICIÓN FIAT']]));
   sh.getRange('H3').setValue(new Date(FECHA_INICIAL_AVANCE[0], FECHA_INICIAL_AVANCE[1], FECHA_INICIAL_AVANCE[2]));
   sh.getRange('H3:H200').setNumberFormat('dd/mm/yyyy')
     .setDataValidation(SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(false)
       .setHelpText('Fecha en que la BASE pasó al avance siguiente').build());
-  sh.getRange('I3').setFormula('=ARRAYFORMULA(IF(H3:H200="","",PROPER(TEXT(EOMONTH(H3:H200,-1),"mmmm yyyy"))))');
+  sh.getRange('I3').setFormula(formulaPeriodo);
   sh.getRange('H3:I200').setHorizontalAlignment('center');
   sh.setColumnWidths(8, 2, 170);
   sh.getRange('H2').setNote('Cargá una fila por mes con el día en que la BASE sumó +1 al avance. ' +
@@ -282,7 +288,7 @@ function crearCalc_(ss) {
 function crearTableroFiat_(ss) {
   const sh = hojaNueva_(ss, HOJAS.FIAT);
   titulo_(sh, 'TABLERO MEDICIÓN FIAT (mes vencido)',
-    '=' + formulaAvance_('"Período medido: "&PROPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"'));
+    '=' + formulaAvance_('"Período medido: "&PROPER(TEXT(f,"mmmm yyyy"))&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"'));
 
   const enc = ['CUOTA MEDIDA', 'AVANCE EN BASE HOY', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS',
     '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)', 'FALTÓ P/ TRAMO B (planes)'];
