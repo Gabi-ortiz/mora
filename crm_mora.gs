@@ -326,7 +326,7 @@ function crmListarCartera(token) {
       const g = ctx.gestionesMes[p.solicitud] || { intentos: 0, efectivos: 0 };
       return {
         solicitud: p.solicitud, cliente: p.cliente, telefono: p.telefono, grupo: p.grupo,
-        orden: p.orden, avance: p.avance, estadoBase: p.estado,
+        orden: p.orden, avance: p.avance, estadoBase: p.estado, cuotas: p.cuotas,
         situacion: p.situacion, responsableEmail: p.responsableEmail,
         responsableNombre: p.responsableNombre,
         estadoCaso: c.estadoCaso || 'Sin gestionar',

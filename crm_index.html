@@ -5,112 +5,302 @@
 <meta charset="utf-8">
 <style>
   :root {
-    --bg: #f5f6f8; --panel: #fff; --ink: #1d2330; --muted: #6b7280; --line: #e3e6eb;
-    --accent: #1f5fbf; --p1: #c62828; --p2: #ef6c00; --p3: #8d6e00; --p4: #5d6d7e;
-    --ok: #2e7d32; --baja: #7b7b7b;
+    --side: #101a33; --side-2: #1f2c4d; --side-ink: #c8d1e6; --side-mute: #6c7a99;
+    --bg: #f4f6fa; --panel: #fff; --ink: #1c2333; --ink-2: #344054; --muted: #667085; --soft: #98a2b3;
+    --line: #eaecf0; --line-2: #d0d5dd; --accent: #2e5bff; --accent-soft: #eef4ff;
+    --p1: #d92d20; --p1-bg: #fde8e8; --p1-ink: #b42318;
+    --p2: #f79009; --p2-bg: #fff1e0; --p2-ink: #b54708;
+    --p3: #caa300; --p3-bg: #fef7d6; --p3-ink: #8a6a00;
+    --p4: #98a2b3; --p4-bg: #eef2f6; --p4-ink: #475467;
+    --ok: #17b26a; --ok-bg: #e3f6ea; --ok-ink: #067647;
+    --wa: #12b76a; --radius: 12px; --shadow: 0 1px 2px rgba(16, 24, 40, .06), 0 1px 3px rgba(16, 24, 40, .04);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
-  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
-  header h1 { font-size: 16px; margin: 0; }
-  header .yo { margin-left: auto; color: var(--muted); font-size: 13px; }
-  nav { display: flex; gap: 4px; flex-wrap: wrap; }
-  nav button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
-  nav button.activo { background: #e8eefb; color: var(--accent); font-weight: 600; }
-  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
-  .filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
-  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
-  textarea { width: 100%; min-height: 70px; }
-  button.btn { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
-  button.btn.sec { background: #fff; color: var(--accent); }
-  button.btn:disabled { opacity: .5; cursor: default; }
-  .resumen { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
-  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 120px; cursor: pointer; }
-  .kpi b { display: block; font-size: 20px; }
-  .kpi span { color: var(--muted); font-size: 12px; }
-  .tabla { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
-  table { border-collapse: collapse; width: 100%; }
-  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
-  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; position: sticky; top: 0; }
-  tbody tr:hover { background: #f7f9fd; cursor: pointer; }
-  td.num, th.num { text-align: right; }
-  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
-  .s-P1 { background: var(--p1); } .s-P2 { background: var(--p2); } .s-P3 { background: var(--p3); }
-  .s-P4 { background: var(--p4); } .s-AL_DIA { background: var(--ok); } .s-RESCINDIDO, .s-BAJA { background: var(--baja); }
-  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; background: #eef1f5; }
-  .alerta { color: var(--p1); font-weight: 600; }
-  .muted { color: var(--muted); }
-  .vacio { padding: 24px; text-align: center; color: var(--muted); }
-  /* Ficha */
-  #ficha { position: fixed; inset: 0; background: rgba(20, 25, 35, .45); display: flex; justify-content: flex-end; z-index: 10; }
-  #ficha .panel { background: var(--panel); width: min(760px, 100%); height: 100%; overflow-y: auto; padding: 16px 20px 40px; }
-  #ficha h2 { margin: 0 0 4px; font-size: 18px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 16px; margin: 12px 0; }
-  .grid div span { display: block; font-size: 11px; color: var(--muted); }
-  .cuotas { display: flex; gap: 3px; flex-wrap: wrap; margin: 8px 0 12px; }
-  .cuota { width: 40px; text-align: center; border-radius: 4px; padding: 3px 0; font-size: 11px; border: 1px solid var(--line); }
-  .cuota b { display: block; font-size: 13px; }
-  .c-P { background: #e6f4ea; } .c-I { background: #fdecea; color: var(--p1); } .c-R { background: #e0e0e0; }
-  .c-mes { outline: 2px solid var(--p2); }
-  .scoring { background: #f7f9fd; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; white-space: pre-wrap; }
-  .scoring > span:first-child { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
-  section.bloque { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
-  section.bloque h3 { font-size: 14px; margin: 0 0 8px; }
-  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
-  .form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
-  .form .ancho { grid-column: 1 / -1; }
-  .gestion { border-left: 3px solid var(--line); padding: 4px 10px; margin-bottom: 10px; }
-  .gestion .cab { font-size: 12px; color: var(--muted); }
-  .acciones a { margin-right: 10px; }
-  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 14px; border-radius: 6px; z-index: 20; }
-  .barra { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; min-width: 80px; }
-  .barra i { display: block; height: 100%; background: var(--accent); }
-  details summary { cursor: pointer; color: var(--accent); }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  button, input, select, textarea { font: inherit; color: inherit; }
   [hidden] { display: none !important; }
-  .login { max-width: 360px; margin: 60px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
-  .login h2 { margin: 0 0 4px; font-size: 18px; }
-  .login label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 12px; }
-  .login button { width: 100%; margin-top: 16px; }
-  .login .err { color: var(--p1); margin-top: 10px; min-height: 1em; }
-  #salir { margin-left: 8px; }
+  a { color: var(--accent); }
+
+  /* ---------- Estructura ---------- */
+  .app { display: flex; min-height: 100vh; }
+  aside { width: 232px; flex: none; background: var(--side); color: var(--side-ink); padding: 20px 14px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 0; height: 100vh; }
+  .logo { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 700; font-size: 17px; margin: 0 6px 22px; }
+  .logo b { width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(135deg, #2e5bff, #7a5af8); display: grid; place-items: center; font-size: 15px; }
+  .nav { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; color: var(--side-ink); font-weight: 500; border: 0; background: none; width: 100%; text-align: left; cursor: pointer; }
+  .nav:hover { background: rgba(255, 255, 255, .05); }
+  .nav.on { background: var(--side-2); color: #fff; }
+  .nav .ic { width: 18px; text-align: center; opacity: .9; }
+  .nav .n { margin-left: auto; background: var(--p1); color: #fff; border-radius: 999px; font-size: 11px; padding: 1px 7px; font-weight: 700; }
+  .sec { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--side-mute); margin: 16px 12px 4px; }
+  .yo { margin-top: auto; display: flex; gap: 10px; align-items: center; padding: 12px 8px 0; border-top: 1px solid #22304f; }
+  .yo .nm { color: #fff; font-weight: 600; line-height: 1.2; }
+  .yo .rl { font-size: 12px; }
+  .yo button { margin-left: auto; background: none; border: 0; color: var(--side-mute); cursor: pointer; font-size: 12px; }
+  .yo button:hover { color: #fff; }
+  .main { flex: 1; min-width: 0; padding: 24px 28px 40px; }
+  .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 22px; }
+  .sub { color: var(--muted); margin-top: 2px; }
+  .search { background: #fff; border: 1px solid var(--line-2); border-radius: 10px; padding: 9px 14px; width: 320px; max-width: 100%; }
+
+  /* ---------- Piezas ---------- */
+  .avatar { width: 34px; height: 34px; flex: none; border-radius: 50%; background: var(--accent); color: #fff; display: inline-grid; place-items: center; font-weight: 700; font-size: 12px; }
+  .avatar.sm { width: 28px; height: 28px; font-size: 11px; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .pill .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+  .s-P1 { background: var(--p1-bg); color: var(--p1-ink); } .s-P1 .dot { background: var(--p1); }
+  .s-P2 { background: var(--p2-bg); color: var(--p2-ink); } .s-P2 .dot { background: var(--p2); }
+  .s-P3 { background: var(--p3-bg); color: var(--p3-ink); } .s-P3 .dot { background: var(--p3); }
+  .s-P4 { background: var(--p4-bg); color: var(--p4-ink); } .s-P4 .dot { background: var(--p4); }
+  .s-AL_DIA { background: var(--ok-bg); color: var(--ok-ink); } .s-AL_DIA .dot { background: var(--ok); }
+  .s-RESCINDIDO, .s-BAJA { background: #f2f4f7; color: #475467; } .s-RESCINDIDO .dot, .s-BAJA .dot { background: #667085; }
+  .caso { background: var(--accent-soft); color: #3538cd; }
+  .caso.sin { background: #f2f4f7; color: var(--muted); }
+  .fiat { font-size: 10px; font-weight: 800; letter-spacing: .03em; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: 5px; vertical-align: 1px; }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-2); background: #fff; border-radius: 8px; padding: 7px 12px; font-weight: 600; color: var(--ink-2); cursor: pointer; text-decoration: none; white-space: nowrap; }
+  .btn:hover { background: #f9fafb; }
+  .btn.pri { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .btn.pri:hover { background: #2549d6; }
+  .btn.wa { background: var(--wa); border-color: var(--wa); color: #fff; }
+  .btn.ghost { border-color: transparent; background: none; }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.sm { padding: 4px 9px; font-size: 12px; }
+  input.in, select.in, textarea.in { border: 1px solid var(--line-2); border-radius: 8px; padding: 8px 10px; background: #fff; width: 100%; }
+  textarea.in { min-height: 72px; resize: vertical; }
+  .in:focus, .search:focus { outline: 2px solid #b2ccff; border-color: var(--accent); }
+  .muted { color: var(--muted); }
+  .alerta { color: var(--p1-ink); font-weight: 600; }
+  .card { background: var(--panel); border-radius: var(--radius); box-shadow: var(--shadow); }
+  .card-h { padding: 16px 18px 0; }
+  .card-h h3 { margin: 0; font-size: 15px; }
+  .card-h .d { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .vacio { padding: 36px 16px; text-align: center; color: var(--muted); }
+
+  /* KPIs */
+  .saludo { display: flex; align-items: center; gap: 12px; background: linear-gradient(90deg, #eef4ff, #f4f0ff); border: 1px solid #dfe6ff; border-radius: var(--radius); padding: 12px 16px; margin-bottom: 16px; }
+  .saludo b { font-size: 15px; }
+  .kpis { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 14px; margin-bottom: 18px; }
+  .kpi { background: #fff; border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); border-top: 4px solid var(--line-2); cursor: pointer; transition: transform .08s; text-align: left; border-left: 0; border-right: 0; border-bottom: 0; }
+  .kpi:hover { transform: translateY(-1px); }
+  .kpi.on { box-shadow: 0 0 0 2px var(--accent), var(--shadow); }
+  .kpi .l { color: #475467; font-size: 13px; font-weight: 600; }
+  .kpi .v { font-size: 28px; font-weight: 700; line-height: 1.15; margin-top: 2px; }
+  .kpi .h { color: var(--soft); font-size: 12px; }
+  .meter { height: 8px; background: #eef2f6; border-radius: 4px; margin-top: 10px; overflow: hidden; }
+  .meter i { display: block; height: 100%; background: var(--accent); border-radius: 4px; }
+
+  /* Tabla de cartera */
+  .bar { display: flex; gap: 6px; padding: 12px 14px; border-bottom: 1px solid var(--line); align-items: center; flex-wrap: wrap; }
+  .tab { padding: 6px 12px; border-radius: 8px; color: #475467; font-weight: 600; border: 0; background: none; cursor: pointer; }
+  .tab.on { background: var(--accent-soft); color: var(--accent); }
+  .tab small { background: var(--line); border-radius: 999px; padding: 0 7px; margin-left: 4px; font-size: 11px; color: #475467; }
+  .bar .der { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+  .bar select { border: 1px solid var(--line-2); border-radius: 8px; padding: 6px 8px; background: #fff; }
+  .selbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; background: #101a33; color: #fff; border-radius: var(--radius) var(--radius) 0 0; flex-wrap: wrap; }
+  .selbar select { border-radius: 8px; padding: 5px 8px; border: 0; color: var(--ink); background: #fff; }
+  .tw { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 12px; text-align: left; color: var(--muted); font-weight: 600; padding: 10px 10px; background: #f9fafb; white-space: nowrap; }
+  td { padding: 10px 10px; border-top: 1px solid #f2f4f7; vertical-align: middle; }
+  th:first-child, td:first-child { padding-left: 16px; }
+  tbody tr { cursor: pointer; }
+  tbody tr:hover { background: #f8faff; }
+  .cli { min-width: 170px; max-width: 250px; }
+  .cli b { display: block; line-height: 1.25; }
+  .cli span { color: var(--soft); font-size: 12px; white-space: nowrap; }
+  .mini { display: inline-flex; gap: 2px; }
+  .mini i { width: 9px; height: 14px; border-radius: 2px; background: #e4e7ec; display: block; }
+  .mini i.P { background: #6ce9a6; } .mini i.I { background: #f97066; } .mini i.R { background: #98a2b3; } .mini i.C { background: #b2ccff; }
+  .mini i.M { background: #fff; outline: 2px solid var(--p2); outline-offset: -2px; }
+  .mini i.M.P { background: #6ce9a6; outline: 0; }
+  .nowrap { white-space: nowrap; }
+  .mas { padding: 14px; text-align: center; border-top: 1px solid var(--line); }
+
+  /* ---------- Ficha (drawer) ---------- */
+  #ficha { position: fixed; inset: 0; background: rgba(16, 26, 51, .45); display: flex; justify-content: flex-end; z-index: 20; }
+  .dr { width: min(680px, 100%); background: #fff; height: 100%; display: flex; flex-direction: column; box-shadow: -10px 0 30px rgba(0, 0, 0, .2); animation: entra .18s ease-out; }
+  @keyframes entra { from { transform: translateX(30px); opacity: .6; } }
+  .dr-h { padding: 18px 24px 14px; background: linear-gradient(180deg, #f5f8ff, #fff); border-bottom: 1px solid var(--line); }
+  .dr-h h2 { margin: 0 0 6px; font-size: 21px; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .dr-nav { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+  .dr-tabs { display: flex; gap: 20px; padding: 0 24px; border-bottom: 1px solid var(--line); }
+  .dr-tabs button { padding: 12px 0; font-weight: 600; color: var(--muted); border: 0; background: none; cursor: pointer; }
+  .dr-tabs button.on { color: var(--accent); box-shadow: inset 0 -2px var(--accent); }
+  .dr-b { padding: 18px 24px 30px; overflow-y: auto; flex: 1; }
+  h4 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  .cuotas { display: grid; grid-template-columns: repeat(13, minmax(0, 1fr)); gap: 4px; margin: 4px 0 18px; }
+  .cu { text-align: center; border-radius: 6px; padding: 5px 0; font-size: 11px; color: var(--muted); background: #f2f4f7; }
+  .cu b { display: block; font-size: 13px; color: var(--ink); }
+  .cu.P { background: var(--ok-bg); } .cu.I { background: var(--p1-bg); } .cu.I b { color: var(--p1-ink); } .cu.R { background: #e4e7ec; }
+  .cu.M { outline: 2px solid var(--p2); outline-offset: -2px; background: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+  .chip { border: 1px solid var(--line-2); border-radius: 999px; padding: 6px 12px; font-weight: 600; font-size: 13px; background: #fff; cursor: pointer; color: var(--ink-2); }
+  .chip.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+  .f2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .f2 .full { grid-column: 1 / -1; }
+  .fl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .promesa { border: 1px dashed #b2ccff; background: #f8faff; border-radius: 10px; padding: 10px; }
+  .atajos { display: flex; gap: 4px; margin-top: 4px; }
+  .acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .datos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
+  .datos div span { display: block; font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .scoring { background: #f8faff; border: 1px solid #dfe6ff; border-radius: 10px; padding: 12px 14px; margin-top: 16px; white-space: pre-wrap; }
+  .tl { border-left: 2px solid var(--line); padding-left: 18px; margin-left: 6px; }
+  .ev { position: relative; margin-bottom: 16px; }
+  .ev:before { content: ""; position: absolute; left: -25px; top: 5px; width: 10px; height: 10px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; box-shadow: 0 0 0 1px var(--line); }
+  .ev.ok:before { background: var(--ok); } .ev.no:before { background: var(--p4); } .ev.vieja:before { background: #d0d5dd; }
+  .ev .t { font-size: 12px; color: var(--soft); }
+  .ev .x { background: #f9fafb; border-radius: 10px; padding: 8px 12px; margin-top: 4px; white-space: pre-wrap; }
+  .ev.vieja .x { background: #fff; border: 1px dashed var(--line-2); }
+
+  /* ---------- Tablero ---------- */
+  .kp4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; }
+  .kp4 .k { background: #fff; border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
+  .kp4 .v { font-size: 26px; font-weight: 700; }
+  .g2 { display: grid; grid-template-columns: 1.1fr 1fr; gap: 16px; margin-top: 16px; }
+  .pad { padding: 14px 18px 18px; }
+  .br { display: grid; grid-template-columns: 72px 1fr 120px; align-items: center; gap: 10px; margin-bottom: 10px; font-size: 13px; }
+  .track { height: 18px; background: #f2f4f7; border-radius: 5px; position: relative; overflow: hidden; }
+  .track .a { position: absolute; left: 0; top: 0; bottom: 0; background: #f97066; }
+  .track .b { position: absolute; top: 0; bottom: 0; background: repeating-linear-gradient(45deg, #fec84b, #fec84b 4px, #fedf89 4px, #fedf89 8px); }
+  .lg { display: flex; gap: 14px; font-size: 12px; color: var(--muted); margin-top: 8px; flex-wrap: wrap; }
+  .lg i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+  .cols { display: flex; align-items: flex-end; gap: 6px; height: 140px; margin-top: 8px; }
+  .col { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: stretch; height: 100%; min-width: 0; }
+  .col i { display: block; }
+  .col i:first-child { border-radius: 3px 3px 0 0; }
+  .col span { font-size: 10px; color: var(--soft); text-align: center; margin-top: 4px; }
+  .pr { display: flex; align-items: center; gap: 8px; min-width: 140px; }
+  .pr .t { flex: 1; height: 7px; background: #eef2f6; border-radius: 4px; overflow: hidden; }
+  .pr .t i { display: block; height: 100%; background: var(--accent); }
+
+  /* ---------- Acceso ---------- */
+  .auth { min-height: 100vh; display: grid; grid-template-columns: 1fr 1fr; }
+  .auth .marca { background: radial-gradient(circle at 20% 20%, #2e5bff55, transparent 50%), radial-gradient(circle at 80% 80%, #7a5af855, transparent 50%), var(--side); color: #fff; padding: 48px; display: flex; flex-direction: column; justify-content: space-between; }
+  .auth .marca h2 { font-size: 30px; margin: 0 0 10px; line-height: 1.2; }
+  .auth .marca p { color: var(--side-ink); max-width: 420px; }
+  .auth .form { display: grid; place-items: center; padding: 32px 16px; }
+  .auth form { width: min(380px, 100%); }
+  .auth form h3 { margin: 0 0 4px; font-size: 22px; }
+  .auth .fl { margin-top: 14px; }
+  .auth .btn { width: 100%; margin-top: 18px; padding: 10px; }
+  .auth .err { color: var(--p1-ink); margin-top: 12px; min-height: 1.2em; }
+
+  #toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #101a33; color: #fff; padding: 10px 16px; border-radius: 10px; z-index: 40; box-shadow: 0 8px 24px rgba(0, 0, 0, .2); }
+  .cargando { display: inline-block; width: 16px; height: 16px; border: 2px solid var(--line-2); border-top-color: var(--accent); border-radius: 50%; animation: gira .7s linear infinite; vertical-align: -3px; margin-right: 8px; }
+  @keyframes gira { to { transform: rotate(360deg); } }
+
+  /* ---------- Celular / pantallas chicas ---------- */
+  @media (max-width: 1100px) { .kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); } .g2 { grid-template-columns: 1fr; } }
+  @media (max-width: 860px) {
+    .app { flex-direction: column; }
+    aside { width: 100%; height: auto; position: sticky; flex-direction: row; align-items: center; overflow-x: auto; padding: 10px; z-index: 10; }
+    .logo { margin: 0 8px 0 0; } .logo span, .sec, .yo .nm, .yo .rl, .nav .tx { display: none; }
+    #nav { display: flex; gap: 2px; } .nav { width: auto; } .yo { margin: 0 0 0 auto; border: 0; padding: 0 0 0 8px; }
+    .saludo { flex-wrap: wrap; } .saludo .btn { margin-left: 0 !important; width: 100%; }
+    .main { padding: 16px; } .kpis, .kp4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .auth { grid-template-columns: 1fr; } .auth .marca { padding: 24px; } .datos, .f2 { grid-template-columns: 1fr; }
+    .cuotas { grid-template-columns: repeat(7, minmax(0, 1fr)); }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1>CRM Mora</h1>
-  <nav id="nav"></nav>
-  <div class="yo"><span id="yo"></span><button class="btn sec" id="salir" hidden>Salir</button></div>
-</header>
-<main id="main"></main>
-<div id="ficha" hidden><div class="panel" id="fichaPanel"></div></div>
+<div id="auth" hidden></div>
+<div id="app" class="app" hidden>
+  <aside>
+    <div class="logo"><b>M</b><span>CRM Mora</span></div>
+    <div id="nav"></div>
+    <div class="yo"><span class="avatar" id="yoAv"></span><div><div class="nm" id="yoNom"></div><div class="rl" id="yoRol"></div></div><button id="salir" title="Salir">Salir</button></div>
+  </aside>
+  <div class="main">
+    <div class="top"><div><h1 id="titulo"></h1><div class="sub" id="subtitulo"></div></div>
+      <input class="search" id="buscar" placeholder="Buscar cliente, solicitud o teléfono" autocomplete="off"></div>
+    <div id="main"></div>
+  </div>
+</div>
+<div id="ficha" hidden><div class="dr" id="dr"></div></div>
 <div id="toast" hidden></div>
 
 <script>
-var S = { token: null, ini: null, planes: [], vista: 'cartera', filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {} };
+var S = {
+  token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
+  filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {},
+  cola: [], fichaTab: 'gestionar', ficha: null,
+};
+var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
+var COLORES = ['#2e5bff', '#7a5af8', '#12b76a', '#f79009', '#ee46bc', '#06aed4', '#d92d20'];
+var ICONO_RES = { 'Atendió': '✅', 'No atendió': '📵', 'Buzón / apagado': '📴', 'Mensaje enviado': '💬', 'Respondió mensaje': '↩️', 'Número erróneo': '⚠️', 'N/A': '—' };
+var ICONO_CANAL = { 'Llamada': '📞', 'WhatsApp': '🟢', 'SMS': '✉️', 'Mail': '📧', 'Presencial': '🤝', 'Sin contacto (solo actualización)': '📝' };
 
+// ---------- Utilidades ----------
+function $(id) { return document.getElementById(id); }
 function esc(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
-// Llamada al servidor sin sesión (login).
+function cada(sel, raiz, fn) { Array.prototype.forEach.call((raiz || document).querySelectorAll(sel), fn); }
+function toast(msg) {
+  var t = $('toast'); t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3500);
+}
+function error(e) { if (!e || !e.sesion) toast('⚠️ ' + (e && e.message ? e.message : e)); }
+function pad2(n) { return ('0' + n).slice(-2); }
+function hoyStr(dias) { var d = new Date(); d.setDate(d.getDate() + (dias || 0)); return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()); }
+function ddmm(s) { return s ? s.slice(8, 10) + '/' + s.slice(5, 7) : ''; }
+function diasDesde(s) {
+  if (!s) return null;
+  var a = new Date(s.slice(0, 10) + 'T00:00:00'), b = new Date(hoyStr() + 'T00:00:00');
+  return Math.round((b - a) / 864e5);
+}
+function haceCuanto(s) {
+  var d = diasDesde(s);
+  if (d === null) return '';
+  return d <= 0 ? 'hoy' : d === 1 ? 'ayer' : 'hace ' + d + ' días';
+}
+function plata(v) { var n = Number(v); return isNaN(n) || v === '' ? esc(v) : '$ ' + n.toLocaleString('es-AR'); }
+function pct(x) { return (x * 100).toFixed(1).replace('.', ',') + '%'; }
+function iniciales(n) {
+  var p = String(n || '?').replace(/[^\wÁÉÍÓÚÑáéíóúñ ]/g, ' ').trim().split(/\s+/);
+  return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase();
+}
+function colorDe(email) {
+  var lista = (S.ini && S.ini.responsables) || [];
+  var i = lista.map(function (r) { return r.email; }).indexOf(email);
+  return COLORES[(i < 0 ? 6 : i) % COLORES.length];
+}
+function pillSit(s, corto) { return '<span class="pill s-' + s.codigo + '"><i class="dot"></i>' + esc(corto ? s.codigo.replace('AL_DIA', 'Al día').replace('RESCINDIDO', 'Rescindido').replace('BAJA', 'Baja') : s.etiqueta) + '</span>'; }
+function pillCaso(e) { return '<span class="pill caso' + (e === 'Sin gestionar' ? ' sin' : '') + '">' + esc(e) + '</span>'; }
+function opciones(lista, sel, vacio) {
+  return (vacio !== undefined ? '<option value="">' + esc(vacio) + '</option>' : '') +
+    lista.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v || '—') + '</option>'; }).join('');
+}
+function miniCuotas(p) {
+  var h = '<span class="mini" title="C2 a C14 · recuadro naranja: cuota del mes">';
+  for (var i = 0; i < 13; i++) {
+    var v = (p.cuotas || [])[i] || '', n = i + 2;
+    h += '<i class="' + esc(v) + (n === p.avance ? ' M' : '') + '"></i>';
+  }
+  return h + '</span>';
+}
+function esActiva(p) { return p.situacion.codigo !== 'RESCINDIDO' && p.situacion.codigo !== 'BAJA'; }
+function esPrio(p) { return p.situacion.codigo === 'P1' || p.situacion.codigo === 'P2'; }
+
+// ---------- Servidor ----------
 function apiLibre(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
-  return new Promise(function (ok, mal) {
-    google.script.run.withSuccessHandler(ok).withFailureHandler(mal)[fn].apply(null, args);
-  });
+  return new Promise(function (ok, mal) { google.script.run.withSuccessHandler(ok).withFailureHandler(mal)[fn].apply(null, args); });
 }
-// Llamada con sesión: agrega el token y, si la sesión venció, vuelve al login.
+// Con sesión: agrega el token; si la sesión venció, vuelve al ingreso.
 function api(fn) {
   var args = [fn, S.token].concat(Array.prototype.slice.call(arguments, 1));
   return apiLibre.apply(null, args).catch(function (e) {
     var msg = String(e && e.message || e);
     if (msg.indexOf('SESION:') >= 0) {
-      if (msg.indexOf('cambiar la clave') >= 0) pantallaCambioClave(true);
-      else pantallaLogin(msg.replace(/^.*SESION:\s*/, ''));
-      var err = new Error(msg.replace(/^.*SESION:\s*/, ''));
-      err.sesion = true;
-      throw err;
+      var limpio = msg.replace(/^.*SESION:\s*/, '');
+      if (limpio.indexOf('cambiar la clave') >= 0) pantallaClave(true); else pantallaLogin(limpio);
+      var err = new Error(limpio); err.sesion = true; throw err;
     }
     throw e;
   });
@@ -119,425 +309,496 @@ function guardarToken(t) {
   S.token = t;
   try { if (t) localStorage.setItem('crmToken', t); else localStorage.removeItem('crmToken'); } catch (e) {}
 }
-function toast(msg) {
-  var t = document.getElementById('toast');
-  t.textContent = msg; t.hidden = false;
-  clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3500);
-}
-function error(e) { toast('Error: ' + (e && e.message ? e.message : e)); }
-function hoy() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
-function chip(s) { return '<span class="chip s-' + s.codigo + '">' + esc(s.etiqueta) + '</span>'; }
-function opciones(lista, sel, vacio) {
-  return (vacio !== undefined ? '<option value="">' + esc(vacio) + '</option>' : '') +
-    lista.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('');
-}
-function telLinks(tel) {
-  var n = String(tel || '').replace(/\D/g, '');
-  if (!n) return '';
-  return '<span class="acciones">' + esc(tel) + ' · <a href="tel:' + n + '" target="_blank">Llamar</a>' +
-    '<a href="https://wa.me/549' + n + '" target="_blank">WhatsApp</a></span>';
-}
 
-// ---------- Arranque / acceso ----------
-try { S.token = localStorage.getItem('crmToken'); } catch (e) {}
-if (S.token) iniciar(); else pantallaLogin('');
-
-function iniciar() {
-  document.getElementById('main').innerHTML = '<div class="vacio">Cargando cartera…</div>';
-  S.vista = 'cartera';
-  api('crmInicio').then(function (ini) {
-    S.ini = ini;
-    document.getElementById('yo').textContent = ini.usuario.nombre + (ini.esSupervisor ? ' · Supervisor' : '');
-    document.getElementById('salir').hidden = false;
-    armarNav();
-    return cargarCartera();
-  }).catch(function (e) {
-    if (e.sesion) return; // api() ya mostró el login o el cambio de clave
-    document.getElementById('main').innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>';
-  });
+// ---------- Acceso ----------
+function mostrarAuth(html) {
+  $('app').hidden = true; $('ficha').hidden = true; $('auth').hidden = false;
+  $('auth').innerHTML = '<div class="auth"><div class="marca"><div class="logo"><b>M</b><span>CRM Mora</span></div>' +
+    '<div><h2>Cada contacto cuenta.</h2><p>Gestión de mora de planes de ahorro: trabajá tu cartera al día, priorizando lo que Fiat mide el mes próximo.</p></div>' +
+    '<div class="muted" style="color:#6c7a99">Acceso exclusivo @grupoantun.com.ar</div></div><div class="form">' + html + '</div></div>';
 }
-
-function sinSesion() {
-  S.ini = null; S.planes = [];
-  document.getElementById('nav').innerHTML = '';
-  document.getElementById('yo').textContent = '';
-  document.getElementById('salir').hidden = true;
-  cerrarFicha();
-}
-
 function pantallaLogin(msg) {
-  guardarToken(null); sinSesion();
-  document.getElementById('main').innerHTML = '<form class="login" id="fLogin"><h2>Ingresar</h2>' +
-    '<div class="muted">Con tu mail @grupoantun.com.ar y tu clave del CRM.</div>' +
-    '<label>Mail<input name="email" type="email" autocomplete="username" required></label>' +
-    '<label>Clave<input name="clave" type="password" autocomplete="current-password" required></label>' +
-    '<button class="btn" type="submit">Ingresar</button><div class="err">' + esc(msg || '') + '</div></form>';
-  var f = document.getElementById('fLogin');
-  f.email.focus();
+  guardarToken(null);
+  mostrarAuth('<form id="fLogin"><h3>Ingresar</h3><div class="muted">Con tu mail de la empresa y tu clave del CRM.</div>' +
+    '<label class="fl">Mail<input class="in" name="email" type="email" autocomplete="username" placeholder="nombre@grupoantun.com.ar" required></label>' +
+    '<label class="fl">Clave<input class="in" name="clave" type="password" autocomplete="current-password" required></label>' +
+    '<button class="btn pri" type="submit">Ingresar</button><div class="err">' + esc(msg || '') + '</div></form>');
+  var f = $('fLogin'); f.email.focus();
   f.onsubmit = function (e) {
     e.preventDefault();
-    var b = f.querySelector('button'); b.disabled = true; b.textContent = 'Ingresando…';
+    var b = f.querySelector('button'); b.disabled = true; b.innerHTML = '<span class="cargando"></span>Ingresando…';
     apiLibre('crmLogin', f.email.value, f.clave.value).then(function (r) {
       guardarToken(r.token);
-      if (r.debeCambiarClave) pantallaCambioClave(true); else iniciar();
-    }).catch(function (err) {
-      b.disabled = false; b.textContent = 'Ingresar';
-      f.querySelector('.err').textContent = err.message || err;
-    });
+      if (r.debeCambiarClave) pantallaClave(true); else iniciar();
+    }).catch(function (x) { b.disabled = false; b.textContent = 'Ingresar'; f.querySelector('.err').textContent = x.message || x; });
   };
 }
-
-function pantallaCambioClave(obligatorio) {
-  sinSesion();
-  document.getElementById('salir').hidden = false;
-  document.getElementById('main').innerHTML = '<form class="login" id="fClave"><h2>Cambiar clave</h2>' +
-    (obligatorio ? '<div class="muted">Es tu primer ingreso o te blanquearon la clave: elegí una clave nueva (mínimo 8 caracteres).</div>' : '') +
-    '<label>Clave actual<input name="actual" type="password" autocomplete="current-password" required></label>' +
-    '<label>Clave nueva<input name="nueva" type="password" autocomplete="new-password" minlength="8" required></label>' +
-    '<label>Repetir clave nueva<input name="repetir" type="password" autocomplete="new-password" minlength="8" required></label>' +
-    '<button class="btn" type="submit">Guardar clave</button>' +
-    (obligatorio ? '' : '<button class="btn sec" type="button" id="cancelarClave">Cancelar</button>') +
-    '<div class="err"></div></form>';
-  var f = document.getElementById('fClave');
-  if (!obligatorio) document.getElementById('cancelarClave').onclick = iniciar;
-  f.actual.focus();
+function pantallaClave(obligatorio) {
+  mostrarAuth('<form id="fClave"><h3>' + (obligatorio ? 'Elegí tu clave' : 'Cambiar clave') + '</h3>' +
+    '<div class="muted">' + (obligatorio ? 'Es tu primer ingreso o te blanquearon la clave. ' : '') + 'Mínimo 8 caracteres.</div>' +
+    '<label class="fl">Clave actual<input class="in" name="actual" type="password" autocomplete="current-password" required></label>' +
+    '<label class="fl">Clave nueva<input class="in" name="nueva" type="password" autocomplete="new-password" minlength="8" required></label>' +
+    '<label class="fl">Repetir clave nueva<input class="in" name="repetir" type="password" autocomplete="new-password" minlength="8" required></label>' +
+    '<button class="btn pri" type="submit">Guardar clave</button>' +
+    '<button class="btn ghost" type="button" id="volver">' + (obligatorio ? 'Salir' : 'Cancelar') + '</button><div class="err"></div></form>');
+  var f = $('fClave'); f.actual.focus();
+  $('volver').onclick = obligatorio ? salir : iniciar;
   f.onsubmit = function (e) {
     e.preventDefault();
     var err = f.querySelector('.err');
     if (f.nueva.value !== f.repetir.value) { err.textContent = 'Las claves nuevas no coinciden.'; return; }
     var b = f.querySelector('button'); b.disabled = true;
-    api('crmCambiarClave', f.actual.value, f.nueva.value).then(function () {
-      toast('Clave actualizada.'); iniciar();
-    }).catch(function (x) { b.disabled = false; err.textContent = x.message || x; });
+    api('crmCambiarClave', f.actual.value, f.nueva.value).then(function () { toast('Clave actualizada.'); iniciar(); })
+      .catch(function (x) { b.disabled = false; err.textContent = x.message || x; });
   };
 }
+function salir() {
+  var t = S.token; pantallaLogin('');
+  if (t) apiLibre('crmLogout', t).catch(function () {});
+}
 
-document.getElementById('salir').onclick = function () {
-  var t = S.token;
-  pantallaLogin('');
-  apiLibre('crmLogout', t).catch(function () {});
+// ---------- Arranque ----------
+try { S.token = localStorage.getItem('crmToken'); } catch (e) {}
+if (S.token) iniciar(); else pantallaLogin('');
+
+function iniciar() {
+  $('auth').hidden = true; $('app').hidden = false;
+  S.vista = 'cartera';
+  $('main').innerHTML = '<div class="vacio"><span class="cargando"></span>Cargando tu cartera…</div>';
+  api('crmInicio').then(function (ini) {
+    S.ini = ini;
+    $('yoAv').textContent = iniciales(ini.usuario.nombre);
+    $('yoNom').textContent = ini.usuario.nombre;
+    $('yoRol').textContent = ini.esSupervisor ? 'Supervisor' : 'Responsable';
+    armarNav(); encabezado();
+    return cargarCartera();
+  }).catch(function (e) {
+    if (e.sesion) return;
+    $('main').innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>';
+  });
+}
+$('salir').onclick = salir;
+$('buscar').oninput = function (e) {
+  S.filtro.texto = e.target.value; S.limite = 200;
+  clearTimeout(S._b); S._b = setTimeout(render, 200);
 };
 
+function cargarCartera() {
+  return api('crmListarCartera').then(function (planes) { S.planes = planes; armarNav(); render(); }).catch(error);
+}
+
 function armarNav() {
-  var vistas = [['cartera', S.ini.esSupervisor ? 'Carteras' : 'Mi cartera'], ['agenda', 'Agenda de hoy'], ['bajas', 'Rescindidos / bajas']];
-  if (S.ini.esSupervisor) vistas.push(['tablero', 'Tablero supervisor'], ['usuarios', 'Usuarios']);
-  vistas.push(['clave', 'Cambiar clave']);
-  document.getElementById('nav').innerHTML = vistas.map(function (v) {
-    return '<button data-v="' + v[0] + '" class="' + (S.vista === v[0] ? 'activo' : '') + '">' + v[1] + '</button>';
-  }).join('');
-  Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) {
+  var sup = S.ini.esSupervisor;
+  var agenda = S.planes.filter(function (p) { return esActiva(p) && p.agendaHoy; }).length;
+  var items = [['cartera', '▦', sup ? 'Carteras' : 'Mi cartera'], ['agenda', '◷', 'Agenda de hoy', agenda], ['bajas', '⊘', 'Rescindidos / bajas']];
+  var h = items.map(itemNav).join('');
+  if (sup) h += '<div class="sec">Supervisión</div>' + [['tablero', '▤', 'Tablero'], ['usuarios', '☺', 'Usuarios']].map(itemNav).join('');
+  h += '<div class="sec">Cuenta</div>' + itemNav(['clave', '⚿', 'Cambiar clave']);
+  $('nav').innerHTML = h;
+  cada('#nav .nav', null, function (b) {
     b.onclick = function () {
-      if (b.getAttribute('data-v') === 'clave') return pantallaCambioClave(false);
-      S.vista = b.getAttribute('data-v'); armarNav(); render();
+      var v = b.getAttribute('data-v');
+      if (v === 'clave') return pantallaClave(false);
+      S.vista = v; S.filtro.situacion = ''; S.limite = 200; armarNav(); encabezado(); render();
     };
   });
 }
-
-function cargarCartera() {
-  return api('crmListarCartera').then(function (planes) { S.planes = planes; render(); }).catch(error);
+function itemNav(it) {
+  return '<button class="nav' + (S.vista === it[0] ? ' on' : '') + '" data-v="' + it[0] + '"><span class="ic">' + it[1] + '</span><span class="tx">' + it[2] + '</span>' +
+    (it[3] ? '<span class="n">' + it[3] + '</span>' : '') + '</button>';
+}
+function encabezado() {
+  var d = new Date(), mes = MESES[d.getMonth()], sig = MESES[(d.getMonth() + 1) % 12];
+  var t = {
+    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear() + ' · en ' + sig + ' Fiat mide las cuotas ' + S.ini.cuotasFiat.join(', ')],
+    agenda: ['Agenda de hoy', 'Re-contactos agendados y promesas de pago vencidas sin pago'],
+    bajas: ['Rescindidos y bajas', 'Solo consulta: no entran en la cola de trabajo'],
+    tablero: ['Tablero supervisor', 'Avance del equipo y proyección de lo que mide Fiat'],
+    usuarios: ['Usuarios', 'Altas, roles, carteras y claves'],
+  }[S.vista];
+  $('titulo').textContent = t[0]; $('subtitulo').textContent = t[1];
+  $('buscar').hidden = S.vista === 'tablero' || S.vista === 'usuarios';
 }
 
 function render() {
-  var m = document.getElementById('main');
+  var m = $('main');
   if (S.vista === 'tablero') return renderTablero(m);
   if (S.vista === 'usuarios') return renderUsuarios(m);
   renderLista(m);
 }
 
-// ---------- Listas (cartera / agenda / bajas) ----------
-function planesDeVista() {
-  var f = S.filtro;
+// ---------- Cartera / agenda / bajas ----------
+function base() {
   return S.planes.filter(function (p) {
-    var activa = p.situacion.codigo !== 'RESCINDIDO' && p.situacion.codigo !== 'BAJA';
-    if (S.vista === 'cartera' && !activa) return false;
-    if (S.vista === 'bajas' && activa) return false;
-    if (S.vista === 'agenda' && !(activa && p.agendaHoy)) return false;
-    if (f.situacion && p.situacion.codigo !== f.situacion) return false;
+    if (S.filtro.resp && p.responsableEmail !== S.filtro.resp) return false;
+    if (S.vista === 'bajas') return !esActiva(p);
+    if (S.vista === 'agenda') return esActiva(p) && p.agendaHoy;
+    return esActiva(p);
+  });
+}
+function coincide(p, sit) {
+  if (!sit) return true;
+  if (sit === 'P34') return p.situacion.codigo === 'P3' || p.situacion.codigo === 'P4';
+  return p.situacion.codigo === sit;
+}
+function filtrados(lista) {
+  var f = S.filtro, t = f.texto.toLowerCase();
+  return lista.filter(function (p) {
+    if (!coincide(p, f.situacion)) return false;
     if (f.estado && p.estadoCaso !== f.estado) return false;
-    if (f.resp && p.responsableEmail !== f.resp) return false;
-    if (f.texto) {
-      var t = f.texto.toLowerCase();
-      if ((p.cliente + ' ' + p.solicitud + ' ' + p.telefono + ' ' + p.grupo).toLowerCase().indexOf(t) < 0) return false;
-    }
+    if (t && (p.cliente + ' ' + p.solicitud + ' ' + p.telefono + ' ' + p.grupo).toLowerCase().indexOf(t) < 0) return false;
     return true;
   }).sort(function (a, b) {
-    // Prioridad; dentro de la prioridad, primero los que hace más que no se gestionan.
-    return a.situacion.orden - b.situacion.orden ||
-      (a.ultimaGestion || '').localeCompare(b.ultimaGestion || '') ||
-      a.avance - b.avance;
+    // Prioridad; dentro de cada una, primero los que hace más que no se gestionan.
+    return a.situacion.orden - b.situacion.orden || (a.ultimaGestion || '').localeCompare(b.ultimaGestion || '') || a.avance - b.avance;
   });
+}
+function proximaAccion(p) {
+  var hoy = hoyStr();
+  if (p.promesaFecha && !p.situacion.cuotaMesPaga && esActiva(p)) {
+    if (p.promesaFecha < hoy) return '<span class="alerta">Promesa vencida ' + ddmm(p.promesaFecha) + '</span>';
+    if (p.promesaFecha === hoy) return '<span class="alerta">Promesa vence hoy</span>';
+  }
+  if (p.proximoContacto) return p.proximoContacto <= hoy ? '<span class="alerta">Contactar hoy</span>' : 'Re-contactar ' + ddmm(p.proximoContacto);
+  if (p.promesaFecha && p.promesaFecha > hoy) return 'Promesa ' + ddmm(p.promesaFecha);
+  if (esPrio(p) && !p.ultimaGestion) return '<span class="alerta">Nunca contactado</span>';
+  return '<span class="muted">—</span>';
 }
 
 function renderLista(m) {
-  var sup = S.ini.esSupervisor;
-  var lista = planesDeVista();
-  var base = S.planes.filter(function (p) {
-    return (!S.filtro.resp || p.responsableEmail === S.filtro.resp) &&
-      p.situacion.codigo !== 'RESCINDIDO' && p.situacion.codigo !== 'BAJA';
-  });
-  var cuenta = function (c) { return base.filter(function (p) { return p.situacion.codigo === c; }).length; };
-  var sinGestionPrio = base.filter(function (p) { return (p.situacion.codigo === 'P1' || p.situacion.codigo === 'P2') && !p.intentosMes; }).length;
-
-  var sit = S.ini.listas.situaciones;
-  var codigos = S.vista === 'bajas' ? ['RESCINDIDO', 'BAJA'] : ['P1', 'P2', 'P3', 'P4', 'AL_DIA'];
+  var sup = S.ini.esSupervisor, lista = base(), vis = filtrados(lista);
+  S.cola = vis.map(function (p) { return p.solicitud; });
+  var cuenta = function (c) { return lista.filter(function (p) { return coincide(p, c); }).length; };
   var h = '';
-  if (S.vista === 'cartera') {
-    h += '<div class="resumen">' + ['P1', 'P2', 'P3', 'P4', 'AL_DIA'].map(function (c) {
-      return '<div class="kpi" data-sit="' + c + '"><b>' + cuenta(c) + '</b><span>' + esc(sit[c].etiqueta) + '</span></div>';
-    }).join('') +
-      '<div class="kpi"><b class="' + (sinGestionPrio ? 'alerta' : '') + '">' + sinGestionPrio + '</b><span>P1+P2 sin gestión este mes</span></div></div>';
-  }
-  if (S.vista === 'agenda') h += '<p class="muted">Re-contactos agendados para hoy o antes, y promesas de pago vencidas cuya cuota del mes todavía no figura paga.</p>';
-  if (S.vista === 'bajas') h += '<p class="muted">Solo consulta: estos planes no entran en la cola de trabajo por ahora.</p>';
 
-  h += '<div class="filtros">' +
-    '<input id="fTexto" placeholder="Buscar cliente, solicitud, teléfono…" value="' + esc(S.filtro.texto) + '">' +
-    '<select id="fSit"><option value="">Todas las situaciones</option>' + codigos.map(function (c) {
-      return '<option value="' + c + '"' + (S.filtro.situacion === c ? ' selected' : '') + '>' + esc(sit[c].etiqueta) + '</option>';
-    }).join('') + '</select>' +
-    '<select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Todos los estados') + '</select>' +
+  if (S.vista === 'cartera') {
+    var prio = lista.filter(esPrio), hechos = prio.filter(function (p) { return p.intentosMes > 0; }).length;
+    var sinG = prio.length - hechos, fr = prio.length ? hechos / prio.length : 0;
+    var hoy = new Date(), fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate() - hoy.getDate();
+    var sinP1 = lista.filter(function (p) { return p.situacion.codigo === 'P1' && !p.intentosMes; }).length;
+    var sinP2 = lista.filter(function (p) { return p.situacion.codigo === 'P2' && !p.intentosMes; }).length;
+    var nombre = S.ini.usuario.nombre.split(' ').slice(-1)[0]; // "Godoy Santiago" → "Santiago"
+
+    h += '<div class="saludo"><span style="font-size:22px">' + (hoy.getHours() < 13 ? '☀️' : '👋') + '</span><div><b>' + (hoy.getHours() < 13 ? 'Buen día' : 'Hola') + ', ' + esc(nombre) + '</b>' +
+      '<div class="muted">' + (sinG ? 'Quedan <b>' + sinG + '</b> casos P1+P2 sin gestión este mes' : '¡Todos los P1+P2 tienen al menos una gestión este mes!') +
+      ' · faltan ' + fin + ' días para fin de mes.</div></div>' +
+      (S.cola.length ? '<button class="btn pri" id="empezar" style="margin-left:auto">Empezar por el primero →</button>' : '') + '</div>';
+    h += '<div class="kpis">' +
+      kpi('P1', 'P1 · Atrasados que mide Fiat', cuenta('P1'), sinP1 + ' sin gestión este mes', 'var(--p1)') +
+      kpi('P2', 'P2 · Cuota del mes (Fiat)', cuenta('P2'), sinP2 + ' sin gestión este mes', 'var(--p2)') +
+      kpi('P34', 'P3 / P4 · Resto de cartera', cuenta('P34'), 'mora general', 'var(--p3)') +
+      kpi('AL_DIA', 'Al día', cuenta('AL_DIA'), 'incluye la cuota del mes', 'var(--ok)') +
+      '<div class="kpi" style="border-top-color:var(--accent);cursor:default"><div class="l">Avance del mes (P1+P2)</div><div class="v">' + Math.round(fr * 100) + '%</div>' +
+      '<div class="meter"><i style="width:' + (fr * 100) + '%"></i></div></div></div>';
+  }
+
+  var tabs = S.vista === 'bajas' ? [['', 'Todos'], ['RESCINDIDO', 'Rescindidos'], ['BAJA', 'Bajas']]
+    : [['', 'Todos'], ['P1', 'P1'], ['P2', 'P2'], ['P3', 'P3'], ['P4', 'P4']].concat(S.vista === 'cartera' ? [['AL_DIA', 'Al día']] : []);
+  var nSel = Object.keys(S.seleccion).length;
+
+  h += '<div class="card">';
+  if (sup && nSel) {
+    h += '<div class="selbar"><b>' + nSel + ' seleccionado' + (nSel > 1 ? 's' : '') + '</b><span>Reasignar a</span><select id="reasDest">' +
+      S.ini.responsables.map(function (r) { return '<option value="' + esc(r.email) + '">' + esc(r.nombre) + '</option>'; }).join('') +
+      '</select><button class="btn sm pri" id="reasBtn">Reasignar</button><button class="btn sm ghost" id="reasNo" style="color:#c8d1e6">Limpiar</button></div>';
+  }
+  h += '<div class="bar">' + tabs.map(function (t) {
+    return '<button class="tab' + (S.filtro.situacion === t[0] ? ' on' : '') + '" data-sit="' + t[0] + '">' + t[1] + ' <small>' + (t[0] ? cuenta(t[0]) : lista.length) + '</small></button>';
+  }).join('') + '<div class="der"><select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Estado del caso: todos') + '</select>' +
     (sup ? '<select id="fResp"><option value="">Todos los responsables</option>' + S.ini.responsables.map(function (r) {
       return '<option value="' + esc(r.email) + '"' + (S.filtro.resp === r.email ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
-    }).join('') + '</select>' : '') +
-    '<span class="muted">' + lista.length + ' planes</span>' +
-    (sup ? '<span style="margin-left:auto">Reasignar seleccionados a <select id="reasDest">' + S.ini.responsables.map(function (r) {
-      return '<option value="' + esc(r.email) + '">' + esc(r.nombre) + '</option>';
-    }).join('') + '</select> <button class="btn sec" id="reasBtn">Reasignar</button></span>' : '') +
-    '<button class="btn sec" id="refrescar">Actualizar</button></div>';
+    }).join('') + '</select>' : '') + '<button class="btn sm" id="refrescar" title="Volver a leer BASE">↻ Actualizar</button></div></div>';
 
-  if (!lista.length) {
-    h += '<div class="tabla"><div class="vacio">No hay planes para mostrar.</div></div>';
+  if (!vis.length) {
+    h += '<div class="vacio">' + (S.vista === 'agenda' ? '🎉 No tenés nada agendado para hoy.' : 'No hay planes para mostrar con estos filtros.') + '</div>';
   } else {
-    h += '<div class="tabla"><table><thead><tr>' + (sup ? '<th><input type="checkbox" id="selTodos"></th>' : '') +
-      '<th>Situación</th><th>Solicitud</th><th>Cliente</th><th class="num">Avance</th><th class="num">Atrasadas</th>' +
-      '<th>Estado caso</th><th>Último contacto</th><th class="num">Intentos mes</th><th>Próx. contacto / promesa</th>' +
-      (sup ? '<th>Responsable</th>' : '') + '<th>Estado BASE</th></tr></thead><tbody>' +
-      lista.map(function (p) {
-        var vencido = p.agendaHoy ? ' class="alerta"' : '';
-        var prox = [p.proximoContacto && ('Contactar ' + p.proximoContacto), p.promesaFecha && ('Promesa ' + p.promesaFecha)].filter(Boolean).join(' · ');
+    h += '<div class="tw"><table><thead><tr>' + (sup ? '<th><input type="checkbox" id="selTodos"></th>' : '') +
+      '<th>Prioridad</th><th>Cliente</th><th>Avance</th><th>Cuotas C2 → C14</th><th>Estado del caso</th><th>Últ. contacto</th><th>Próxima acción</th>' +
+      (sup ? '<th>Responsable</th>' : '') + '</tr></thead><tbody>' +
+      vis.slice(0, S.limite).map(function (p) {
         return '<tr data-sol="' + esc(p.solicitud) + '">' +
           (sup ? '<td><input type="checkbox" class="sel" data-sol="' + esc(p.solicitud) + '"' + (S.seleccion[p.solicitud] ? ' checked' : '') + '></td>' : '') +
-          '<td>' + chip(p.situacion) + '</td><td>' + esc(p.solicitud) + '</td><td>' + esc(p.cliente) + '</td>' +
-          '<td class="num">' + esc(p.avance) + (p.situacion.medidoPorFiat ? ' <span class="tag">Fiat</span>' : '') + '</td>' +
-          '<td class="num">' + (p.situacion.cuotasAtrasadas || '') + '</td>' +
-          '<td>' + esc(p.estadoCaso) + '</td>' +
-          '<td>' + (p.ultimaGestion ? esc(p.ultimaGestion) + ' <span class="muted">' + esc(p.ultimoCanal) + '</span>' : '<span class="muted">—</span>') + '</td>' +
-          '<td class="num">' + (p.intentosMes || '') + '</td>' +
-          '<td' + vencido + '>' + esc(prox) + '</td>' +
-          (sup ? '<td>' + esc(p.responsableNombre) + '</td>' : '') +
-          '<td>' + esc(p.estadoBase) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+          '<td>' + pillSit(p.situacion, true) + '</td>' +
+          '<td class="cli"><b>' + esc(p.cliente) + '</b><span>Sol. ' + esc(p.solicitud) + ' · ' + esc(p.grupo) + '/' + esc(p.orden) + '</span></td>' +
+          '<td class="nowrap">' + esc(p.avance) + (p.situacion.medidoPorFiat ? '<span class="fiat">FIAT</span>' : '') + '</td>' +
+          '<td>' + miniCuotas(p) + '</td><td>' + pillCaso(p.estadoCaso) + '</td>' +
+          '<td class="nowrap">' + (p.ultimaGestion ? haceCuanto(p.ultimaGestion) + ' <span class="muted">· ' + esc(p.ultimoCanal) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+          '<td class="nowrap">' + proximaAccion(p) + '</td>' +
+          (sup ? '<td class="nowrap"><span class="avatar sm" style="background:' + colorDe(p.responsableEmail) + '">' + iniciales(p.responsableNombre) + '</span> ' + esc(p.responsableNombre) + '</td>' : '') + '</tr>';
+      }).join('') + '</tbody></table></div>' +
+      (vis.length > S.limite ? '<div class="mas"><button class="btn" id="mas">Mostrar más (' + (vis.length - S.limite) + ' restantes)</button></div>' : '');
   }
-  m.innerHTML = h;
+  m.innerHTML = h + '</div>';
 
-  var re = function () { render(); };
-  document.getElementById('fTexto').oninput = function (e) {
-    S.filtro.texto = e.target.value;
-    clearTimeout(re._t); re._t = setTimeout(function () { render(); var i = document.getElementById('fTexto'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250);
-  };
-  document.getElementById('fSit').onchange = function (e) { S.filtro.situacion = e.target.value; re(); };
-  document.getElementById('fEst').onchange = function (e) { S.filtro.estado = e.target.value; re(); };
-  if (sup) document.getElementById('fResp').onchange = function (e) { S.filtro.resp = e.target.value; re(); };
-  document.getElementById('refrescar').onclick = function () { toast('Actualizando…'); cargarCartera(); };
-  Array.prototype.forEach.call(m.querySelectorAll('.kpi[data-sit]'), function (k) {
-    k.onclick = function () { var c = k.getAttribute('data-sit'); S.filtro.situacion = S.filtro.situacion === c ? '' : c; re(); };
+  cada('.kpi[data-sit], .tab[data-sit]', m, function (b) {
+    b.onclick = function () { var c = b.getAttribute('data-sit'); S.filtro.situacion = S.filtro.situacion === c && b.classList.contains('kpi') ? '' : c; S.limite = 200; render(); };
   });
-  Array.prototype.forEach.call(m.querySelectorAll('tbody tr'), function (tr) {
-    tr.onclick = function (e) { if (e.target.type === 'checkbox') return; abrirFicha(tr.getAttribute('data-sol')); };
+  $('fEst').onchange = function (e) { S.filtro.estado = e.target.value; render(); };
+  if ($('fResp')) $('fResp').onchange = function (e) { S.filtro.resp = e.target.value; render(); };
+  $('refrescar').onclick = function () { toast('Actualizando…'); cargarCartera(); };
+  if ($('mas')) $('mas').onclick = function () { S.limite += 300; render(); };
+  if ($('empezar')) $('empezar').onclick = function () { abrirFicha(S.cola[0]); };
+  cada('tbody tr', m, function (tr) {
+    tr.onclick = function (e) { if (e.target.type !== 'checkbox') abrirFicha(tr.getAttribute('data-sol')); };
   });
   if (sup) {
-    Array.prototype.forEach.call(m.querySelectorAll('input.sel'), function (c) {
-      c.onchange = function () { if (c.checked) S.seleccion[c.getAttribute('data-sol')] = true; else delete S.seleccion[c.getAttribute('data-sol')]; };
+    cada('input.sel', m, function (c) {
+      c.onchange = function () { if (c.checked) S.seleccion[c.getAttribute('data-sol')] = 1; else delete S.seleccion[c.getAttribute('data-sol')]; render(); };
     });
-    var todos = document.getElementById('selTodos');
-    if (todos) todos.onchange = function () {
-      lista.forEach(function (p) { if (todos.checked) S.seleccion[p.solicitud] = true; else delete S.seleccion[p.solicitud]; });
-      re();
+    if ($('selTodos')) $('selTodos').onchange = function (e) {
+      vis.slice(0, S.limite).forEach(function (p) { if (e.target.checked) S.seleccion[p.solicitud] = 1; else delete S.seleccion[p.solicitud]; });
+      render();
     };
-    document.getElementById('reasBtn').onclick = function () {
-      var sols = Object.keys(S.seleccion);
-      if (!sols.length) return toast('Seleccioná al menos un plan.');
-      var dest = document.getElementById('reasDest').value;
-      api('crmReasignar', sols, dest).then(function (n) {
-        toast(n + ' plan(es) reasignados.'); S.seleccion = {}; return cargarCartera();
-      }).catch(error);
+    if ($('reasNo')) $('reasNo').onclick = function () { S.seleccion = {}; render(); };
+    if ($('reasBtn')) $('reasBtn').onclick = function () {
+      var sols = Object.keys(S.seleccion), b = this; b.disabled = true;
+      api('crmReasignar', sols, $('reasDest').value).then(function (n) {
+        toast('✔ ' + n + ' plan(es) reasignados.'); S.seleccion = {}; return cargarCartera();
+      }).catch(function (e) { b.disabled = false; error(e); });
     };
   }
+}
+function kpi(cod, l, v, h, color) {
+  return '<button class="kpi' + (S.filtro.situacion === cod ? ' on' : '') + '" data-sit="' + cod + '" style="border-top-color:' + color + '"><div class="l">' + l + '</div><div class="v">' + v + '</div><div class="h">' + h + '</div></button>';
 }
 
 // ---------- Ficha del plan ----------
 function abrirFicha(sol) {
-  var f = document.getElementById('ficha');
-  document.getElementById('fichaPanel').innerHTML = '<div class="vacio">Cargando plan ' + esc(sol) + '…</div>';
-  f.hidden = false;
-  api('crmFichaPlan', sol).then(renderFicha).catch(function (e) { f.hidden = true; error(e); });
+  $('ficha').hidden = false; S.fichaTab = 'gestionar';
+  $('dr').innerHTML = '<div class="vacio"><span class="cargando"></span>Abriendo plan ' + esc(sol) + '…</div>';
+  api('crmFichaPlan', sol).then(renderFicha).catch(function (e) { cerrarFicha(); error(e); });
 }
-document.getElementById('ficha').onclick = function (e) { if (e.target.id === 'ficha') cerrarFicha(); };
-document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarFicha(); });
-function cerrarFicha() { document.getElementById('ficha').hidden = true; }
+function cerrarFicha() { $('ficha').hidden = true; S.ficha = null; }
+$('ficha').onclick = function (e) { if (e.target.id === 'ficha') cerrarFicha(); };
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('ficha').hidden) cerrarFicha(); });
 
 function renderFicha(d) {
-  var p = d.plan, c = d.caso, L = S.ini.listas, sup = S.ini.esSupervisor;
-  var dato = function (t, v) { return '<div><span>' + t + '</span>' + (v === '' || v == null ? '—' : v) + '</div>'; };
-  var h = '<div style="display:flex;justify-content:space-between;gap:8px"><div><h2>' + esc(p.cliente) + '</h2>' +
-    chip(p.situacion) + ' <span class="tag">Estado BASE: ' + esc(p.estado) + '</span> <span class="tag">Caso: ' + esc(c.estadoCaso) + '</span>' +
-    '</div><button class="btn sec" id="cerrar">Cerrar</button></div>';
+  S.ficha = d;
+  var p = d.plan, c = d.caso, i = S.cola.indexOf(p.solicitud);
+  var tel = String(p.telefono || '').replace(/\D/g, ''), tel2 = String(p.telefonoAlt || '').replace(/\D/g, '');
+  var h = '<div class="dr-h"><div class="row" style="justify-content:space-between"><div class="dr-nav">' +
+    (i >= 0 ? '<button class="btn sm" id="ant"' + (i === 0 ? ' disabled' : '') + '>‹</button> ' + (i + 1) + ' de ' + S.cola.length + ' <button class="btn sm" id="sig"' + (i === S.cola.length - 1 ? ' disabled' : '') + '>›</button>' : '') +
+    '</div><button class="btn ghost sm" id="cerrar" title="Cerrar (Esc)">✕</button></div>' +
+    '<h2>' + esc(p.cliente) + '</h2><div class="row">' + pillSit(p.situacion) + pillCaso(c.estadoCaso || 'Sin gestionar') + '<span class="pill caso sin">' + esc(p.estado) + '</span></div>' +
+    '<div class="muted" style="margin-top:8px">Sol. ' + esc(p.solicitud) + ' · Grupo ' + esc(p.grupo) + ' / Orden ' + esc(p.orden) + ' · Avance ' + esc(p.avance) +
+    (p.situacion.medidoPorFiat ? ' · <b style="color:var(--accent)">Fiat mide la cuota ' + esc(p.avance) + ' el mes próximo</b>' : '') + '</div>' +
+    '<div class="row" style="margin-top:12px">' +
+    (tel ? '<a class="btn pri" href="tel:' + tel + '" target="_blank">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>' : '<span class="muted">Sin teléfono cargado</span>') +
+    (tel2 ? '<a class="btn" href="tel:' + tel2 + '" target="_blank">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : '') + '</div></div>' +
+    '<div class="dr-tabs">' + [['gestionar', 'Gestionar'], ['datos', 'Datos del plan'], ['historial', 'Historial (' + (d.gestiones.length + p.notasBase.length) + ')']].map(function (t) {
+      return '<button data-t="' + t[0] + '" class="' + (S.fichaTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>';
+    }).join('') + '</div><div class="dr-b" id="drb"></div>';
+  $('dr').innerHTML = h;
+  $('cerrar').onclick = cerrarFicha;
+  if ($('ant')) $('ant').onclick = function () { abrirFicha(S.cola[i - 1]); };
+  if ($('sig')) $('sig').onclick = function () { abrirFicha(S.cola[i + 1]); };
+  cada('.dr-tabs button', $('dr'), function (b) { b.onclick = function () { S.fichaTab = b.getAttribute('data-t'); renderFicha(S.ficha); }; });
+  ({ gestionar: tabGestionar, datos: tabDatos, historial: tabHistorial })[S.fichaTab](d, $('drb'), i);
+}
 
-  h += '<div class="grid">' +
-    dato('Solicitud', esc(p.solicitud)) + dato('Grupo / Orden', esc(p.grupo) + ' / ' + esc(p.orden)) +
-    dato('Documento', esc(p.documento)) + dato('Teléfono', telLinks(p.telefono)) +
-    dato('Teléfono alternativo', telLinks(p.telefonoAlt)) + dato('Modelo', esc(p.modelo)) +
-    dato('Avance', esc(p.avance) + (p.situacion.medidoPorFiat ? ' — Fiat mide la cuota ' + esc(p.avance) + ' el mes próximo' : '')) +
-    dato('Forma de pago', esc(p.formaPago)) + dato('Tipo de plan', esc(p.tipoPlan)) +
-    dato('Sobrepauta / cuota pactada', esc(p.sobrepauta)) +
-    dato('Vendedor / Supervisor venta', esc(p.vendedor) + ' / ' + esc(p.supervisorVenta)) +
-    dato('Responsable', esc(p.responsableNombre)) + '</div>';
+function cuotasGrandes(p) {
+  return '<div class="cuotas">' + p.cuotas.map(function (v, k) {
+    var n = k + 2, mes = n === p.avance;
+    return '<div class="cu ' + esc(v) + (mes ? ' M' : '') + '" title="' + (mes ? 'Cuota del mes en curso' : '') + '">C' + n + '<b>' + (esc(v) || (mes ? 'mes' : '·')) + '</b></div>';
+  }).join('') + '</div>';
+}
 
-  h += '<div class="scoring"><span>Scoring (col. AG)</span>' + (esc(p.scoring) || '<span class="muted">Sin scoring cargado</span>') + '</div>';
+function tabGestionar(d, el, i) {
+  var p = d.plan, c = d.caso, L = S.ini.listas;
+  var sig = i >= 0 && i < S.cola.length - 1;
+  var h = '<h4>Cuotas</h4>' + cuotasGrandes(p) +
+    '<form id="fG"><h4>¿Por dónde fue el contacto?</h4><div class="chips" data-campo="canal">' + L.canales.map(function (x, k) {
+      return '<button type="button" class="chip' + (k === 0 ? ' on' : '') + '" data-v="' + esc(x) + '">' + (ICONO_CANAL[x] || '') + ' ' + esc(x.replace(' (solo actualización)', '')) + '</button>';
+    }).join('') + '</div>' +
+    '<h4>¿Qué pasó?</h4><div class="chips" data-campo="resultado">' + L.resultados.filter(function (x) { return x !== 'N/A'; }).map(function (x) {
+      return '<button type="button" class="chip" data-v="' + esc(x) + '">' + (ICONO_RES[x] || '') + ' ' + esc(x) + '</button>';
+    }).join('') + '</div>' +
+    '<div class="f2"><label class="fl">Estado del caso<select class="in" name="estadoCaso">' + opciones(L.estadosCaso, c.estadoCaso && c.estadoCaso !== 'Sin gestionar' ? c.estadoCaso : 'Contactando') + '</select></label>' +
+    '<label class="fl">Motivo de no pago<select class="in" name="motivo">' + opciones(L.motivos, c.motivo || '') + '</select></label>' +
+    '<div class="full promesa" id="bPromesa"><div class="f2"><label class="fl">🤝 Promete pagar el<input class="in" type="date" name="promesaFecha" value="' + esc(c.promesaFecha || '') + '"></label>' +
+    '<label class="fl">Monto prometido<input class="in" type="number" min="0" step="any" name="promesaMonto" placeholder="$" value="' + esc(c.promesaMonto || '') + '"></label></div></div>' +
+    '<label class="fl">Próximo contacto<input class="in" type="date" name="proximoContacto" min="' + hoyStr() + '">' +
+    '<span class="atajos"><button type="button" class="btn sm" data-d="1">Mañana</button><button type="button" class="btn sm" data-d="3">+3 días</button><button type="button" class="btn sm" data-d="7">+1 semana</button></span></label>' +
+    '<div></div><label class="fl full">Nota<textarea class="in" name="nota" placeholder="Qué se habló, qué quedó pactado…"></textarea></label></div>' +
+    '<div class="acciones">' + (sig ? '<button class="btn" type="submit" data-sig="0">Guardar</button><button class="btn pri" type="submit" data-sig="1">Guardar y siguiente →</button>'
+      : '<button class="btn pri" type="submit" data-sig="0">Guardar gestión</button>') + '</div></form>';
 
-  h += '<div class="muted" style="font-size:12px">Cuotas (C2…C14). Recuadrada: cuota del mes en curso.</div><div class="cuotas">' +
-    p.cuotas.map(function (v, i) {
-      var n = i + 2;
-      return '<div class="cuota c-' + esc(v) + (n === p.avance ? ' c-mes' : '') + '">C' + n + '<b>' + (esc(v) || '·') + '</b></div>';
-    }).join('') + '</div>';
+  var ult = d.gestiones.slice(0, 3);
+  if (ult.length) h += '<div style="margin-top:22px"><h4>Últimos contactos</h4><div class="tl">' + ult.map(eventoGestion).join('') + '</div></div>';
+  if (S.ini.esSupervisor) h += bloqueReasignar(p);
+  el.innerHTML = h;
 
-  if (sup) {
-    h += '<div class="filtros">Reasignar a <select id="fichaResp">' + S.ini.responsables.map(function (r) {
-      return '<option value="' + esc(r.email) + '"' + (r.email === p.responsableEmail ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
-    }).join('') + '</select><button class="btn sec" id="fichaReas">Reasignar</button></div>';
-  }
-
-  h += '<section class="bloque"><h3>Registrar gestión</h3><form id="fGestion" class="form">' +
-    '<label>Canal<select name="canal" required>' + opciones(L.canales, 'Llamada') + '</select></label>' +
-    '<label>Resultado<select name="resultado">' + opciones(L.resultados, '') + '</select></label>' +
-    '<label>Estado del caso<select name="estadoCaso" required>' + opciones(L.estadosCaso, c.estadoCaso || 'Contactando') + '</select></label>' +
-    '<label>Motivo de no pago<select name="motivo">' + opciones(L.motivos, c.motivo || '') + '</select></label>' +
-    '<label>Fecha promesa de pago<input type="date" name="promesaFecha" value="' + esc(c.promesaFecha || '') + '"></label>' +
-    '<label>Monto prometido<input type="number" name="promesaMonto" min="0" step="any" value="' + esc(c.promesaMonto || '') + '"></label>' +
-    '<label>Próximo contacto<input type="date" name="proximoContacto" min="' + hoy() + '"></label>' +
-    '<label class="ancho">Nota<textarea name="nota" placeholder="Qué se habló, qué quedó pactado…"></textarea></label>' +
-    '<div class="ancho"><button class="btn" type="submit">Guardar gestión</button></div></form></section>';
-
-  h += '<section class="bloque"><h3>Historial de gestiones (' + d.gestiones.length + ')</h3>' +
-    (d.gestiones.length ? d.gestiones.map(function (g) {
-      return '<div class="gestion"><div class="cab">' + esc(g.fechaHora) + ' · ' + esc(g.usuario) + ' · ' + esc(g.canal) +
-        (g.resultado ? ' · ' + esc(g.resultado) : '') + ' → <b>' + esc(g.estadoCaso) + '</b></div>' +
-        (g.motivo ? '<div>Motivo: ' + esc(g.motivo) + '</div>' : '') +
-        (g.promesaFecha ? '<div>Promesa: ' + esc(g.promesaFecha) + (g.promesaMonto ? ' por $' + esc(g.promesaMonto) : '') + '</div>' : '') +
-        (g.proximoContacto ? '<div>Próximo contacto: ' + esc(g.proximoContacto) + '</div>' : '') +
-        (g.nota ? '<div>' + esc(g.nota) + '</div>' : '') + '</div>';
-    }).join('') : '<div class="muted">Todavía no hay gestiones registradas en el CRM.</div>') + '</section>';
-
-  if (p.notasBase.length) {
-    h += '<section class="bloque"><details><summary>Notas anteriores de la planilla (' + p.notasBase.length + ')</summary>' +
-      p.notasBase.map(function (n) { return '<div class="gestion"><div class="cab">' + esc(n.columna) + '</div>' + esc(n.valor) + '</div>'; }).join('') +
-      '</details></section>';
-  }
-
-  var panel = document.getElementById('fichaPanel');
-  panel.innerHTML = h;
-  panel.scrollTop = 0;
-  document.getElementById('cerrar').onclick = cerrarFicha;
-  document.getElementById('fGestion').onsubmit = function (e) {
+  var f = $('fG'), datos = { canal: L.canales[0], resultado: '' };
+  cada('.chips', f, function (grupo) {
+    cada('.chip', grupo, function (ch) {
+      ch.onclick = function () {
+        var campo = grupo.getAttribute('data-campo');
+        cada('.chip', grupo, function (x) { x.classList.remove('on'); });
+        if (datos[campo] === ch.getAttribute('data-v') && campo === 'resultado') { datos[campo] = ''; return; }
+        ch.classList.add('on'); datos[campo] = ch.getAttribute('data-v');
+        if (campo === 'resultado') sugerirEstado(f, datos[campo]);
+      };
+    });
+  });
+  var mostrarPromesa = function () { $('bPromesa').hidden = f.estadoCaso.value !== 'Promesa de pago'; };
+  f.estadoCaso.onchange = mostrarPromesa; mostrarPromesa();
+  cada('.atajos button', f, function (b) { b.onclick = function () { f.proximoContacto.value = hoyStr(Number(b.getAttribute('data-d'))); }; });
+  f.onsubmit = function (e) {
     e.preventDefault();
-    var form = e.target, datos = {};
-    Array.prototype.forEach.call(form.elements, function (el) { if (el.name) datos[el.name] = el.value; });
-    var btn = form.querySelector('button'); btn.disabled = true; btn.textContent = 'Guardando…';
-    api('crmRegistrarGestion', p.solicitud, datos).then(function (d2) {
-      toast('Gestión guardada.'); renderFicha(d2); cargarCartera();
-    }).catch(function (err) { btn.disabled = false; btn.textContent = 'Guardar gestión'; error(err); });
+    var siguiente = e.submitter && e.submitter.getAttribute('data-sig') === '1';
+    var envio = {
+      canal: datos.canal, resultado: datos.resultado, estadoCaso: f.estadoCaso.value, motivo: f.motivo.value,
+      promesaFecha: f.estadoCaso.value === 'Promesa de pago' ? f.promesaFecha.value : '',
+      promesaMonto: f.estadoCaso.value === 'Promesa de pago' ? f.promesaMonto.value : '',
+      proximoContacto: f.proximoContacto.value, nota: f.nota.value,
+    };
+    cada('button[type=submit]', f, function (b) { b.disabled = true; });
+    api('crmRegistrarGestion', p.solicitud, envio).then(function (d2) {
+      toast('✔ Gestión guardada');
+      cargarCartera();
+      if (siguiente) abrirFicha(S.cola[i + 1]); else { S.fichaTab = 'gestionar'; renderFicha(d2); }
+    }).catch(function (x) { cada('button[type=submit]', f, function (b) { b.disabled = false; }); error(x); });
   };
-  if (sup) document.getElementById('fichaReas').onclick = function () {
-    api('crmReasignar', [p.solicitud], document.getElementById('fichaResp').value).then(function () {
-      toast('Plan reasignado.'); abrirFicha(p.solicitud); cargarCartera();
+  enlazarReasignar(p);
+}
+// Sugiere un estado del caso según el resultado del contacto (se puede cambiar).
+function sugerirEstado(f, res) {
+  var mapa = { 'Atendió': 'Contactado', 'Respondió mensaje': 'Contactado', 'No atendió': 'Contactando', 'Buzón / apagado': 'Contactando', 'Mensaje enviado': 'Contactando', 'Número erróneo': 'Inubicable' };
+  if (mapa[res] && f.estadoCaso.value !== 'Promesa de pago') { f.estadoCaso.value = mapa[res]; f.estadoCaso.onchange(); }
+}
+
+function tabDatos(d, el) {
+  var p = d.plan;
+  var dato = function (t, v) { return '<div><span>' + t + '</span>' + (v === '' || v == null ? '—' : esc(v)) + '</div>'; };
+  el.innerHTML = '<div class="datos">' + dato('Solicitud', p.solicitud) + dato('Grupo / Orden', p.grupo + ' / ' + p.orden) + dato('Documento', p.documento) +
+    dato('Modelo', p.modelo) + dato('Tipo de plan', p.tipoPlan) + dato('Forma de pago', p.formaPago) + dato('Sobrepauta / cuota pactada', p.sobrepauta) +
+    dato('Estado en BASE', p.estado) + dato('Vendedor', p.vendedor) + dato('Supervisor de venta', p.supervisorVenta) +
+    dato('Teléfono', p.telefono) + dato('Teléfono alternativo', p.telefonoAlt) + dato('Responsable', p.responsableNombre) + '</div>' +
+    '<div class="scoring"><h4>Scoring (col. AG)</h4>' + (esc(p.scoring) || '<span class="muted">Sin scoring cargado.</span>') + '</div>' +
+    '<div style="margin-top:18px"><h4>Cuotas</h4>' + cuotasGrandes(p) + '</div>' + (S.ini.esSupervisor ? bloqueReasignar(p) : '');
+  enlazarReasignar(p);
+}
+
+function eventoGestion(g) {
+  var clase = ['Atendió', 'Respondió mensaje'].indexOf(g.resultado) >= 0 ? 'ok' : (g.resultado ? 'no' : '');
+  return '<div class="ev ' + clase + '"><div class="t">' + esc(g.fechaHora) + ' · ' + esc(g.usuario) + ' · ' + (ICONO_CANAL[g.canal] || '') + ' ' + esc(g.canal) +
+    (g.resultado ? ' · ' + esc(g.resultado) : '') + '</div><div class="x"><b>' + esc(g.estadoCaso) + '</b>' +
+    (g.motivo ? ' · ' + esc(g.motivo) : '') + (g.promesaFecha ? ' · promete ' + ddmm(g.promesaFecha) + (g.promesaMonto ? ' por ' + plata(g.promesaMonto) : '') : '') +
+    (g.proximoContacto ? ' · volver a llamar ' + ddmm(g.proximoContacto) : '') + (g.nota ? '\n' + esc(g.nota) : '') + '</div></div>';
+}
+function tabHistorial(d, el) {
+  var p = d.plan, h = '';
+  h += '<h4>Gestiones en el CRM (' + d.gestiones.length + ')</h4>' + (d.gestiones.length ? '<div class="tl">' + d.gestiones.map(eventoGestion).join('') + '</div>' : '<p class="muted">Todavía no hay gestiones registradas en el CRM.</p>');
+  if (p.notasBase.length) {
+    h += '<h4 style="margin-top:22px">Seguimiento anterior de la planilla (' + p.notasBase.length + ')</h4><div class="tl">' + p.notasBase.map(function (n) {
+      return '<div class="ev vieja"><div class="t">📄 ' + esc(n.columna) + '</div><div class="x">' + esc(n.valor) + '</div></div>';
+    }).join('') + '</div>';
+  }
+  el.innerHTML = h;
+}
+
+function bloqueReasignar(p) {
+  return '<div style="margin-top:22px;padding-top:16px;border-top:1px solid var(--line)"><h4>Responsable del plan</h4><div class="row"><select class="in" id="fichaResp" style="width:auto">' +
+    S.ini.responsables.map(function (r) { return '<option value="' + esc(r.email) + '"' + (r.email === p.responsableEmail ? ' selected' : '') + '>' + esc(r.nombre) + '</option>'; }).join('') +
+    '</select><button class="btn" id="fichaReas">Reasignar</button></div></div>';
+}
+function enlazarReasignar(p) {
+  if (!$('fichaReas')) return;
+  $('fichaReas').onclick = function () {
+    api('crmReasignar', [p.solicitud], $('fichaResp').value).then(function () {
+      toast('✔ Plan reasignado'); abrirFicha(p.solicitud); cargarCartera();
     }).catch(error);
   };
 }
 
 // ---------- Tablero supervisor ----------
-function pct(x) { return (x * 100).toFixed(1) + '%'; }
 function renderTablero(m) {
-  m.innerHTML = '<div class="vacio">Calculando tablero…</div>';
+  m.innerHTML = '<div class="vacio"><span class="cargando"></span>Calculando tablero…</div>';
   api('crmTableroSupervisor').then(function (t) {
-    var h = '<h3>Qué va a medir Fiat el mes que viene (si nada cambia)</h3>' +
-      '<p class="muted">Planes que hoy están en el avance de cada cuota. "Piso": rescindidos + cuotas vencidas impagas (ya es mora salvo que se regularice). "Si nadie más paga": suma además los que todavía no pagaron la cuota del mes.</p>' +
-      '<div class="tabla"><table><thead><tr><th>Cuota</th><th class="num">Cartera total</th><th class="num">Rescindidos</th><th class="num">P1 atrasados</th><th class="num">P2 cuota mes pendiente</th><th class="num">% mora piso</th><th class="num">% si nadie más paga</th></tr></thead><tbody>' +
-      t.proyeccion.map(function (r) {
-        return '<tr><td>Cuota ' + r.cuota + '</td><td class="num">' + r.carteraTotal + '</td><td class="num">' + r.rescindidos + '</td><td class="num">' + r.atrasados +
-          '</td><td class="num">' + r.mesPendiente + '</td><td class="num">' + pct(r.pctPiso) + '</td><td class="num">' + pct(r.pctSiNadiePaga) + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+    var sum = function (arr, k) { return arr.reduce(function (a, x) { return a + (x[k] || 0); }, 0); };
+    var R = t.porResponsable, P = t.proyeccion;
+    var tot = sum(P, 'carteraTotal'), piso = tot ? (sum(P, 'rescindidos') + sum(P, 'atrasados')) / tot : 0;
+    var gest = sum(R, 'prioGestionados'), sinG = sum(R, 'prioSinGestion'), intentos = sum(R, 'intentosMes'), efect = sum(R, 'efectivosMes');
+    var h = '<div class="kp4">' +
+      '<div class="k"><div class="muted">Mora proyectada Fiat (piso)</div><div class="v">' + pct(piso) + '</div><div class="muted" style="font-size:12px">cuotas ' + S.ini.cuotasFiat.join(', ') + ' · si nadie regulariza</div></div>' +
+      '<div class="k"><div class="muted">P1 + P2 gestionados</div><div class="v">' + (gest + sinG ? Math.round(gest / (gest + sinG) * 100) : 0) + '%</div><div class="muted" style="font-size:12px">' + gest + ' de ' + (gest + sinG) + '</div></div>' +
+      '<div class="k"><div class="muted">Promesas vigentes</div><div class="v">' + sum(R, 'promesasVigentes') + '</div><div class="' + (sum(R, 'promesasVencidas') ? 'alerta' : 'muted') + '" style="font-size:12px">' + sum(R, 'promesasVencidas') + ' vencidas sin pago</div></div>' +
+      '<div class="k"><div class="muted">Contactos efectivos del mes</div><div class="v">' + efect + '</div><div class="muted" style="font-size:12px">de ' + intentos + ' intentos' + (intentos ? ' · ' + Math.round(efect / intentos * 100) + '%' : '') + '</div></div></div>';
 
-    h += '<h3 style="margin-top:24px">Avance por responsable (mes en curso)</h3><div class="tabla"><table><thead><tr>' +
-      '<th>Responsable</th><th class="num">Cartera activa</th><th class="num">P1</th><th class="num">P2</th><th class="num">P3+P4</th>' +
-      '<th>P1+P2 gestionados</th><th class="num">P1+P2 sin gestión</th><th class="num">Intentos</th><th class="num">Contactos efectivos</th>' +
-      '<th class="num">Promesas vigentes</th><th class="num">Promesas vencidas</th><th class="num">Gestionados hoy al día</th><th class="num">Rescindidos/bajas</th></tr></thead><tbody>' +
-      t.porResponsable.map(function (r) {
-        var tot = r.prioGestionados + r.prioSinGestion, fr = tot ? r.prioGestionados / tot : 0;
-        return '<tr><td>' + esc(r.nombre) + '</td><td class="num">' + r.activa + '</td><td class="num">' + r.p1 + '</td><td class="num">' + r.p2 +
-          '</td><td class="num">' + r.p34 + '</td><td><div style="display:flex;gap:6px;align-items:center"><div class="barra"><i style="width:' + (fr * 100) + '%"></i></div>' + pct(fr) + '</div></td>' +
-          '<td class="num' + (r.prioSinGestion ? ' alerta' : '') + '">' + r.prioSinGestion + '</td><td class="num">' + r.intentosMes + '</td><td class="num">' + r.efectivosMes +
-          '</td><td class="num">' + r.promesasVigentes + '</td><td class="num' + (r.promesasVencidas ? ' alerta' : '') + '">' + r.promesasVencidas +
-          '</td><td class="num">' + r.regularizadosConGestion + '</td><td class="num">' + r.bajas + '</td></tr>';
-      }).join('') + '</tbody></table></div>';
+    var maxPct = Math.max.apply(null, P.map(function (r) { return r.pctSiNadiePaga; }).concat([0.05]));
+    h += '<div class="g2"><div class="card"><div class="card-h"><h3>Qué va a medir Fiat el mes próximo</h3><div class="d">Planes que hoy están en el avance de cada cuota. Rojo: ya es mora salvo que se regularice. Amarillo: se suma si no pagan la cuota del mes.</div></div><div class="pad">' +
+      P.map(function (r) {
+        var a = r.pctPiso / maxPct * 100, b = (r.pctSiNadiePaga - r.pctPiso) / maxPct * 100;
+        return '<div class="br"><b>Cuota ' + r.cuota + '</b><div class="track" title="' + r.carteraTotal + ' planes · ' + r.rescindidos + ' rescindidos · ' + r.atrasados + ' atrasados · ' + r.mesPendiente + ' con la cuota del mes pendiente">' +
+          '<i class="a" style="width:' + a + '%"></i><i class="b" style="left:' + a + '%;width:' + b + '%"></i></div><span>' + pct(r.pctPiso) + ' → ' + pct(r.pctSiNadiePaga) + '</span></div>';
+      }).join('') + '<div class="lg"><span><i style="background:#f97066"></i>Rescindidos + atrasados</span><span><i style="background:#fec84b"></i>Cuota del mes pendiente</span></div></div></div>';
 
-    var dias = Object.keys(t.actividad).sort().reverse();
-    var quienes = {};
+    var dias = Object.keys(t.actividad).sort(), quienes = {};
     dias.forEach(function (d) { Object.keys(t.actividad[d]).forEach(function (q) { quienes[q] = 1; }); });
     quienes = Object.keys(quienes).sort();
-    h += '<h3 style="margin-top:24px">Gestiones por día (últimos 14 días)</h3>' + (dias.length
-      ? '<div class="tabla"><table><thead><tr><th>Día</th>' + quienes.map(function (q) { return '<th class="num">' + esc(q) + '</th>'; }).join('') + '</tr></thead><tbody>' +
-        dias.map(function (d) {
-          return '<tr><td>' + d + '</td>' + quienes.map(function (q) { return '<td class="num">' + (t.actividad[d][q] || '') + '</td>'; }).join('') + '</tr>';
-        }).join('') + '</tbody></table></div>'
-      : '<div class="tabla"><div class="vacio">Sin gestiones en los últimos 14 días.</div></div>');
+    var colorQ = function (q) { var r = S.ini.responsables.filter(function (x) { return x.nombre === q; })[0]; return r ? colorDe(r.email) : COLORES[(quienes.indexOf(q) + 3) % COLORES.length]; };
+    var maxDia = Math.max.apply(null, dias.map(function (d) { return Object.keys(t.actividad[d]).reduce(function (a, q) { return a + t.actividad[d][q]; }, 0); }).concat([1]));
+    h += '<div class="card"><div class="card-h"><h3>Gestiones por día</h3><div class="d">Últimos 14 días, por responsable</div></div><div class="pad">' +
+      (dias.length ? '<div class="cols">' + dias.map(function (d) {
+        var tot = 0;
+        var segs = quienes.map(function (q) { var n = t.actividad[d][q] || 0; tot += n; return n ? '<i style="height:' + (n / maxDia * 120) + 'px;background:' + colorQ(q) + '" title="' + esc(q) + ': ' + n + '"></i>' : ''; }).join('');
+        return '<div class="col" title="' + ddmm(d) + ': ' + tot + ' gestiones">' + segs + '<span>' + ddmm(d) + '</span></div>';
+      }).join('') + '</div><div class="lg">' + quienes.map(function (q) { return '<span><i style="background:' + colorQ(q) + '"></i>' + esc(q) + '</span>'; }).join('') + '</div>'
+        : '<div class="vacio">Todavía no hay gestiones en los últimos 14 días.</div>') + '</div></div></div>';
+
+    R.sort(function (a, b) { return b.prioSinGestion - a.prioSinGestion; });
+    h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Equipo · mes en curso</h3><div class="d">Ordenado por casos P1+P2 sin gestión</div></div><div class="tw" style="padding:6px 4px 8px"><table><thead><tr>' +
+      '<th>Responsable</th><th>Cartera activa</th><th>P1</th><th>P2</th><th>P3+P4</th><th>P1+P2 gestionados</th><th>Sin gestión</th><th>Intentos</th><th>Efectivos</th><th>Promesas vig. / venc.</th><th>Gestionados y hoy al día</th><th>Rescind./bajas</th></tr></thead><tbody>' +
+      R.map(function (r) {
+        var tt = r.prioGestionados + r.prioSinGestion, fr = tt ? r.prioGestionados / tt : 0;
+        var rr = S.ini.responsables.filter(function (x) { return x.nombre === r.nombre; })[0];
+        return '<tr style="cursor:default"><td class="nowrap"><span class="avatar sm" style="background:' + (rr ? colorDe(rr.email) : '#98a2b3') + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
+          '<td>' + r.activa + '</td><td>' + r.p1 + '</td><td>' + r.p2 + '</td><td>' + r.p34 + '</td>' +
+          '<td><div class="pr"><div class="t"><i style="width:' + fr * 100 + '%"></i></div>' + Math.round(fr * 100) + '%</div></td>' +
+          '<td class="' + (r.prioSinGestion ? 'alerta' : '') + '">' + r.prioSinGestion + '</td><td>' + r.intentosMes + '</td><td>' + r.efectivosMes + '</td>' +
+          '<td>' + r.promesasVigentes + ' / <span class="' + (r.promesasVencidas ? 'alerta' : '') + '">' + r.promesasVencidas + '</span></td><td>' + r.regularizadosConGestion + '</td><td>' + r.bajas + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
     m.innerHTML = h;
-  }).catch(function (e) { m.innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>'; });
+  }).catch(function (e) { if (!e.sesion) m.innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>'; });
 }
 
-// ---------- Usuarios (supervisor) ----------
+// ---------- Usuarios ----------
 function renderUsuarios(m) {
-  m.innerHTML = '<div class="vacio">Cargando usuarios…</div>';
+  m.innerHTML = '<div class="vacio"><span class="cargando"></span>Cargando usuarios…</div>';
   api('crmListarUsuarios').then(function (us) { dibujarUsuarios(m, us); }).catch(error);
 }
 function dibujarUsuarios(m, us) {
   var fila = function (u, nuevo) {
-    return '<tr data-email="' + esc(u.email) + '">' +
-      '<td>' + (nuevo ? '<input name="email" placeholder="email@grupoantun.com.ar">' : esc(u.email)) + '</td>' +
-      '<td><input name="nombre" value="' + esc(u.nombre) + '"></td>' +
-      '<td><select name="rol">' + opciones(['RESPONSABLE', 'SUPERVISOR'], u.rol) + '</select></td>' +
-      '<td><input name="alias" size="8" value="' + esc(u.alias) + '" title="Cómo figura en la columna RESPONSABLE de BASE"></td>' +
-      '<td><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '></td>' +
-      '<td>' + (nuevo ? '<span class="muted">Clave inicial</span>' : u.debeCambiarClave ? '<span class="muted">Pendiente de cambio</span>' : 'Personal') + '</td>' +
-      '<td><button class="btn sec guardar">' + (nuevo ? 'Agregar' : 'Guardar') + '</button>' +
-      (nuevo ? '' : ' <button class="btn sec blanquear">Blanquear clave</button>') + '</td></tr>';
+    return '<tr data-email="' + esc(u.email) + '" style="cursor:default">' +
+      '<td class="nowrap">' + (nuevo ? '<input class="in" name="email" placeholder="nombre@grupoantun.com.ar">' : '<span class="avatar sm" style="background:' + (u.rol === 'SUPERVISOR' ? '#101a33' : colorDe(u.email)) + '">' + iniciales(u.nombre) + '</span> ' + esc(u.email)) + '</td>' +
+      '<td><input class="in" name="nombre" value="' + esc(u.nombre) + '" placeholder="Apellido Nombre"></td>' +
+      '<td><select class="in" name="rol">' + opciones(['RESPONSABLE', 'SUPERVISOR'], u.rol) + '</select></td>' +
+      '<td><input class="in" name="alias" style="width:90px" value="' + esc(u.alias) + '" title="Cómo figura en la columna RESPONSABLE de BASE"></td>' +
+      '<td style="text-align:center"><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '></td>' +
+      '<td class="nowrap">' + (nuevo ? '<span class="muted">Turin3800 inicial</span>' : u.debeCambiarClave ? '<span class="pill s-P2">Pendiente de cambio</span>' : '<span class="pill s-AL_DIA">Personal</span>') + '</td>' +
+      '<td class="nowrap"><button class="btn sm ' + (nuevo ? 'pri' : '') + ' guardar">' + (nuevo ? 'Agregar' : 'Guardar') + '</button>' +
+      (nuevo ? '' : ' <button class="btn sm blanquear">Blanquear clave</button>') + '</td></tr>';
   };
-  m.innerHTML = '<p class="muted">Solo mails @grupoantun.com.ar. Los usuarios nuevos y los blanqueos quedan con la clave inicial y deben cambiarla al ingresar. ' +
-    '"Alias BASE" es el nombre con el que el responsable figura en la columna RESPONSABLE de BASE (EZE, FABIO, SANTI): así se asigna su cartera automáticamente. Las reasignaciones hechas desde el CRM tienen prioridad sobre esa columna.</p>' +
-    '<div class="tabla"><table><thead><tr><th>Email</th><th>Nombre</th><th>Rol</th><th>Alias BASE</th><th>Activo</th><th>Clave</th><th></th></tr></thead><tbody>' +
-    us.map(function (u) { return fila(u, false); }).join('') +
-    fila({ email: '', nombre: '', rol: 'RESPONSABLE', alias: '', activo: true }, true) + '</tbody></table></div>';
-  Array.prototype.forEach.call(m.querySelectorAll('button.blanquear'), function (b) {
+  m.innerHTML = '<div class="card"><div class="card-h"><h3>Usuarios del CRM</h3><div class="d">Solo mails @grupoantun.com.ar. Las altas y los blanqueos quedan con la clave inicial y deben cambiarla al ingresar. ' +
+    '"Alias BASE" es cómo figura el responsable en la columna RESPONSABLE de BASE (EZE, FABIO, SANTI): así recibe su cartera. A los supervisores no se les asignan planes.</div></div>' +
+    '<div class="tw" style="padding:10px 4px"><table><thead><tr><th>Email</th><th>Nombre</th><th>Rol</th><th>Alias BASE</th><th>Activo</th><th>Clave</th><th></th></tr></thead><tbody>' +
+    us.map(function (u) { return fila(u, false); }).join('') + fila({ email: '', nombre: '', rol: 'RESPONSABLE', alias: '', activo: true }, true) + '</tbody></table></div></div>';
+  cada('button.blanquear', m, function (b) {
     b.onclick = function () {
       var email = b.closest('tr').getAttribute('data-email');
-      if (b.getAttribute('data-confirmar') !== '1') {
-        b.setAttribute('data-confirmar', '1'); b.textContent = '¿Confirmar blanqueo?'; return;
-      }
+      if (b.getAttribute('data-ok') !== '1') { b.setAttribute('data-ok', '1'); b.textContent = '¿Confirmar?'; b.classList.add('pri'); return; }
       b.disabled = true;
-      api('crmBlanquearClave', email).then(function (lista) {
-        toast('Clave de ' + email + ' blanqueada a la clave inicial.'); dibujarUsuarios(m, lista);
-      }).catch(function (e) { b.disabled = false; error(e); });
+      api('crmBlanquearClave', email).then(function (lista) { toast('✔ Clave de ' + email + ' blanqueada'); dibujarUsuarios(m, lista); })
+        .catch(function (e) { b.disabled = false; error(e); });
     };
   });
-  Array.prototype.forEach.call(m.querySelectorAll('button.guardar'), function (b) {
+  cada('button.guardar', m, function (b) {
     b.onclick = function () {
       var tr = b.closest('tr'), q = function (n) { return tr.querySelector('[name="' + n + '"]'); };
-      var datos = {
-        email: q('email') ? q('email').value : tr.getAttribute('data-email'),
-        nombre: q('nombre').value, rol: q('rol').value, alias: q('alias').value, activo: q('activo').checked,
-      };
+      var datos = { email: q('email') ? q('email').value : tr.getAttribute('data-email'), nombre: q('nombre').value, rol: q('rol').value, alias: q('alias').value, activo: q('activo').checked };
       b.disabled = true;
       api('crmGuardarUsuario', datos).then(function (lista) {
-        toast('Usuario guardado.'); dibujarUsuarios(m, lista);
+        toast('✔ Usuario guardado'); dibujarUsuarios(m, lista);
         return api('crmInicio').then(function (ini) { S.ini.responsables = ini.responsables; });
       }).catch(function (e) { b.disabled = false; error(e); });
     };
