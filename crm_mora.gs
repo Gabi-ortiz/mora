@@ -80,9 +80,20 @@ const CRM_CANALES = ['Llamada', 'WhatsApp', 'SMS', 'Mail', 'Presencial', 'Sin co
 const CRM_RESULTADOS = ['Atendió', 'No atendió', 'Buzón / apagado', 'Mensaje enviado',
   'Respondió mensaje', 'Número erróneo', 'N/A'];
 const CRM_RESULTADOS_EFECTIVOS = ['Atendió', 'Respondió mensaje'];
-const CRM_MOTIVOS_NO_PAGO = ['', 'Problemas económicos', 'Olvido', 'Esperaba adjudicar',
-  'Disconforme con aumento de cuota', 'Problema con débito / medio de pago',
-  'Garantías rechazadas', 'Quiere renunciar', 'Otro'];
+// Motivos de no pago: los códigos que ya usa el equipo (col. "ACT MOTIVO NO PAGO").
+const CRM_MOTIVOS_NO_PAGO = ['',
+  'P/E - Problemas económicos',
+  'S/C - Sin contacto',
+  'M/V - Mala venta',
+  'T/U - Toma de usado',
+  'P/P - Problemas personales',
+  'A/C - Área comercial',
+  'TR - Transferencia',
+  'T/P - Título propio',
+  'A/A - Área administrativa',
+  'S/G - Sin gestión',
+  'C/C - Cambio de concesionario',
+];
 
 // Situación de cada plan según BASE (ver crmSituacion). "orden" define la
 // prioridad en la cola de trabajo.

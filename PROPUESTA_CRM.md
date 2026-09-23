@@ -117,8 +117,10 @@ para que el estado no dependa solo de lo que carga el responsable.
   última actualización apenas se hace.
 
 ## Pendiente de definir
-- Lista final de estados del caso, resultados de contacto y motivos de no
-  pago (hoy son una propuesta, se cambian en `crm_mora.gs`).
+- Lista final de estados del caso y resultados de contacto (hoy son una
+  propuesta, se cambian en `crm_mora.gs`). Los motivos de no pago ya son
+  los códigos del equipo (P/E, S/C, M/V, T/U, P/P, A/C, TR, T/P, A/A, S/G,
+  C/C).
 - Qué más mostrar en el Tablero supervisor (hoy: proyección de lo que
   mide Fiat por cuota, avance por responsable, gestiones por día).
 - Si Renunciado/Cancelado deben quedar fuera de la cartera activa como
