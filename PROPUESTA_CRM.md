@@ -1,7 +1,8 @@
 # CRM de gestión de mora — propuesta inicial
 
-Estado: **borrador para discutir** (no hay código todavía). Se apoya en el
-tablero de mora que ya existe en este repo (`tablero_mora.gs`, ver README).
+Estado: **v1 implementada** (`crm_mora.gs` + `crm_index.html`, instalación
+en el README). Se apoya en el tablero de mora que ya existe en este repo
+(`tablero_mora.gs`).
 
 ## Objetivo
 Que cada responsable (hoy **Eze**, **Fabio** y **Santi**, columna A
@@ -98,12 +99,30 @@ para que el estado no dependa solo de lo que carga el responsable.
 4. Migrar (opcional) las notas mensuales de texto libre de BASE como
    gestiones históricas "importadas".
 
-## Preguntas abiertas
-- ¿La cuota del mes en curso (C(avance)) se completa en BASE recién cuando
-  paga, o se carga `I` durante el mes? (define P2).
-- ¿Las carteras de Eze/Fabio/Santi las define la columna RESPONSABLE de
-  BASE, o se reasignan desde el CRM?
-- ¿Los Rescindidos se trabajan (recupero) o quedan fuera?
-- ¿Quién más usa la app (supervisor/nosotros) y con qué emails?
-- ¿Cada cuánto se actualiza BASE (diario / semanal)? Define qué tan rápido
-  se ve un pago reflejado como "Regularizado".
+## Decisiones tomadas (23/09/2026)
+- **Roles**: uno o más SUPERVISORES con control total (usuarios,
+  asignación/reasignación, cualquier acción sobre cualquier plan, tablero
+  "Supervisor"). RESPONSABLES (Godoy Santiago sgodoy@, Vaca Ezequiel evaca@,
+  Aguero Fabio faguero@ — grupoantun.com.ar) ven solo su cartera.
+- **Cuota del mes**: BASE la actualiza el supervisor a mano desde el
+  sistema de Fiat; la cuota del mes queda `I` (o vacía) hasta que paga. El
+  CRM trata vacío e `I` igual: "no paga todavía".
+- **Asignación**: la hace el supervisor. Por defecto sale de la columna
+  RESPONSABLE de BASE; las reasignaciones hechas desde el CRM tienen
+  prioridad.
+- **Rescindidos**: fuera de la cola de trabajo (se trabaja solo la cartera
+  activa), pero visibles en la vista "Rescindidos / bajas".
+- **Actualización de BASE**: manual por el supervisor; más adelante se
+  evalúa automatizar. El CRM lee BASE en vivo en cada carga, así que ve la
+  última actualización apenas se hace.
+
+## Pendiente de definir
+- Lista final de estados del caso, resultados de contacto y motivos de no
+  pago (hoy son una propuesta, se cambian en `crm_mora.gs`).
+- Qué más mostrar en el Tablero supervisor (hoy: proyección de lo que
+  mide Fiat por cuota, avance por responsable, gestiones por día).
+- Si Renunciado/Cancelado deben quedar fuera de la cartera activa como
+  hoy (`CRM_ESTADOS_BAJA`).
+- Metas por responsable (ej. % de P1+P2 contactados por semana).
+- Migrar las notas mensuales de texto libre de BASE como gestiones
+  (hoy se muestran como "Notas anteriores de la planilla" en la ficha).

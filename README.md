@@ -153,3 +153,69 @@ trigger) para refrescar cada vista.
 - En el Tablero, "Período real" se muestra como etiqueta legible tipo
   "Cuota 3 AGOSTO" (derivada de la fecha de la foto), no como fecha cruda,
   para no confundir con la columna "Avance".
+
+## CRM de gestión de mora (`crm_mora.gs` + `crm_index.html`)
+App web para que cada responsable trabaje su cartera al día y deje registro
+de cada gestión, y para que los supervisores tengan control total. Diseño y
+decisiones en `PROPUESTA_CRM.md`.
+
+### Roles
+- **SUPERVISOR** (uno o más): ve todas las carteras, reasigna planes (de a
+  uno desde la ficha, o varios con los checkboxes), registra gestiones y
+  cambia el estado de cualquier plan, administra usuarios (alta, rol,
+  alias, activar/desactivar) y ve el "Tablero supervisor". Siempre tiene
+  que quedar al menos un supervisor activo.
+- **RESPONSABLE** (Godoy Santiago, Vaca Ezequiel, Aguero Fabio): ve y
+  gestiona solo su cartera. El servidor lo controla en cada llamada, no
+  solo la pantalla.
+
+### Cómo se asigna la cartera
+1. Si el supervisor reasignó el plan desde el CRM → ese responsable
+   (queda en `CRM_Casos.ResponsableEmail`).
+2. Si no → la columna A "RESPONSABLE" de BASE (EZE/FABIO/SANTI), cruzada
+   con el "Alias BASE" de cada usuario en `CRM_Usuarios`.
+
+### Prioridad (situación de cada plan, calculada en vivo desde BASE)
+Un plan hoy en avance N tiene cargadas C2..C(N-1); la cuota del mes en
+curso es C(N) (vacía o `I` hasta que paga). El mes que viene pasa a avance
+N+1 y, si N ∈ {3,5,7,9,12}, Fiat mide C2..C(N).
+- **P1**: avance ∈ {3,5,7,9,12} con alguna `I` en C2..C(N-1).
+- **P2**: avance ∈ {3,5,7,9,12}, vencidas pagas, cuota del mes sin `P`.
+- **P3 / P4**: lo mismo en el resto de los avances.
+- **Al día**: todo `P`, incluida la cuota del mes.
+- **Rescindido / Baja**: alguna `R` o Estado Rescindido/Renunciado/
+  Cancelado → fuera de la cola, solo consulta en "Rescindidos / bajas".
+
+Dentro de cada prioridad se ordena por última gestión (los nunca
+gestionados primero).
+
+### Hojas que crea (no editar a mano salvo CRM_Usuarios si hace falta)
+- **CRM_Usuarios**: Email, Nombre, Rol, AliasBase, Activo.
+- **CRM_Casos**: una fila por plan gestionado/reasignado con el estado
+  vigente (estado del caso, último contacto, próximo contacto, promesa).
+- **CRM_Gestiones**: log append-only, una fila por intento de contacto,
+  con avance y situación del plan al momento de la gestión.
+- **CRM_Auditoria**: acciones de supervisor (reasignaciones, usuarios).
+
+### Instalación
+1. En el mismo proyecto de Apps Script del tablero (Extensiones > Apps
+   Script), actualizar `tablero_mora.gs` y agregar:
+   - un archivo de script `crm_mora` con el contenido de `crm_mora.gs`;
+   - un archivo HTML llamado exactamente `crm_index` con el contenido de
+     `crm_index.html`.
+2. Recargar la planilla → menú "Mora" > "CRM: inicializar hojas y
+   usuarios". Quien lo corre queda como SUPERVISOR; se cargan los tres
+   responsables.
+3. Implementar > Nueva implementación > tipo "Aplicación web":
+   - Ejecutar como: **Yo** (así los responsables no necesitan acceso a la
+     planilla y no pueden ver carteras ajenas).
+   - Quién tiene acceso: **Cualquier usuario de grupoantun.com.ar** (o
+     "Cualquier usuario con cuenta de Google").
+   - Compartir la URL `/exec` con los usuarios.
+4. **Importante**: para que la app sepa quién entra, el dueño de la
+   implementación tiene que ser una cuenta del **mismo dominio** que los
+   usuarios (grupoantun.com.ar). Si se publica desde una cuenta @gmail.com,
+   Google no informa el email de quien entra y la app muestra "No pude
+   identificar tu cuenta".
+5. Cada cambio de código requiere Implementar > Administrar
+   implementaciones > editar > Versión nueva (la URL no cambia).

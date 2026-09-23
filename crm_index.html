@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html>
+<head>
+<base target="_top">
+<meta charset="utf-8">
+<style>
+  :root {
+    --bg: #f5f6f8; --panel: #fff; --ink: #1d2330; --muted: #6b7280; --line: #e3e6eb;
+    --accent: #1f5fbf; --p1: #c62828; --p2: #ef6c00; --p3: #8d6e00; --p4: #5d6d7e;
+    --ok: #2e7d32; --baja: #7b7b7b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--ink); }
+  header { background: var(--panel); border-bottom: 1px solid var(--line); padding: 10px 16px; display: flex; gap: 16px; align-items: center; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 16px; margin: 0; }
+  header .yo { margin-left: auto; color: var(--muted); font-size: 13px; }
+  nav { display: flex; gap: 4px; flex-wrap: wrap; }
+  nav button { border: 0; background: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; font: inherit; color: var(--muted); }
+  nav button.activo { background: #e8eefb; color: var(--accent); font-weight: 600; }
+  main { padding: 16px; max-width: 1400px; margin: 0 auto; }
+  .filtros { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; align-items: center; }
+  input, select, textarea { font: inherit; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+  textarea { width: 100%; min-height: 70px; }
+  button.btn { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer; }
+  button.btn.sec { background: #fff; color: var(--accent); }
+  button.btn:disabled { opacity: .5; cursor: default; }
+  .resumen { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+  .kpi { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; min-width: 120px; cursor: pointer; }
+  .kpi b { display: block; font-size: 20px; }
+  .kpi span { color: var(--muted); font-size: 12px; }
+  .tabla { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; background: #fafbfc; position: sticky; top: 0; }
+  tbody tr:hover { background: #f7f9fd; cursor: pointer; }
+  td.num, th.num { text-align: right; }
+  .chip { display: inline-block; padding: 2px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; color: #fff; }
+  .s-P1 { background: var(--p1); } .s-P2 { background: var(--p2); } .s-P3 { background: var(--p3); }
+  .s-P4 { background: var(--p4); } .s-AL_DIA { background: var(--ok); } .s-RESCINDIDO, .s-BAJA { background: var(--baja); }
+  .tag { display: inline-block; padding: 1px 6px; border-radius: 4px; font-size: 12px; background: #eef1f5; }
+  .alerta { color: var(--p1); font-weight: 600; }
+  .muted { color: var(--muted); }
+  .vacio { padding: 24px; text-align: center; color: var(--muted); }
+  /* Ficha */
+  #ficha { position: fixed; inset: 0; background: rgba(20, 25, 35, .45); display: flex; justify-content: flex-end; z-index: 10; }
+  #ficha .panel { background: var(--panel); width: min(760px, 100%); height: 100%; overflow-y: auto; padding: 16px 20px 40px; }
+  #ficha h2 { margin: 0 0 4px; font-size: 18px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 6px 16px; margin: 12px 0; }
+  .grid div span { display: block; font-size: 11px; color: var(--muted); }
+  .cuotas { display: flex; gap: 3px; flex-wrap: wrap; margin: 8px 0 12px; }
+  .cuota { width: 40px; text-align: center; border-radius: 4px; padding: 3px 0; font-size: 11px; border: 1px solid var(--line); }
+  .cuota b { display: block; font-size: 13px; }
+  .c-P { background: #e6f4ea; } .c-I { background: #fdecea; color: var(--p1); } .c-R { background: #e0e0e0; }
+  .c-mes { outline: 2px solid var(--p2); }
+  section.bloque { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
+  section.bloque h3 { font-size: 14px; margin: 0 0 8px; }
+  .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
+  .form label { display: flex; flex-direction: column; font-size: 12px; color: var(--muted); gap: 3px; }
+  .form .ancho { grid-column: 1 / -1; }
+  .gestion { border-left: 3px solid var(--line); padding: 4px 10px; margin-bottom: 10px; }
+  .gestion .cab { font-size: 12px; color: var(--muted); }
+  .acciones a { margin-right: 10px; }
+  #toast { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: #222; color: #fff; padding: 8px 14px; border-radius: 6px; z-index: 20; }
+  .barra { height: 8px; background: #eee; border-radius: 4px; overflow: hidden; min-width: 80px; }
+  .barra i { display: block; height: 100%; background: var(--accent); }
+  details summary { cursor: pointer; color: var(--accent); }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<header>
+  <h1>CRM Mora</h1>
+  <nav id="nav"></nav>
+  <div class="yo" id="yo">Cargando…</div>
+</header>
+<main id="main"><div class="vacio">Cargando cartera…</div></main>
+<div id="ficha" hidden><div class="panel" id="fichaPanel"></div></div>
+<div id="toast" hidden></div>
+
+<script>
+var S = { ini: null, planes: [], vista: 'cartera', filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {} };
+
+function esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+function api(fn) {
+  var args = Array.prototype.slice.call(arguments, 1);
+  return new Promise(function (ok, mal) {
+    google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) { mal(e); })[fn].apply(null, args);
+  });
+}
+function toast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3500);
+}
+function error(e) { toast('Error: ' + (e && e.message ? e.message : e)); }
+function hoy() { var d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+function chip(s) { return '<span class="chip s-' + s.codigo + '">' + esc(s.etiqueta) + '</span>'; }
+function opciones(lista, sel, vacio) {
+  return (vacio !== undefined ? '<option value="">' + esc(vacio) + '</option>' : '') +
+    lista.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v) + '</option>'; }).join('');
+}
+function telLinks(tel) {
+  var n = String(tel || '').replace(/\D/g, '');
+  if (!n) return '';
+  return '<span class="acciones">' + esc(tel) + ' · <a href="tel:' + n + '" target="_blank">Llamar</a>' +
+    '<a href="https://wa.me/549' + n + '" target="_blank">WhatsApp</a></span>';
+}
+
+// ---------- Arranque ----------
+api('crmInicio').then(function (ini) {
+  S.ini = ini;
+  document.getElementById('yo').textContent = ini.usuario.nombre + (ini.esSupervisor ? ' · Supervisor' : '');
+  armarNav();
+  return cargarCartera();
+}).catch(function (e) {
+  document.getElementById('main').innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>';
+  document.getElementById('yo').textContent = '';
+});
+
+function armarNav() {
+  var vistas = [['cartera', S.ini.esSupervisor ? 'Carteras' : 'Mi cartera'], ['agenda', 'Agenda de hoy'], ['bajas', 'Rescindidos / bajas']];
+  if (S.ini.esSupervisor) vistas.push(['tablero', 'Tablero supervisor'], ['usuarios', 'Usuarios']);
+  document.getElementById('nav').innerHTML = vistas.map(function (v) {
+    return '<button data-v="' + v[0] + '" class="' + (S.vista === v[0] ? 'activo' : '') + '">' + v[1] + '</button>';
+  }).join('');
+  Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) {
+    b.onclick = function () { S.vista = b.getAttribute('data-v'); armarNav(); render(); };
+  });
+}
+
+function cargarCartera() {
+  return api('crmListarCartera').then(function (planes) { S.planes = planes; render(); }).catch(error);
+}
+
+function render() {
+  var m = document.getElementById('main');
+  if (S.vista === 'tablero') return renderTablero(m);
+  if (S.vista === 'usuarios') return renderUsuarios(m);
+  renderLista(m);
+}
+
+// ---------- Listas (cartera / agenda / bajas) ----------
+function planesDeVista() {
+  var f = S.filtro;
+  return S.planes.filter(function (p) {
+    var activa = p.situacion.codigo !== 'RESCINDIDO' && p.situacion.codigo !== 'BAJA';
+    if (S.vista === 'cartera' && !activa) return false;
+    if (S.vista === 'bajas' && activa) return false;
+    if (S.vista === 'agenda' && !(activa && p.agendaHoy)) return false;
+    if (f.situacion && p.situacion.codigo !== f.situacion) return false;
+    if (f.estado && p.estadoCaso !== f.estado) return false;
+    if (f.resp && p.responsableEmail !== f.resp) return false;
+    if (f.texto) {
+      var t = f.texto.toLowerCase();
+      if ((p.cliente + ' ' + p.solicitud + ' ' + p.telefono + ' ' + p.grupo).toLowerCase().indexOf(t) < 0) return false;
+    }
+    return true;
+  }).sort(function (a, b) {
+    // Prioridad; dentro de la prioridad, primero los que hace más que no se gestionan.
+    return a.situacion.orden - b.situacion.orden ||
+      (a.ultimaGestion || '').localeCompare(b.ultimaGestion || '') ||
+      a.avance - b.avance;
+  });
+}
+
+function renderLista(m) {
+  var sup = S.ini.esSupervisor;
+  var lista = planesDeVista();
+  var base = S.planes.filter(function (p) {
+    return (!S.filtro.resp || p.responsableEmail === S.filtro.resp) &&
+      p.situacion.codigo !== 'RESCINDIDO' && p.situacion.codigo !== 'BAJA';
+  });
+  var cuenta = function (c) { return base.filter(function (p) { return p.situacion.codigo === c; }).length; };
+  var sinGestionPrio = base.filter(function (p) { return (p.situacion.codigo === 'P1' || p.situacion.codigo === 'P2') && !p.intentosMes; }).length;
+
+  var sit = S.ini.listas.situaciones;
+  var codigos = S.vista === 'bajas' ? ['RESCINDIDO', 'BAJA'] : ['P1', 'P2', 'P3', 'P4', 'AL_DIA'];
+  var h = '';
+  if (S.vista === 'cartera') {
+    h += '<div class="resumen">' + ['P1', 'P2', 'P3', 'P4', 'AL_DIA'].map(function (c) {
+      return '<div class="kpi" data-sit="' + c + '"><b>' + cuenta(c) + '</b><span>' + esc(sit[c].etiqueta) + '</span></div>';
+    }).join('') +
+      '<div class="kpi"><b class="' + (sinGestionPrio ? 'alerta' : '') + '">' + sinGestionPrio + '</b><span>P1+P2 sin gestión este mes</span></div></div>';
+  }
+  if (S.vista === 'agenda') h += '<p class="muted">Re-contactos agendados para hoy o antes, y promesas de pago vencidas cuya cuota del mes todavía no figura paga.</p>';
+  if (S.vista === 'bajas') h += '<p class="muted">Solo consulta: estos planes no entran en la cola de trabajo por ahora.</p>';
+
+  h += '<div class="filtros">' +
+    '<input id="fTexto" placeholder="Buscar cliente, solicitud, teléfono…" value="' + esc(S.filtro.texto) + '">' +
+    '<select id="fSit"><option value="">Todas las situaciones</option>' + codigos.map(function (c) {
+      return '<option value="' + c + '"' + (S.filtro.situacion === c ? ' selected' : '') + '>' + esc(sit[c].etiqueta) + '</option>';
+    }).join('') + '</select>' +
+    '<select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Todos los estados') + '</select>' +
+    (sup ? '<select id="fResp"><option value="">Todos los responsables</option>' + S.ini.responsables.map(function (r) {
+      return '<option value="' + esc(r.email) + '"' + (S.filtro.resp === r.email ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
+    }).join('') + '</select>' : '') +
+    '<span class="muted">' + lista.length + ' planes</span>' +
+    (sup ? '<span style="margin-left:auto">Reasignar seleccionados a <select id="reasDest">' + S.ini.responsables.map(function (r) {
+      return '<option value="' + esc(r.email) + '">' + esc(r.nombre) + '</option>';
+    }).join('') + '</select> <button class="btn sec" id="reasBtn">Reasignar</button></span>' : '') +
+    '<button class="btn sec" id="refrescar">Actualizar</button></div>';
+
+  if (!lista.length) {
+    h += '<div class="tabla"><div class="vacio">No hay planes para mostrar.</div></div>';
+  } else {
+    h += '<div class="tabla"><table><thead><tr>' + (sup ? '<th><input type="checkbox" id="selTodos"></th>' : '') +
+      '<th>Situación</th><th>Solicitud</th><th>Cliente</th><th class="num">Avance</th><th class="num">Atrasadas</th>' +
+      '<th>Estado caso</th><th>Último contacto</th><th class="num">Intentos mes</th><th>Próx. contacto / promesa</th>' +
+      (sup ? '<th>Responsable</th>' : '') + '<th>Estado BASE</th></tr></thead><tbody>' +
+      lista.map(function (p) {
+        var vencido = p.agendaHoy ? ' class="alerta"' : '';
+        var prox = [p.proximoContacto && ('Contactar ' + p.proximoContacto), p.promesaFecha && ('Promesa ' + p.promesaFecha)].filter(Boolean).join(' · ');
+        return '<tr data-sol="' + esc(p.solicitud) + '">' +
+          (sup ? '<td><input type="checkbox" class="sel" data-sol="' + esc(p.solicitud) + '"' + (S.seleccion[p.solicitud] ? ' checked' : '') + '></td>' : '') +
+          '<td>' + chip(p.situacion) + '</td><td>' + esc(p.solicitud) + '</td><td>' + esc(p.cliente) + '</td>' +
+          '<td class="num">' + esc(p.avance) + (p.situacion.medidoPorFiat ? ' <span class="tag">Fiat</span>' : '') + '</td>' +
+          '<td class="num">' + (p.situacion.cuotasAtrasadas || '') + '</td>' +
+          '<td>' + esc(p.estadoCaso) + '</td>' +
+          '<td>' + (p.ultimaGestion ? esc(p.ultimaGestion) + ' <span class="muted">' + esc(p.ultimoCanal) + '</span>' : '<span class="muted">—</span>') + '</td>' +
+          '<td class="num">' + (p.intentosMes || '') + '</td>' +
+          '<td' + vencido + '>' + esc(prox) + '</td>' +
+          (sup ? '<td>' + esc(p.responsableNombre) + '</td>' : '') +
+          '<td>' + esc(p.estadoBase) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+  }
+  m.innerHTML = h;
+
+  var re = function () { render(); };
+  document.getElementById('fTexto').oninput = function (e) {
+    S.filtro.texto = e.target.value;
+    clearTimeout(re._t); re._t = setTimeout(function () { render(); var i = document.getElementById('fTexto'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }, 250);
+  };
+  document.getElementById('fSit').onchange = function (e) { S.filtro.situacion = e.target.value; re(); };
+  document.getElementById('fEst').onchange = function (e) { S.filtro.estado = e.target.value; re(); };
+  if (sup) document.getElementById('fResp').onchange = function (e) { S.filtro.resp = e.target.value; re(); };
+  document.getElementById('refrescar').onclick = function () { toast('Actualizando…'); cargarCartera(); };
+  Array.prototype.forEach.call(m.querySelectorAll('.kpi[data-sit]'), function (k) {
+    k.onclick = function () { var c = k.getAttribute('data-sit'); S.filtro.situacion = S.filtro.situacion === c ? '' : c; re(); };
+  });
+  Array.prototype.forEach.call(m.querySelectorAll('tbody tr'), function (tr) {
+    tr.onclick = function (e) { if (e.target.type === 'checkbox') return; abrirFicha(tr.getAttribute('data-sol')); };
+  });
+  if (sup) {
+    Array.prototype.forEach.call(m.querySelectorAll('input.sel'), function (c) {
+      c.onchange = function () { if (c.checked) S.seleccion[c.getAttribute('data-sol')] = true; else delete S.seleccion[c.getAttribute('data-sol')]; };
+    });
+    var todos = document.getElementById('selTodos');
+    if (todos) todos.onchange = function () {
+      lista.forEach(function (p) { if (todos.checked) S.seleccion[p.solicitud] = true; else delete S.seleccion[p.solicitud]; });
+      re();
+    };
+    document.getElementById('reasBtn').onclick = function () {
+      var sols = Object.keys(S.seleccion);
+      if (!sols.length) return toast('Seleccioná al menos un plan.');
+      var dest = document.getElementById('reasDest').value;
+      api('crmReasignar', sols, dest).then(function (n) {
+        toast(n + ' plan(es) reasignados.'); S.seleccion = {}; return cargarCartera();
+      }).catch(error);
+    };
+  }
+}
+
+// ---------- Ficha del plan ----------
+function abrirFicha(sol) {
+  var f = document.getElementById('ficha');
+  document.getElementById('fichaPanel').innerHTML = '<div class="vacio">Cargando plan ' + esc(sol) + '…</div>';
+  f.hidden = false;
+  api('crmFichaPlan', sol).then(renderFicha).catch(function (e) { f.hidden = true; error(e); });
+}
+document.getElementById('ficha').onclick = function (e) { if (e.target.id === 'ficha') cerrarFicha(); };
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') cerrarFicha(); });
+function cerrarFicha() { document.getElementById('ficha').hidden = true; }
+
+function renderFicha(d) {
+  var p = d.plan, c = d.caso, L = S.ini.listas, sup = S.ini.esSupervisor;
+  var dato = function (t, v) { return '<div><span>' + t + '</span>' + (v === '' || v == null ? '—' : v) + '</div>'; };
+  var h = '<div style="display:flex;justify-content:space-between;gap:8px"><div><h2>' + esc(p.cliente) + '</h2>' +
+    chip(p.situacion) + ' <span class="tag">Estado BASE: ' + esc(p.estado) + '</span> <span class="tag">Caso: ' + esc(c.estadoCaso) + '</span>' +
+    '</div><button class="btn sec" id="cerrar">Cerrar</button></div>';
+
+  h += '<div class="grid">' +
+    dato('Solicitud', esc(p.solicitud)) + dato('Grupo / Orden', esc(p.grupo) + ' / ' + esc(p.orden)) +
+    dato('Documento', esc(p.documento)) + dato('Teléfono', telLinks(p.telefono)) +
+    dato('Teléfono alternativo', telLinks(p.telefonoAlt)) + dato('Modelo', esc(p.modelo)) +
+    dato('Avance', esc(p.avance) + (p.situacion.medidoPorFiat ? ' — Fiat mide la cuota ' + esc(p.avance) + ' el mes próximo' : '')) +
+    dato('Forma de pago', esc(p.formaPago)) + dato('Tipo de plan', esc(p.tipoPlan)) +
+    dato('Sobrepauta / cuota pactada', esc(p.sobrepauta)) + dato('Scoring', esc(p.scoring)) +
+    dato('Vendedor / Supervisor venta', esc(p.vendedor) + ' / ' + esc(p.supervisorVenta)) +
+    dato('Responsable', esc(p.responsableNombre)) + '</div>';
+
+  h += '<div class="muted" style="font-size:12px">Cuotas (C2…C14). Recuadrada: cuota del mes en curso.</div><div class="cuotas">' +
+    p.cuotas.map(function (v, i) {
+      var n = i + 2;
+      return '<div class="cuota c-' + esc(v) + (n === p.avance ? ' c-mes' : '') + '">C' + n + '<b>' + (esc(v) || '·') + '</b></div>';
+    }).join('') + '</div>';
+
+  if (sup) {
+    h += '<div class="filtros">Reasignar a <select id="fichaResp">' + S.ini.responsables.map(function (r) {
+      return '<option value="' + esc(r.email) + '"' + (r.email === p.responsableEmail ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
+    }).join('') + '</select><button class="btn sec" id="fichaReas">Reasignar</button></div>';
+  }
+
+  h += '<section class="bloque"><h3>Registrar gestión</h3><form id="fGestion" class="form">' +
+    '<label>Canal<select name="canal" required>' + opciones(L.canales, 'Llamada') + '</select></label>' +
+    '<label>Resultado<select name="resultado">' + opciones(L.resultados, '') + '</select></label>' +
+    '<label>Estado del caso<select name="estadoCaso" required>' + opciones(L.estadosCaso, c.estadoCaso || 'Contactando') + '</select></label>' +
+    '<label>Motivo de no pago<select name="motivo">' + opciones(L.motivos, c.motivo || '') + '</select></label>' +
+    '<label>Fecha promesa de pago<input type="date" name="promesaFecha" value="' + esc(c.promesaFecha || '') + '"></label>' +
+    '<label>Monto prometido<input type="number" name="promesaMonto" min="0" step="any" value="' + esc(c.promesaMonto || '') + '"></label>' +
+    '<label>Próximo contacto<input type="date" name="proximoContacto" min="' + hoy() + '"></label>' +
+    '<label class="ancho">Nota<textarea name="nota" placeholder="Qué se habló, qué quedó pactado…"></textarea></label>' +
+    '<div class="ancho"><button class="btn" type="submit">Guardar gestión</button></div></form></section>';
+
+  h += '<section class="bloque"><h3>Historial de gestiones (' + d.gestiones.length + ')</h3>' +
+    (d.gestiones.length ? d.gestiones.map(function (g) {
+      return '<div class="gestion"><div class="cab">' + esc(g.fechaHora) + ' · ' + esc(g.usuario) + ' · ' + esc(g.canal) +
+        (g.resultado ? ' · ' + esc(g.resultado) : '') + ' → <b>' + esc(g.estadoCaso) + '</b></div>' +
+        (g.motivo ? '<div>Motivo: ' + esc(g.motivo) + '</div>' : '') +
+        (g.promesaFecha ? '<div>Promesa: ' + esc(g.promesaFecha) + (g.promesaMonto ? ' por $' + esc(g.promesaMonto) : '') + '</div>' : '') +
+        (g.proximoContacto ? '<div>Próximo contacto: ' + esc(g.proximoContacto) + '</div>' : '') +
+        (g.nota ? '<div>' + esc(g.nota) + '</div>' : '') + '</div>';
+    }).join('') : '<div class="muted">Todavía no hay gestiones registradas en el CRM.</div>') + '</section>';
+
+  if (p.notasBase.length) {
+    h += '<section class="bloque"><details><summary>Notas anteriores de la planilla (' + p.notasBase.length + ')</summary>' +
+      p.notasBase.map(function (n) { return '<div class="gestion"><div class="cab">' + esc(n.columna) + '</div>' + esc(n.valor) + '</div>'; }).join('') +
+      '</details></section>';
+  }
+
+  var panel = document.getElementById('fichaPanel');
+  panel.innerHTML = h;
+  panel.scrollTop = 0;
+  document.getElementById('cerrar').onclick = cerrarFicha;
+  document.getElementById('fGestion').onsubmit = function (e) {
+    e.preventDefault();
+    var form = e.target, datos = {};
+    Array.prototype.forEach.call(form.elements, function (el) { if (el.name) datos[el.name] = el.value; });
+    var btn = form.querySelector('button'); btn.disabled = true; btn.textContent = 'Guardando…';
+    api('crmRegistrarGestion', p.solicitud, datos).then(function (d2) {
+      toast('Gestión guardada.'); renderFicha(d2); cargarCartera();
+    }).catch(function (err) { btn.disabled = false; btn.textContent = 'Guardar gestión'; error(err); });
+  };
+  if (sup) document.getElementById('fichaReas').onclick = function () {
+    api('crmReasignar', [p.solicitud], document.getElementById('fichaResp').value).then(function () {
+      toast('Plan reasignado.'); abrirFicha(p.solicitud); cargarCartera();
+    }).catch(error);
+  };
+}
+
+// ---------- Tablero supervisor ----------
+function pct(x) { return (x * 100).toFixed(1) + '%'; }
+function renderTablero(m) {
+  m.innerHTML = '<div class="vacio">Calculando tablero…</div>';
+  api('crmTableroSupervisor').then(function (t) {
+    var h = '<h3>Qué va a medir Fiat el mes que viene (si nada cambia)</h3>' +
+      '<p class="muted">Planes que hoy están en el avance de cada cuota. "Piso": rescindidos + cuotas vencidas impagas (ya es mora salvo que se regularice). "Si nadie más paga": suma además los que todavía no pagaron la cuota del mes.</p>' +
+      '<div class="tabla"><table><thead><tr><th>Cuota</th><th class="num">Cartera total</th><th class="num">Rescindidos</th><th class="num">P1 atrasados</th><th class="num">P2 cuota mes pendiente</th><th class="num">% mora piso</th><th class="num">% si nadie más paga</th></tr></thead><tbody>' +
+      t.proyeccion.map(function (r) {
+        return '<tr><td>Cuota ' + r.cuota + '</td><td class="num">' + r.carteraTotal + '</td><td class="num">' + r.rescindidos + '</td><td class="num">' + r.atrasados +
+          '</td><td class="num">' + r.mesPendiente + '</td><td class="num">' + pct(r.pctPiso) + '</td><td class="num">' + pct(r.pctSiNadiePaga) + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    h += '<h3 style="margin-top:24px">Avance por responsable (mes en curso)</h3><div class="tabla"><table><thead><tr>' +
+      '<th>Responsable</th><th class="num">Cartera activa</th><th class="num">P1</th><th class="num">P2</th><th class="num">P3+P4</th>' +
+      '<th>P1+P2 gestionados</th><th class="num">P1+P2 sin gestión</th><th class="num">Intentos</th><th class="num">Contactos efectivos</th>' +
+      '<th class="num">Promesas vigentes</th><th class="num">Promesas vencidas</th><th class="num">Gestionados hoy al día</th><th class="num">Rescindidos/bajas</th></tr></thead><tbody>' +
+      t.porResponsable.map(function (r) {
+        var tot = r.prioGestionados + r.prioSinGestion, fr = tot ? r.prioGestionados / tot : 0;
+        return '<tr><td>' + esc(r.nombre) + '</td><td class="num">' + r.activa + '</td><td class="num">' + r.p1 + '</td><td class="num">' + r.p2 +
+          '</td><td class="num">' + r.p34 + '</td><td><div style="display:flex;gap:6px;align-items:center"><div class="barra"><i style="width:' + (fr * 100) + '%"></i></div>' + pct(fr) + '</div></td>' +
+          '<td class="num' + (r.prioSinGestion ? ' alerta' : '') + '">' + r.prioSinGestion + '</td><td class="num">' + r.intentosMes + '</td><td class="num">' + r.efectivosMes +
+          '</td><td class="num">' + r.promesasVigentes + '</td><td class="num' + (r.promesasVencidas ? ' alerta' : '') + '">' + r.promesasVencidas +
+          '</td><td class="num">' + r.regularizadosConGestion + '</td><td class="num">' + r.bajas + '</td></tr>';
+      }).join('') + '</tbody></table></div>';
+
+    var dias = Object.keys(t.actividad).sort().reverse();
+    var quienes = {};
+    dias.forEach(function (d) { Object.keys(t.actividad[d]).forEach(function (q) { quienes[q] = 1; }); });
+    quienes = Object.keys(quienes).sort();
+    h += '<h3 style="margin-top:24px">Gestiones por día (últimos 14 días)</h3>' + (dias.length
+      ? '<div class="tabla"><table><thead><tr><th>Día</th>' + quienes.map(function (q) { return '<th class="num">' + esc(q) + '</th>'; }).join('') + '</tr></thead><tbody>' +
+        dias.map(function (d) {
+          return '<tr><td>' + d + '</td>' + quienes.map(function (q) { return '<td class="num">' + (t.actividad[d][q] || '') + '</td>'; }).join('') + '</tr>';
+        }).join('') + '</tbody></table></div>'
+      : '<div class="tabla"><div class="vacio">Sin gestiones en los últimos 14 días.</div></div>');
+    m.innerHTML = h;
+  }).catch(function (e) { m.innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>'; });
+}
+
+// ---------- Usuarios (supervisor) ----------
+function renderUsuarios(m) {
+  m.innerHTML = '<div class="vacio">Cargando usuarios…</div>';
+  api('crmListarUsuarios').then(function (us) { dibujarUsuarios(m, us); }).catch(error);
+}
+function dibujarUsuarios(m, us) {
+  var fila = function (u, nuevo) {
+    return '<tr data-email="' + esc(u.email) + '">' +
+      '<td>' + (nuevo ? '<input name="email" placeholder="email@grupoantun.com.ar">' : esc(u.email)) + '</td>' +
+      '<td><input name="nombre" value="' + esc(u.nombre) + '"></td>' +
+      '<td><select name="rol">' + opciones(['RESPONSABLE', 'SUPERVISOR'], u.rol) + '</select></td>' +
+      '<td><input name="alias" size="8" value="' + esc(u.alias) + '" title="Cómo figura en la columna RESPONSABLE de BASE"></td>' +
+      '<td><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '></td>' +
+      '<td><button class="btn sec guardar">' + (nuevo ? 'Agregar' : 'Guardar') + '</button></td></tr>';
+  };
+  m.innerHTML = '<p class="muted">"Alias BASE" es el nombre con el que el responsable figura en la columna RESPONSABLE de BASE (EZE, FABIO, SANTI): así se asigna su cartera automáticamente. Las reasignaciones hechas desde el CRM tienen prioridad sobre esa columna.</p>' +
+    '<div class="tabla"><table><thead><tr><th>Email</th><th>Nombre</th><th>Rol</th><th>Alias BASE</th><th>Activo</th><th></th></tr></thead><tbody>' +
+    us.map(function (u) { return fila(u, false); }).join('') +
+    fila({ email: '', nombre: '', rol: 'RESPONSABLE', alias: '', activo: true }, true) + '</tbody></table></div>';
+  Array.prototype.forEach.call(m.querySelectorAll('button.guardar'), function (b) {
+    b.onclick = function () {
+      var tr = b.closest('tr'), q = function (n) { return tr.querySelector('[name="' + n + '"]'); };
+      var datos = {
+        email: q('email') ? q('email').value : tr.getAttribute('data-email'),
+        nombre: q('nombre').value, rol: q('rol').value, alias: q('alias').value, activo: q('activo').checked,
+      };
+      b.disabled = true;
+      api('crmGuardarUsuario', datos).then(function (lista) {
+        toast('Usuario guardado.'); dibujarUsuarios(m, lista);
+        return api('crmInicio').then(function (ini) { S.ini.responsables = ini.responsables; });
+      }).catch(function (e) { b.disabled = false; error(e); });
+    };
+  });
+}
+</script>
+</body>
+</html>

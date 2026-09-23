@@ -73,6 +73,8 @@ function onOpen() {
     .addItem('Actualizar tablero', 'actualizarTablero')
     .addItem('Actualizar detalle de planes', 'actualizarDetallePlanes')
     .addItem('Instalar snapshot automático diario', 'instalarTriggerDiario')
+    .addSeparator()
+    .addItem('CRM: inicializar hojas y usuarios', 'crmInicializar') // ver crm_mora.gs
     .addToUi();
 }
 
