@@ -159,15 +159,29 @@ App web para que cada responsable trabaje su cartera al día y deje registro
 de cada gestión, y para que los supervisores tengan control total. Diseño y
 decisiones en `PROPUESTA_CRM.md`.
 
+### Acceso
+- Se entra con **mail @grupoantun.com.ar + clave del CRM**. Cualquier otro
+  dominio se rechaza (al ingresar y al dar de alta usuarios).
+- Todo usuario nuevo, y todo blanqueo, queda con la clave inicial
+  **Turin3800** y la app obliga a cambiarla en el primer ingreso (mínimo 8
+  caracteres, distinta de la inicial).
+- Las claves se guardan con hash + sal en `CRM_Usuarios` (nunca en texto
+  plano, y nunca viajan al navegador).
+- Sesión de 6 h. 5 intentos fallidos bloquean ese mail 15 minutos (un
+  blanqueo lo desbloquea). Blanquear o desactivar a un usuario le corta
+  la sesión en el momento.
+
 ### Roles
-- **SUPERVISOR** (uno o más): ve todas las carteras, reasigna planes (de a
-  uno desde la ficha, o varios con los checkboxes), registra gestiones y
-  cambia el estado de cualquier plan, administra usuarios (alta, rol,
-  alias, activar/desactivar) y ve el "Tablero supervisor". Siempre tiene
-  que quedar al menos un supervisor activo.
-- **RESPONSABLE** (Godoy Santiago, Vaca Ezequiel, Aguero Fabio): ve y
-  gestiona solo su cartera. El servidor lo controla en cada llamada, no
-  solo la pantalla.
+- **SUPERVISOR** (al inicio: Guillermo Rietschi grietschi@ y Gabriel Ortiz
+  gortiz@): ve todas las carteras, reasigna planes (de a uno desde la
+  ficha, o varios con los checkboxes), registra gestiones y cambia el
+  estado de cualquier plan, administra usuarios (alta de supervisores o
+  responsables, rol, alias, activar/desactivar, **blanquear clave**) y ve
+  el "Tablero supervisor". Siempre tiene que quedar al menos un
+  supervisor activo.
+- **RESPONSABLE** (Godoy Santiago sgodoy@, Vaca Ezequiel evaca@, Aguero
+  Fabio faguero@): ve y gestiona solo su cartera. El servidor lo controla
+  en cada llamada, no solo la pantalla.
 
 ### Cómo se asigna la cartera
 1. Si el supervisor reasignó el plan desde el CRM → ese responsable
@@ -198,24 +212,26 @@ gestionados primero).
 - **CRM_Auditoria**: acciones de supervisor (reasignaciones, usuarios).
 
 ### Instalación
-1. En el mismo proyecto de Apps Script del tablero (Extensiones > Apps
-   Script), actualizar `tablero_mora.gs` y agregar:
-   - un archivo de script `crm_mora` con el contenido de `crm_mora.gs`;
-   - un archivo HTML llamado exactamente `crm_index` con el contenido de
-     `crm_index.html`.
+El proyecto de Apps Script queda con **3 archivos separados** (no pegar
+todo en uno):
+
+| Archivo en Apps Script | Tipo | Contenido |
+|---|---|---|
+| `Code.gs` (el que ya existe) | Script | `tablero_mora.gs` (reemplazar todo: solo cambió el menú) |
+| `crm_mora` | Script (＋ > Secuencia de comandos) | `crm_mora.gs` |
+| `crm_index` | HTML (＋ > HTML) | `crm_index.html` — el nombre tiene que ser exactamente `crm_index` |
+
+1. Crear/pegar los tres archivos como en la tabla y guardar.
 2. Recargar la planilla → menú "Mora" > "CRM: inicializar hojas y
-   usuarios". Quien lo corre queda como SUPERVISOR; se cargan los tres
-   responsables.
-3. Implementar > Nueva implementación > tipo "Aplicación web":
-   - Ejecutar como: **Yo** (así los responsables no necesitan acceso a la
-     planilla y no pueden ver carteras ajenas).
-   - Quién tiene acceso: **Cualquier usuario de grupoantun.com.ar** (o
-     "Cualquier usuario con cuenta de Google").
-   - Compartir la URL `/exec` con los usuarios.
-4. **Importante**: para que la app sepa quién entra, el dueño de la
-   implementación tiene que ser una cuenta del **mismo dominio** que los
-   usuarios (grupoantun.com.ar). Si se publica desde una cuenta @gmail.com,
-   Google no informa el email de quien entra y la app muestra "No pude
-   identificar tu cuenta".
-5. Cada cambio de código requiere Implementar > Administrar
-   implementaciones > editar > Versión nueva (la URL no cambia).
+   usuarios" (pide autorización la primera vez). Crea las hojas CRM_* y
+   los 5 usuarios iniciales con la clave Turin3800.
+3. Implementar > Nueva implementación > engranaje > "Aplicación web":
+   - Ejecutar como: **Yo**.
+   - Quién tiene acceso: **Cualquier persona** si el dueño del script es
+     una cuenta @gmail.com; si es una cuenta @grupoantun.com.ar se puede
+     elegir "Cualquier usuario de grupoantun.com.ar" como capa extra.
+     En los dos casos la app pide mail @grupoantun.com.ar + clave.
+   - Compartir con los usuarios la URL que termina en `/exec`.
+4. Cada cambio de código posterior: Implementar > Administrar
+   implementaciones > lápiz > Versión: "Nueva versión" > Implementar (la
+   URL no cambia).

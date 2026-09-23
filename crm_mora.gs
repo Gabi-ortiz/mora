@@ -44,9 +44,20 @@ const CRM_CANT_CUOTAS = 13;      // C2..C14
 const CRM_ROL_SUPERVISOR = 'SUPERVISOR';
 const CRM_ROL_RESPONSABLE = 'RESPONSABLE';
 
-// Usuarios que se cargan la primera vez que se corre crmInicializar().
-// El que corre la inicialización queda además como SUPERVISOR.
+// Acceso: mail @grupoantun.com.ar + clave propia del CRM.
+const CRM_DOMINIO = 'grupoantun.com.ar';  // único dominio habilitado
+const CRM_CLAVE_INICIAL = 'Turin3800';    // clave de alta y de blanqueo; obliga a cambiarla
+const CRM_CLAVE_MIN = 8;
+const CRM_SESION_SEG = 6 * 60 * 60;       // sesión de 6 h (máximo de CacheService)
+const CRM_MAX_INTENTOS = 5;               // intentos fallidos antes de bloquear 15 min
+const CRM_BLOQUEO_SEG = 15 * 60;
+const CRM_HASH_ITERACIONES = 500;
+
+// Usuarios que se cargan la primera vez que se corre crmInicializar(),
+// todos con CRM_CLAVE_INICIAL y cambio de clave obligatorio.
 const CRM_USUARIOS_INICIALES = [
+  { email: 'grietschi@grupoantun.com.ar', nombre: 'Rietschi Guillermo', rol: CRM_ROL_SUPERVISOR, alias: '' },
+  { email: 'gortiz@grupoantun.com.ar', nombre: 'Ortiz Gabriel', rol: CRM_ROL_SUPERVISOR, alias: '' },
   { email: 'sgodoy@grupoantun.com.ar', nombre: 'Godoy Santiago', rol: CRM_ROL_RESPONSABLE, alias: 'SANTI' },
   { email: 'evaca@grupoantun.com.ar', nombre: 'Vaca Ezequiel', rol: CRM_ROL_RESPONSABLE, alias: 'EZE' },
   { email: 'faguero@grupoantun.com.ar', nombre: 'Aguero Fabio', rol: CRM_ROL_RESPONSABLE, alias: 'FABIO' },
@@ -79,7 +90,8 @@ const CRM_SITUACIONES = {
   BAJA: { orden: 9, etiqueta: 'Baja' },
 };
 
-const CRM_ENC_USUARIOS = ['Email', 'Nombre', 'Rol', 'AliasBase', 'Activo'];
+const CRM_ENC_USUARIOS = ['Email', 'Nombre', 'Rol', 'AliasBase', 'Activo',
+  'ClaveHash', 'ClaveSal', 'DebeCambiarClave'];
 const CRM_ENC_CASOS = ['Solicitud', 'ResponsableEmail', 'EstadoCaso', 'UltimaGestion',
   'UltimoCanal', 'UltimoResultado', 'ProximoContacto', 'PromesaFecha', 'PromesaMonto',
   'MotivoNoPago', 'ActualizadoPor'];
@@ -99,29 +111,31 @@ function doGet() {
 }
 
 /**
- * Crea las hojas CRM_* (si no existen) y carga los usuarios iniciales. Quien
- * lo corre queda como SUPERVISOR. Se puede correr más de una vez: no
- * duplica usuarios ni borra datos.
+ * Crea las hojas CRM_* (si no existen) y carga los usuarios iniciales con la
+ * clave inicial. Se puede correr más de una vez: no duplica usuarios, no
+ * borra datos y no toca las claves de los usuarios que ya existen.
  */
 function crmInicializar() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  crmHoja(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
-  crmHoja(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS);
-  crmHoja(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
-  crmHoja(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA);
+  const hoja = crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
+  // Por si la hoja se creó con una versión anterior (sin columnas de clave).
+  hoja.getRange(1, 1, 1, CRM_ENC_USUARIOS.length).setValues([CRM_ENC_USUARIOS]).setFontWeight('bold');
+  crmHoja_(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS);
+  crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
+  crmHoja_(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA);
 
-  const existentes = crmLeerUsuarios(ss).map(function (u) { return u.email; });
-  const nuevos = CRM_USUARIOS_INICIALES.slice();
-  const yo = Session.getEffectiveUser().getEmail().toLowerCase();
-  if (yo) nuevos.unshift({ email: yo, nombre: yo, rol: CRM_ROL_SUPERVISOR, alias: '' });
-
-  const hoja = ss.getSheetByName(CRM_HOJA_USUARIOS);
-  nuevos.forEach(function (u) {
+  const usuarios = crmLeerUsuarios_(ss);
+  const existentes = usuarios.map(function (u) { return u.email; });
+  CRM_USUARIOS_INICIALES.forEach(function (u) {
     if (existentes.indexOf(u.email) >= 0) return;
-    hoja.appendRow([u.email, u.nombre, u.rol, u.alias, true]);
+    hoja.appendRow([u.email, u.nombre, u.rol, u.alias, true].concat(crmClaveInicial_()));
     existentes.push(u.email);
   });
-  crmAuditar(ss, yo, 'Inicializar CRM', 'Hojas y usuarios iniciales verificados');
+  // Usuarios cargados sin clave (versión anterior o a mano en la hoja).
+  usuarios.forEach(function (u, i) {
+    if (!u.tieneClave) hoja.getRange(i + 2, 6, 1, 3).setValues([crmClaveInicial_()]);
+  });
+  crmAuditar_(ss, Session.getEffectiveUser().getEmail(), 'Inicializar CRM', 'Hojas y usuarios iniciales verificados');
   SpreadsheetApp.getUi().alert('CRM listo. Ahora publicalo: Implementar > Nueva implementación > Aplicación web (ver README).');
 }
 
@@ -187,14 +201,14 @@ function crmEsActiva(codigo) {
 // ---------------------------------------------------------------------------
 
 /** Datos iniciales: quién soy y las listas del formulario. */
-function crmInicio() {
-  const u = crmUsuarioActual();
+function crmInicio(token) {
+  const u = crmUsuarioActual_(token);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   return {
     usuario: u,
     esSupervisor: u.rol === CRM_ROL_SUPERVISOR,
     responsables: u.rol === CRM_ROL_SUPERVISOR
-      ? crmLeerUsuarios(ss).filter(function (x) { return x.activo; })
+      ? crmLeerUsuarios_(ss).filter(function (x) { return x.activo; })
         .map(function (x) { return { email: x.email, nombre: x.nombre }; })
       : [],
     listas: {
@@ -209,12 +223,12 @@ function crmInicio() {
  * Cartera visible para el usuario: el responsable ve solo la suya, el
  * supervisor ve todo. Incluye rescindidos/bajas (la vista los separa).
  */
-function crmListarCartera() {
-  const u = crmUsuarioActual();
-  const ctx = crmContexto();
+function crmListarCartera(token) {
+  const u = crmUsuarioActual_(token);
+  const ctx = crmContexto_();
   const hoy = crmHoyStr();
   return ctx.planes
-    .filter(function (p) { return crmPuedeVer(u, p); })
+    .filter(function (p) { return crmPuedeVer_(u, p); })
     .map(function (p) {
       const c = ctx.casos[p.solicitud] || {};
       const g = ctx.gestionesMes[p.solicitud] || { intentos: 0, efectivos: 0 };
@@ -235,13 +249,13 @@ function crmListarCartera() {
 }
 
 /** Ficha completa de un plan: datos de BASE, notas viejas y gestiones. */
-function crmFichaPlan(solicitud) {
-  const u = crmUsuarioActual();
-  const ctx = crmContexto();
-  const p = crmBuscarPlan(ctx, solicitud);
-  if (!crmPuedeVer(u, p)) throw new Error('No tenés acceso a este plan.');
+function crmFichaPlan(token, solicitud) {
+  const u = crmUsuarioActual_(token);
+  const ctx = crmContexto_();
+  const p = crmBuscarPlan_(ctx, solicitud);
+  if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
 
-  const gestiones = crmLeerObjetos(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES)
+  const gestiones = crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES)
     .filter(function (g) { return String(g.Solicitud) === p.solicitud; })
     .map(function (g) {
       return {
@@ -264,11 +278,11 @@ function crmFichaPlan(solicitud) {
  * Registra un intento de contacto / actualización sobre un plan y actualiza
  * el estado vigente del caso.
  */
-function crmRegistrarGestion(solicitud, datos) {
-  const u = crmUsuarioActual();
-  const ctx = crmContexto();
-  const p = crmBuscarPlan(ctx, solicitud);
-  if (!crmPuedeVer(u, p)) throw new Error('No tenés acceso a este plan.');
+function crmRegistrarGestion(token, solicitud, datos) {
+  const u = crmUsuarioActual_(token);
+  const ctx = crmContexto_();
+  const p = crmBuscarPlan_(ctx, solicitud);
+  if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
   if (CRM_CANALES.indexOf(datos.canal) < 0) throw new Error('Canal inválido.');
   if (CRM_ESTADOS_CASO.indexOf(datos.estadoCaso) < 0) throw new Error('Estado inválido.');
   if (datos.estadoCaso === 'Promesa de pago' && !datos.promesaFecha) {
@@ -279,13 +293,13 @@ function crmRegistrarGestion(solicitud, datos) {
   lock.waitLock(20000);
   try {
     const ahora = new Date();
-    const hojaG = crmHoja(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
+    const hojaG = crmHoja_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
     hojaG.appendRow([
       ahora, u.email, u.nombre, p.solicitud, datos.canal, datos.resultado || '',
       datos.estadoCaso, datos.motivo || '', crmFecha(datos.promesaFecha), datos.promesaMonto || '',
       crmFecha(datos.proximoContacto), datos.nota || '', p.avance, p.situacion.codigo,
     ]);
-    crmActualizarCaso(ctx.ss, p.solicitud, {
+    crmActualizarCaso_(ctx.ss, p.solicitud, {
       EstadoCaso: datos.estadoCaso,
       UltimaGestion: ahora,
       UltimoCanal: datos.canal,
@@ -299,23 +313,23 @@ function crmRegistrarGestion(solicitud, datos) {
   } finally {
     lock.releaseLock();
   }
-  return crmFichaPlan(solicitud);
+  return crmFichaPlan(token, solicitud);
 }
 
 /** Supervisor: reasigna uno o varios planes a un responsable. */
-function crmReasignar(solicitudes, email) {
-  const u = crmExigirSupervisor();
+function crmReasignar(token, solicitudes, email) {
+  const u = crmExigirSupervisor_(token);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const destino = crmLeerUsuarios(ss).filter(function (x) { return x.email === email && x.activo; })[0];
+  const destino = crmLeerUsuarios_(ss).filter(function (x) { return x.email === email && x.activo; })[0];
   if (!destino) throw new Error('Usuario destino inexistente o inactivo.');
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     solicitudes.forEach(function (s) {
-      crmActualizarCaso(ss, String(s), { ResponsableEmail: email, ActualizadoPor: u.email });
+      crmActualizarCaso_(ss, String(s), { ResponsableEmail: email, ActualizadoPor: u.email });
     });
-    crmAuditar(ss, u.email, 'Reasignar', solicitudes.length + ' plan(es) → ' + email + ': ' + solicitudes.join(', '));
+    crmAuditar_(ss, u.email, 'Reasignar', solicitudes.length + ' plan(es) → ' + email + ': ' + solicitudes.join(', '));
   } finally {
     lock.releaseLock();
   }
@@ -323,20 +337,20 @@ function crmReasignar(solicitudes, email) {
 }
 
 /** Supervisor: lista de usuarios. */
-function crmListarUsuarios() {
-  crmExigirSupervisor();
-  return crmLeerUsuarios(SpreadsheetApp.getActiveSpreadsheet());
+function crmListarUsuarios(token) {
+  crmExigirSupervisor_(token);
+  return crmLeerUsuarios_(SpreadsheetApp.getActiveSpreadsheet());
 }
 
 /** Supervisor: alta o modificación de un usuario (clave = email). */
-function crmGuardarUsuario(datos) {
-  const u = crmExigirSupervisor();
+function crmGuardarUsuario(token, datos) {
+  const u = crmExigirSupervisor_(token);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const email = String(datos.email || '').trim().toLowerCase();
-  if (!/^[^@\s]+@[^@\s]+$/.test(email)) throw new Error('Email inválido.');
+  if (!crmEmailValido_(email)) throw new Error('El email tiene que ser @' + CRM_DOMINIO + '.');
   if ([CRM_ROL_SUPERVISOR, CRM_ROL_RESPONSABLE].indexOf(datos.rol) < 0) throw new Error('Rol inválido.');
 
-  const usuarios = crmLeerUsuarios(ss);
+  const usuarios = crmLeerUsuarios_(ss);
   const quedanSupervisores = usuarios.filter(function (x) {
     return x.email !== email && x.activo && x.rol === CRM_ROL_SUPERVISOR;
   }).length + (datos.activo && datos.rol === CRM_ROL_SUPERVISOR ? 1 : 0);
@@ -344,30 +358,32 @@ function crmGuardarUsuario(datos) {
 
   const fila = [email, datos.nombre || email, datos.rol,
     String(datos.alias || '').trim().toUpperCase(), !!datos.activo];
-  const hoja = crmHoja(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
+  const hoja = crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
   const idx = usuarios.map(function (x) { return x.email; }).indexOf(email);
+  // Modificar no toca la clave; un alta nace con la clave inicial.
   if (idx >= 0) hoja.getRange(idx + 2, 1, 1, fila.length).setValues([fila]);
-  else hoja.appendRow(fila);
-  crmAuditar(ss, u.email, idx >= 0 ? 'Modificar usuario' : 'Alta usuario', JSON.stringify(fila));
-  return crmLeerUsuarios(ss);
+  else hoja.appendRow(fila.concat(crmClaveInicial_()));
+  if (idx >= 0 && !fila[4]) crmCerrarSesiones_(email);
+  crmAuditar_(ss, u.email, idx >= 0 ? 'Modificar usuario' : 'Alta usuario', JSON.stringify(fila));
+  return crmLeerUsuarios_(ss);
 }
 
 /** Supervisor: números para el tablero. */
-function crmTableroSupervisor() {
-  crmExigirSupervisor();
-  const ctx = crmContexto();
+function crmTableroSupervisor(token) {
+  crmExigirSupervisor_(token);
+  const ctx = crmContexto_();
   const hoy = crmHoyStr();
 
   // Por responsable
   const porResp = {};
-  crmLeerUsuarios(ctx.ss).forEach(function (x) {
-    if (x.rol === CRM_ROL_RESPONSABLE && x.activo) porResp[x.email] = crmFilaResp(x.nombre);
+  crmLeerUsuarios_(ctx.ss).forEach(function (x) {
+    if (x.rol === CRM_ROL_RESPONSABLE && x.activo) porResp[x.email] = crmFilaResp_(x.nombre);
   });
-  const sinAsignar = crmFilaResp('(sin asignar)');
+  const sinAsignar = crmFilaResp_('(sin asignar)');
 
   ctx.planes.forEach(function (p) {
     if (p.responsableEmail && !porResp[p.responsableEmail]) {
-      porResp[p.responsableEmail] = crmFilaResp(p.responsableNombre);
+      porResp[p.responsableEmail] = crmFilaResp_(p.responsableNombre);
     }
     const r = p.responsableEmail ? porResp[p.responsableEmail] : sinAsignar;
     const cod = p.situacion.codigo;
@@ -419,7 +435,7 @@ function crmTableroSupervisor() {
   desde.setDate(desde.getDate() - 13);
   const desdeStr = crmFmt(desde);
   const actividad = {};
-  crmLeerObjetos(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+  crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
     const dia = crmFmt(g.FechaHora);
     if (dia < desdeStr) return;
     const quien = g.UsuarioNombre || g.UsuarioEmail;
@@ -431,18 +447,127 @@ function crmTableroSupervisor() {
 }
 
 // ---------------------------------------------------------------------------
+// Acceso: login con mail @grupoantun.com.ar + clave
+// ---------------------------------------------------------------------------
+
+/** Valida mail y clave; devuelve un token de sesión. */
+function crmLogin(email, clave) {
+  email = String(email || '').trim().toLowerCase();
+  if (!crmEmailValido_(email)) throw new Error('Ingresá con tu mail @' + CRM_DOMINIO + '.');
+  const cache = CacheService.getScriptCache();
+  const claveIntentos = 'int_' + email;
+  const intentos = Number(cache.get(claveIntentos) || 0);
+  if (intentos >= CRM_MAX_INTENTOS) {
+    throw new Error('Demasiados intentos fallidos. Esperá 15 minutos o pedí a un supervisor que blanquee tu clave.');
+  }
+
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const fila = crmFilaUsuario_(ss, email);
+  const ok = fila && fila.activo && fila.hash && crmHashClave_(clave, fila.sal) === fila.hash;
+  if (!ok) {
+    cache.put(claveIntentos, String(intentos + 1), CRM_BLOQUEO_SEG);
+    throw new Error('Mail o clave incorrectos.');
+  }
+  cache.remove(claveIntentos);
+  const token = Utilities.getUuid() + Utilities.getUuid();
+  cache.put('ses_' + token, JSON.stringify({ email: email, t: Date.now() }), CRM_SESION_SEG);
+  crmAuditar_(ss, email, 'Ingreso', '');
+  return { token: token, debeCambiarClave: fila.debeCambiar };
+}
+
+function crmLogout(token) {
+  if (token) CacheService.getScriptCache().remove('ses_' + token);
+}
+
+/** Cambio de clave del propio usuario (obligatorio tras alta o blanqueo). */
+function crmCambiarClave(token, actual, nueva) {
+  const u = crmUsuarioActual_(token, true);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const fila = crmFilaUsuario_(ss, u.email);
+  if (crmHashClave_(actual, fila.sal) !== fila.hash) throw new Error('La clave actual no es correcta.');
+  nueva = String(nueva || '');
+  if (nueva.length < CRM_CLAVE_MIN) throw new Error('La clave nueva tiene que tener al menos ' + CRM_CLAVE_MIN + ' caracteres.');
+  if (nueva === CRM_CLAVE_INICIAL || nueva === actual) throw new Error('La clave nueva tiene que ser distinta de la actual.');
+  const sal = Utilities.getUuid();
+  crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).getRange(fila.fila, 6, 1, 3)
+    .setValues([[crmHashClave_(nueva, sal), sal, false]]);
+  crmAuditar_(ss, u.email, 'Cambio de clave', '');
+  return true;
+}
+
+/** Supervisor: vuelve la clave de un usuario a la inicial y obliga a cambiarla. */
+function crmBlanquearClave(token, email) {
+  const u = crmExigirSupervisor_(token);
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const fila = crmFilaUsuario_(ss, String(email || '').toLowerCase());
+  if (!fila) throw new Error('Usuario inexistente.');
+  crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).getRange(fila.fila, 6, 1, 3).setValues([crmClaveInicial_()]);
+  CacheService.getScriptCache().remove('int_' + fila.email);
+  crmCerrarSesiones_(fila.email);
+  crmAuditar_(ss, u.email, 'Blanqueo de clave', fila.email);
+  return crmLeerUsuarios_(ss);
+}
+
+function crmEmailValido_(email) {
+  return new RegExp('^[^@\\s]+@' + CRM_DOMINIO.replace(/\./g, '\\.') + '$').test(email);
+}
+
+/** [hash, sal, debeCambiar] de la clave inicial, con sal nueva. */
+function crmClaveInicial_() {
+  const sal = Utilities.getUuid();
+  return [crmHashClave_(CRM_CLAVE_INICIAL, sal), sal, true];
+}
+
+function crmHashClave_(clave, sal) {
+  let h = sal + '|' + String(clave || '');
+  for (let i = 0; i < CRM_HASH_ITERACIONES; i++) {
+    h = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, h + sal, Utilities.Charset.UTF_8)
+      .map(function (b) { return ((b < 0 ? b + 256 : b)).toString(16).padStart(2, '0'); }).join('');
+  }
+  return h;
+}
+
+/** Fila cruda de CRM_Usuarios (con hash), o null. Nunca sale al navegador. */
+function crmFilaUsuario_(ss, email) {
+  const filas = crmLeerObjetos_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS);
+  for (let i = 0; i < filas.length; i++) {
+    if (String(filas[i].Email).trim().toLowerCase() === email) {
+      return {
+        fila: i + 2, email: email, activo: crmBool_(filas[i].Activo),
+        hash: String(filas[i].ClaveHash || ''), sal: String(filas[i].ClaveSal || ''),
+        debeCambiar: crmBool_(filas[i].DebeCambiarClave),
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Las sesiones viven en CacheService (no se pueden listar), así que para
+ * cortar las de un usuario se marca una "época": cualquier token de ese
+ * mail emitido antes deja de valer (ver crmUsuarioActual_).
+ */
+function crmCerrarSesiones_(email) {
+  CacheService.getScriptCache().put('epoca_' + email, String(Date.now()), CRM_SESION_SEG);
+}
+
+function crmBool_(v) {
+  return v === true || String(v).toUpperCase() === 'TRUE';
+}
+
+// ---------------------------------------------------------------------------
 // Acceso a datos
 // ---------------------------------------------------------------------------
 
 /** Lee BASE + CRM_Casos + gestiones del mes y arma los planes resueltos. */
-function crmContexto() {
+function crmContexto_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojaBase = ss.getSheetByName(HOJA_BASE);
   if (!hojaBase) throw new Error('No encuentro la hoja "' + HOJA_BASE + '"');
   const valores = hojaBase.getDataRange().getValues();
   const encabezados = valores[0];
 
-  const usuarios = crmLeerUsuarios(ss);
+  const usuarios = crmLeerUsuarios_(ss);
   const porAlias = {};
   const porEmail = {};
   usuarios.forEach(function (x) {
@@ -451,7 +576,7 @@ function crmContexto() {
   });
 
   const casos = {};
-  crmLeerObjetos(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS).forEach(function (c) {
+  crmLeerObjetos_(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS).forEach(function (c) {
     casos[String(c.Solicitud)] = {
       responsableEmail: String(c.ResponsableEmail || '').toLowerCase(),
       estadoCaso: c.EstadoCaso || 'Sin gestionar',
@@ -464,7 +589,7 @@ function crmContexto() {
 
   const mes = crmFmt(new Date(), 'yyyy-MM');
   const gestionesMes = {};
-  crmLeerObjetos(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+  crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
     if (crmFmt(g.FechaHora, 'yyyy-MM') !== mes) return;
     const k = String(g.Solicitud);
     gestionesMes[k] = gestionesMes[k] || { intentos: 0, efectivos: 0 };
@@ -495,7 +620,7 @@ function crmContexto() {
       formaPago: crmFmt(f[CRM_COL_FORMA_PAGO - 1]), tipoPlan: crmFmt(f[CRM_COL_TIPO_PLAN - 1]),
       scoring: crmFmt(f[CRM_COL_SCORING - 1]),
       cuotas: f.slice(COL_C2 - 1, COL_C2 - 1 + CRM_CANT_CUOTAS).map(function (v) { return String(v || ''); }),
-      notasBase: crmNotasBase(encabezados, f),
+      notasBase: crmNotasBase_(encabezados, f),
       situacion: situacion,
       aliasBase: alias,
       responsableEmail: resp ? resp.email : '',
@@ -506,7 +631,7 @@ function crmContexto() {
 }
 
 /** Columnas de texto libre de BASE (AH en adelante) que tengan algo. */
-function crmNotasBase(encabezados, fila) {
+function crmNotasBase_(encabezados, fila) {
   const notas = [];
   for (let c = CRM_COL_PRIMERA_NOTA - 1; c < fila.length; c++) {
     const v = fila[c];
@@ -516,47 +641,57 @@ function crmNotasBase(encabezados, fila) {
   return notas;
 }
 
-function crmBuscarPlan(ctx, solicitud) {
+function crmBuscarPlan_(ctx, solicitud) {
   const p = ctx.planes.filter(function (x) { return x.solicitud === String(solicitud); })[0];
   if (!p) throw new Error('No encuentro la solicitud ' + solicitud + ' en BASE.');
   return p;
 }
 
-function crmPuedeVer(u, plan) {
+function crmPuedeVer_(u, plan) {
   return u.rol === CRM_ROL_SUPERVISOR || plan.responsableEmail === u.email;
 }
 
-function crmUsuarioActual() {
-  const email = String(Session.getActiveUser().getEmail() || '').toLowerCase();
-  if (!email) {
-    throw new Error('No pude identificar tu cuenta de Google. La app tiene que estar publicada ' +
-      'desde una cuenta del mismo dominio que los usuarios (ver README).');
-  }
-  const u = crmLeerUsuarios(SpreadsheetApp.getActiveSpreadsheet())
+/**
+ * Usuario de la sesión (token que devolvió crmLogin). Exige usuario activo
+ * y con la clave ya cambiada, salvo permitirClaveInicial (solo para
+ * crmCambiarClave). Los errores de sesión empiezan con "SESION:" para que
+ * la pantalla vuelva al login.
+ */
+function crmUsuarioActual_(token, permitirClaveInicial) {
+  const cache = CacheService.getScriptCache();
+  const ses = token ? JSON.parse(cache.get('ses_' + token) || 'null') : null;
+  const epoca = ses ? Number(cache.get('epoca_' + ses.email) || 0) : 0;
+  if (!ses || ses.t < epoca) throw new Error('SESION: tu sesión venció, volvé a ingresar.');
+  const email = ses.email;
+  const u = crmLeerUsuarios_(SpreadsheetApp.getActiveSpreadsheet())
     .filter(function (x) { return x.email === email && x.activo; })[0];
-  if (!u) throw new Error('El usuario ' + email + ' no está habilitado en el CRM. Pedíselo a un supervisor.');
+  if (!u || !crmEmailValido_(u.email)) throw new Error('SESION: tu usuario no está habilitado en el CRM.');
+  if (u.debeCambiarClave && !permitirClaveInicial) throw new Error('SESION: tenés que cambiar la clave.');
+  cache.put('ses_' + token, JSON.stringify(ses), CRM_SESION_SEG); // renueva
   return u;
 }
 
-function crmExigirSupervisor() {
-  const u = crmUsuarioActual();
+function crmExigirSupervisor_(token) {
+  const u = crmUsuarioActual_(token);
   if (u.rol !== CRM_ROL_SUPERVISOR) throw new Error('Solo un supervisor puede hacer esto.');
   return u;
 }
 
-function crmLeerUsuarios(ss) {
-  return crmLeerObjetos(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).map(function (x) {
+function crmLeerUsuarios_(ss) {
+  return crmLeerObjetos_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).map(function (x) {
     return {
       email: String(x.Email || '').trim().toLowerCase(), nombre: String(x.Nombre || ''),
       rol: String(x.Rol || '').trim().toUpperCase(), alias: String(x.AliasBase || '').trim().toUpperCase(),
-      activo: x.Activo === true || String(x.Activo).toUpperCase() === 'TRUE',
+      activo: crmBool_(x.Activo),
+      debeCambiarClave: crmBool_(x.DebeCambiarClave),
+      tieneClave: !!x.ClaveHash,
     };
   }).filter(function (x) { return x.email; });
 }
 
 /** Actualiza (o crea) la fila de CRM_Casos de una solicitud con los campos dados. */
-function crmActualizarCaso(ss, solicitud, campos) {
-  const hoja = crmHoja(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS);
+function crmActualizarCaso_(ss, solicitud, campos) {
+  const hoja = crmHoja_(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS);
   const ultima = hoja.getLastRow();
   const ids = ultima > 1 ? hoja.getRange(2, 1, ultima - 1, 1).getValues().map(function (r) { return String(r[0]); }) : [];
   const idx = ids.indexOf(String(solicitud));
@@ -576,12 +711,12 @@ function crmActualizarCaso(ss, solicitud, campos) {
   else hoja.appendRow(fila);
 }
 
-function crmAuditar(ss, email, accion, detalle) {
-  crmHoja(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA).appendRow([new Date(), email, accion, detalle]);
+function crmAuditar_(ss, email, accion, detalle) {
+  crmHoja_(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA).appendRow([new Date(), email, accion, detalle]);
 }
 
 /** Devuelve la hoja, creándola con encabezados si no existe. */
-function crmHoja(ss, nombre, encabezados) {
+function crmHoja_(ss, nombre, encabezados) {
   let hoja = ss.getSheetByName(nombre);
   if (!hoja) {
     hoja = ss.insertSheet(nombre);
@@ -592,8 +727,8 @@ function crmHoja(ss, nombre, encabezados) {
 }
 
 /** Filas de una hoja CRM como objetos {Encabezado: valor}. */
-function crmLeerObjetos(ss, nombre, encabezados) {
-  const hoja = crmHoja(ss, nombre, encabezados);
+function crmLeerObjetos_(ss, nombre, encabezados) {
+  const hoja = crmHoja_(ss, nombre, encabezados);
   const ultima = hoja.getLastRow();
   if (ultima < 2) return [];
   return hoja.getRange(2, 1, ultima - 1, encabezados.length).getValues().map(function (f) {
@@ -603,7 +738,7 @@ function crmLeerObjetos(ss, nombre, encabezados) {
   });
 }
 
-function crmFilaResp(nombre) {
+function crmFilaResp_(nombre) {
   return {
     nombre: nombre, activa: 0, p1: 0, p2: 0, p34: 0, bajas: 0, prioGestionados: 0,
     prioSinGestion: 0, intentosMes: 0, efectivosMes: 0, regularizadosConGestion: 0,

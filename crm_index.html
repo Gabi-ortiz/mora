@@ -65,31 +65,57 @@
   .barra i { display: block; height: 100%; background: var(--accent); }
   details summary { cursor: pointer; color: var(--accent); }
   [hidden] { display: none !important; }
+  .login { max-width: 360px; margin: 60px auto; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 24px; }
+  .login h2 { margin: 0 0 4px; font-size: 18px; }
+  .login label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); margin-top: 12px; }
+  .login button { width: 100%; margin-top: 16px; }
+  .login .err { color: var(--p1); margin-top: 10px; min-height: 1em; }
+  #salir { margin-left: 8px; }
 </style>
 </head>
 <body>
 <header>
   <h1>CRM Mora</h1>
   <nav id="nav"></nav>
-  <div class="yo" id="yo">Cargando…</div>
+  <div class="yo"><span id="yo"></span><button class="btn sec" id="salir" hidden>Salir</button></div>
 </header>
-<main id="main"><div class="vacio">Cargando cartera…</div></main>
+<main id="main"></main>
 <div id="ficha" hidden><div class="panel" id="fichaPanel"></div></div>
 <div id="toast" hidden></div>
 
 <script>
-var S = { ini: null, planes: [], vista: 'cartera', filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {} };
+var S = { token: null, ini: null, planes: [], vista: 'cartera', filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {} };
 
 function esc(v) {
   return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
-function api(fn) {
+// Llamada al servidor sin sesión (login).
+function apiLibre(fn) {
   var args = Array.prototype.slice.call(arguments, 1);
   return new Promise(function (ok, mal) {
-    google.script.run.withSuccessHandler(ok).withFailureHandler(function (e) { mal(e); })[fn].apply(null, args);
+    google.script.run.withSuccessHandler(ok).withFailureHandler(mal)[fn].apply(null, args);
   });
+}
+// Llamada con sesión: agrega el token y, si la sesión venció, vuelve al login.
+function api(fn) {
+  var args = [fn, S.token].concat(Array.prototype.slice.call(arguments, 1));
+  return apiLibre.apply(null, args).catch(function (e) {
+    var msg = String(e && e.message || e);
+    if (msg.indexOf('SESION:') >= 0) {
+      if (msg.indexOf('cambiar la clave') >= 0) pantallaCambioClave(true);
+      else pantallaLogin(msg.replace(/^.*SESION:\s*/, ''));
+      var err = new Error(msg.replace(/^.*SESION:\s*/, ''));
+      err.sesion = true;
+      throw err;
+    }
+    throw e;
+  });
+}
+function guardarToken(t) {
+  S.token = t;
+  try { if (t) localStorage.setItem('crmToken', t); else localStorage.removeItem('crmToken'); } catch (e) {}
 }
 function toast(msg) {
   var t = document.getElementById('toast');
@@ -110,25 +136,98 @@ function telLinks(tel) {
     '<a href="https://wa.me/549' + n + '" target="_blank">WhatsApp</a></span>';
 }
 
-// ---------- Arranque ----------
-api('crmInicio').then(function (ini) {
-  S.ini = ini;
-  document.getElementById('yo').textContent = ini.usuario.nombre + (ini.esSupervisor ? ' · Supervisor' : '');
-  armarNav();
-  return cargarCartera();
-}).catch(function (e) {
-  document.getElementById('main').innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>';
+// ---------- Arranque / acceso ----------
+try { S.token = localStorage.getItem('crmToken'); } catch (e) {}
+if (S.token) iniciar(); else pantallaLogin('');
+
+function iniciar() {
+  document.getElementById('main').innerHTML = '<div class="vacio">Cargando cartera…</div>';
+  S.vista = 'cartera';
+  api('crmInicio').then(function (ini) {
+    S.ini = ini;
+    document.getElementById('yo').textContent = ini.usuario.nombre + (ini.esSupervisor ? ' · Supervisor' : '');
+    document.getElementById('salir').hidden = false;
+    armarNav();
+    return cargarCartera();
+  }).catch(function (e) {
+    if (e.sesion) return; // api() ya mostró el login o el cambio de clave
+    document.getElementById('main').innerHTML = '<div class="vacio alerta">' + esc(e.message || e) + '</div>';
+  });
+}
+
+function sinSesion() {
+  S.ini = null; S.planes = [];
+  document.getElementById('nav').innerHTML = '';
   document.getElementById('yo').textContent = '';
-});
+  document.getElementById('salir').hidden = true;
+  cerrarFicha();
+}
+
+function pantallaLogin(msg) {
+  guardarToken(null); sinSesion();
+  document.getElementById('main').innerHTML = '<form class="login" id="fLogin"><h2>Ingresar</h2>' +
+    '<div class="muted">Con tu mail @grupoantun.com.ar y tu clave del CRM.</div>' +
+    '<label>Mail<input name="email" type="email" autocomplete="username" required></label>' +
+    '<label>Clave<input name="clave" type="password" autocomplete="current-password" required></label>' +
+    '<button class="btn" type="submit">Ingresar</button><div class="err">' + esc(msg || '') + '</div></form>';
+  var f = document.getElementById('fLogin');
+  f.email.focus();
+  f.onsubmit = function (e) {
+    e.preventDefault();
+    var b = f.querySelector('button'); b.disabled = true; b.textContent = 'Ingresando…';
+    apiLibre('crmLogin', f.email.value, f.clave.value).then(function (r) {
+      guardarToken(r.token);
+      if (r.debeCambiarClave) pantallaCambioClave(true); else iniciar();
+    }).catch(function (err) {
+      b.disabled = false; b.textContent = 'Ingresar';
+      f.querySelector('.err').textContent = err.message || err;
+    });
+  };
+}
+
+function pantallaCambioClave(obligatorio) {
+  sinSesion();
+  document.getElementById('salir').hidden = false;
+  document.getElementById('main').innerHTML = '<form class="login" id="fClave"><h2>Cambiar clave</h2>' +
+    (obligatorio ? '<div class="muted">Es tu primer ingreso o te blanquearon la clave: elegí una clave nueva (mínimo 8 caracteres).</div>' : '') +
+    '<label>Clave actual<input name="actual" type="password" autocomplete="current-password" required></label>' +
+    '<label>Clave nueva<input name="nueva" type="password" autocomplete="new-password" minlength="8" required></label>' +
+    '<label>Repetir clave nueva<input name="repetir" type="password" autocomplete="new-password" minlength="8" required></label>' +
+    '<button class="btn" type="submit">Guardar clave</button>' +
+    (obligatorio ? '' : '<button class="btn sec" type="button" id="cancelarClave">Cancelar</button>') +
+    '<div class="err"></div></form>';
+  var f = document.getElementById('fClave');
+  if (!obligatorio) document.getElementById('cancelarClave').onclick = iniciar;
+  f.actual.focus();
+  f.onsubmit = function (e) {
+    e.preventDefault();
+    var err = f.querySelector('.err');
+    if (f.nueva.value !== f.repetir.value) { err.textContent = 'Las claves nuevas no coinciden.'; return; }
+    var b = f.querySelector('button'); b.disabled = true;
+    api('crmCambiarClave', f.actual.value, f.nueva.value).then(function () {
+      toast('Clave actualizada.'); iniciar();
+    }).catch(function (x) { b.disabled = false; err.textContent = x.message || x; });
+  };
+}
+
+document.getElementById('salir').onclick = function () {
+  var t = S.token;
+  pantallaLogin('');
+  apiLibre('crmLogout', t).catch(function () {});
+};
 
 function armarNav() {
   var vistas = [['cartera', S.ini.esSupervisor ? 'Carteras' : 'Mi cartera'], ['agenda', 'Agenda de hoy'], ['bajas', 'Rescindidos / bajas']];
   if (S.ini.esSupervisor) vistas.push(['tablero', 'Tablero supervisor'], ['usuarios', 'Usuarios']);
+  vistas.push(['clave', 'Cambiar clave']);
   document.getElementById('nav').innerHTML = vistas.map(function (v) {
     return '<button data-v="' + v[0] + '" class="' + (S.vista === v[0] ? 'activo' : '') + '">' + v[1] + '</button>';
   }).join('');
   Array.prototype.forEach.call(document.querySelectorAll('#nav button'), function (b) {
-    b.onclick = function () { S.vista = b.getAttribute('data-v'); armarNav(); render(); };
+    b.onclick = function () {
+      if (b.getAttribute('data-v') === 'clave') return pantallaCambioClave(false);
+      S.vista = b.getAttribute('data-v'); armarNav(); render();
+    };
   });
 }
 
@@ -404,12 +503,27 @@ function dibujarUsuarios(m, us) {
       '<td><select name="rol">' + opciones(['RESPONSABLE', 'SUPERVISOR'], u.rol) + '</select></td>' +
       '<td><input name="alias" size="8" value="' + esc(u.alias) + '" title="Cómo figura en la columna RESPONSABLE de BASE"></td>' +
       '<td><input type="checkbox" name="activo"' + (u.activo ? ' checked' : '') + '></td>' +
-      '<td><button class="btn sec guardar">' + (nuevo ? 'Agregar' : 'Guardar') + '</button></td></tr>';
+      '<td>' + (nuevo ? '<span class="muted">Clave inicial</span>' : u.debeCambiarClave ? '<span class="muted">Pendiente de cambio</span>' : 'Personal') + '</td>' +
+      '<td><button class="btn sec guardar">' + (nuevo ? 'Agregar' : 'Guardar') + '</button>' +
+      (nuevo ? '' : ' <button class="btn sec blanquear">Blanquear clave</button>') + '</td></tr>';
   };
-  m.innerHTML = '<p class="muted">"Alias BASE" es el nombre con el que el responsable figura en la columna RESPONSABLE de BASE (EZE, FABIO, SANTI): así se asigna su cartera automáticamente. Las reasignaciones hechas desde el CRM tienen prioridad sobre esa columna.</p>' +
-    '<div class="tabla"><table><thead><tr><th>Email</th><th>Nombre</th><th>Rol</th><th>Alias BASE</th><th>Activo</th><th></th></tr></thead><tbody>' +
+  m.innerHTML = '<p class="muted">Solo mails @grupoantun.com.ar. Los usuarios nuevos y los blanqueos quedan con la clave inicial y deben cambiarla al ingresar. ' +
+    '"Alias BASE" es el nombre con el que el responsable figura en la columna RESPONSABLE de BASE (EZE, FABIO, SANTI): así se asigna su cartera automáticamente. Las reasignaciones hechas desde el CRM tienen prioridad sobre esa columna.</p>' +
+    '<div class="tabla"><table><thead><tr><th>Email</th><th>Nombre</th><th>Rol</th><th>Alias BASE</th><th>Activo</th><th>Clave</th><th></th></tr></thead><tbody>' +
     us.map(function (u) { return fila(u, false); }).join('') +
     fila({ email: '', nombre: '', rol: 'RESPONSABLE', alias: '', activo: true }, true) + '</tbody></table></div>';
+  Array.prototype.forEach.call(m.querySelectorAll('button.blanquear'), function (b) {
+    b.onclick = function () {
+      var email = b.closest('tr').getAttribute('data-email');
+      if (b.getAttribute('data-confirmar') !== '1') {
+        b.setAttribute('data-confirmar', '1'); b.textContent = '¿Confirmar blanqueo?'; return;
+      }
+      b.disabled = true;
+      api('crmBlanquearClave', email).then(function (lista) {
+        toast('Clave de ' + email + ' blanqueada a la clave inicial.'); dibujarUsuarios(m, lista);
+      }).catch(function (e) { b.disabled = false; error(e); });
+    };
+  });
   Array.prototype.forEach.call(m.querySelectorAll('button.guardar'), function (b) {
     b.onclick = function () {
       var tr = b.closest('tr'), q = function (n) { return tr.querySelector('[name="' + n + '"]'); };
