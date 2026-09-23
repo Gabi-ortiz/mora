@@ -298,8 +298,9 @@ function crmInicio(token) {
   return {
     usuario: u,
     esSupervisor: u.rol === CRM_ROL_SUPERVISOR,
+    // Solo responsables activos: a un supervisor no se le asignan planes.
     responsables: u.rol === CRM_ROL_SUPERVISOR
-      ? crmLeerUsuarios_(ss).filter(function (x) { return x.activo; })
+      ? crmLeerUsuarios_(ss).filter(function (x) { return x.activo && x.rol === CRM_ROL_RESPONSABLE; })
         .map(function (x) { return { email: x.email, nombre: x.nombre }; })
       : [],
     listas: {
@@ -424,8 +425,10 @@ function crmRegistrarGestion(token, solicitud, datos) {
 function crmReasignar(token, solicitudes, email) {
   const u = crmExigirSupervisor_(token);
   const ss = crmDatos_();
-  const destino = crmLeerUsuarios_(ss).filter(function (x) { return x.email === email && x.activo; })[0];
-  if (!destino) throw new Error('Usuario destino inexistente o inactivo.');
+  const destino = crmLeerUsuarios_(ss).filter(function (x) {
+    return x.email === email && x.activo && x.rol === CRM_ROL_RESPONSABLE;
+  })[0];
+  if (!destino) throw new Error('Solo se puede asignar a un responsable activo.');
 
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
