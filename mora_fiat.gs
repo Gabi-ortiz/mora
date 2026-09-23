@@ -6,6 +6,8 @@
  * la hoja BASE, todos los tableros se recalculan solos. La hoja BASE no se toca.
  * La hoja PARAMETROS (tabla de incentivos) solo se crea la primera vez: editala ahí.
  * La hoja Historial diario nunca se borra: cada día hábil se le agrega la foto del Tablero Estado Actual.
+ * En PARAMETROS (columna H) se carga a mano la fecha en que la BASE cambia de avance cada mes:
+ * de ahí salen el "período medido" de FIAT y el "avance vigente desde" de los tableros.
  *
  * Columnas de BASE que se usan:
  *   A RESPONSABLE | B SOLICITUD | C GRUPO | D Orden | H NyAP | I TELEFONO
@@ -64,6 +66,7 @@ function construirTableros() {
   if (!ss.getSheetByName('BASE')) throw new Error('No existe la hoja BASE');
 
   crearParametros_(ss);
+  asegurarCalendarioAvance_(ss);
   crearCalc_(ss);
   crearTableroFiat_(ss);
   crearTableroActual_(ss);
@@ -110,6 +113,52 @@ function crearParametros_(ss) {
   sh.setColumnWidths(1, 6, 130);
 }
 
+// ---------------------------------------------------------------- CALENDARIO DE CAMBIO DE AVANCE
+// Tabla en PARAMETROS!H:I. Se carga a mano la fecha en que la BASE pasa al avance siguiente (+1).
+// Ej.: 21/09/2026 => desde ese día la BASE muestra el avance de septiembre y FIAT mide agosto.
+const FECHA_INICIAL_AVANCE = [2026, 8, 21]; // 21/09/2026 (mes base 0)
+
+/** Agrega la tabla de fechas a PARAMETROS si todavía no existe (no toca lo cargado). */
+function asegurarCalendarioAvance_(ss) {
+  const sh = ss.getSheetByName(HOJAS.PARAM);
+  if (sh.getRange('H2').getValue() !== '') return;
+  sh.getRange('H1').setValue('Fechas de cambio de avance (cargar cada mes)').setFontWeight('bold').setFontColor(COLOR_TITULO);
+  estiloHeader_(sh.getRange('H2:I2').setValues([['FECHA CAMBIO DE AVANCE', 'PERÍODO QUE MIDE FIAT']]));
+  sh.getRange('H3').setValue(new Date(FECHA_INICIAL_AVANCE[0], FECHA_INICIAL_AVANCE[1], FECHA_INICIAL_AVANCE[2]));
+  sh.getRange('H3:H200').setNumberFormat('dd/mm/yyyy')
+    .setDataValidation(SpreadsheetApp.newDataValidation().requireDate().setAllowInvalid(false)
+      .setHelpText('Fecha en que la BASE pasó al avance siguiente').build());
+  sh.getRange('I3').setFormula('=ARRAYFORMULA(IF(H3:H200="","",PROPER(TEXT(EOMONTH(H3:H200,-1),"mmmm yyyy"))))');
+  sh.getRange('H3:I200').setHorizontalAlignment('center');
+  sh.setColumnWidths(8, 2, 170);
+  sh.getRange('H2').setNote('Cargá una fila por mes con el día en que la BASE sumó +1 al avance. ' +
+    'Los tableros toman la última fecha que sea menor o igual a hoy.');
+}
+
+/**
+ * Arma una fórmula donde f = última fecha de cambio de avance <= hoy.
+ * Mientras no haya una fecha cargada del mes en curso, antepone un aviso.
+ */
+function formulaAvance_(texto) {
+  return 'LET(u, MAXIFS(PARAMETROS!H3:H200, PARAMETROS!H3:H200, "<="&TODAY()), ' +
+    'f, IF(u=0, DATE(YEAR(TODAY()),MONTH(TODAY()),1), u), ' +
+    'aviso, IF(u < DATE(YEAR(TODAY()),MONTH(TODAY()),1), "⚠ Sin cambio de avance cargado este mes (si la BASE ya cambió, cargá la fecha en PARAMETROS)  —  ", ""), ' +
+    'aviso&' + texto + ')';
+}
+
+/** Última fecha de cambio de avance <= hoy (o null si no hay ninguna cargada). */
+function ultimoCambioAvance_(ss) {
+  const sh = ss.getSheetByName(HOJAS.PARAM);
+  if (!sh) return null;
+  const hoy = new Date();
+  let ultima = null;
+  sh.getRange('H3:H200').getValues().forEach(function (r) {
+    const d = r[0];
+    if (d instanceof Date && d <= hoy && (!ultima || d > ultima)) ultima = d;
+  });
+  return ultima;
+}
+
 // ---------------------------------------------------------------- CALC (una fila por plan)
 function crearCalc_(ss) {
   const sh = hojaNueva_(ss, HOJAS.CALC);
@@ -147,7 +196,7 @@ function crearCalc_(ss) {
 function crearTableroFiat_(ss) {
   const sh = hojaNueva_(ss, HOJAS.FIAT);
   titulo_(sh, 'TABLERO MEDICIÓN FIAT (mes vencido)',
-    '="Período medido: "&PROPER(TEXT(EOMONTH(TODAY(),-1),"mmmm yyyy"))&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"');
+    '=' + formulaAvance_('"Período medido: "&PROPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"'));
 
   const enc = ['CUOTA MEDIDA', 'AVANCE EN BASE HOY', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS',
     '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)', 'FALTÓ P/ TRAMO B (planes)'];
@@ -215,7 +264,7 @@ function colorTramos_(sh, rango) {
 function crearTableroActual_(ss) {
   const sh = hojaNueva_(ss, HOJAS.ACTUAL);
   titulo_(sh, 'TABLERO ESTADO ACTUAL POR AVANCE',
-    '="Foto al "&TEXT(TODAY(),"dd/mm/yyyy")&"  —  la cuota del avance actual vence a fin de mes. Los avances 3, 5, 7, 9 y 12 son los que FIAT mide el mes próximo."');
+    '=' + formulaAvance_('"Foto al "&TEXT(TODAY(),"dd/mm/yyyy")&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&" (mes de avance: "&PROPER(TEXT(f,"mmmm yyyy"))&")  —  los avances 3, 5, 7, 9 y 12 son los que FIAT mide el mes próximo."'));
 
   const f = `=LET(
   av, CALC!I2:I, e, CALC!K2:K, p, PARAMETROS!A3:F7,
@@ -278,7 +327,9 @@ function crearGestionMes_(ss) {
 
 // ---------------------------------------------------------------- HISTORIAL DIARIO
 const ENC_HISTORIAL = ['FECHA', 'AVANCE', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS', '% MORA (MORA + RESC.)',
-  'PRÓX. MEDICIÓN FIAT', 'TRAMO A: MENOR A', 'PLANES A REGULARIZAR P/ TRAMO A', 'PLANES A REGULARIZAR P/ TRAMO B'];
+  'PRÓX. MEDICIÓN FIAT', 'TRAMO A: MENOR A', 'PLANES A REGULARIZAR P/ TRAMO A', 'PLANES A REGULARIZAR P/ TRAMO B',
+  'AVANCE VIGENTE DESDE'];
+const COLS_TABLERO_ACTUAL = 10; // columnas A:J del Tablero Estado Actual que se copian al historial
 
 /** Crea la hoja solo si no existe: el historial nunca se borra. */
 function crearHistorial_(ss) {
@@ -323,10 +374,12 @@ function guardarHistorial() {
   if (!tab) throw new Error('No existe la hoja ' + HOJAS.ACTUAL + '. Ejecutá construirTableros primero.');
   crearHistorial_(ss);
   const hist = ss.getSheetByName(HOJAS.HIST);
+  // Mantiene el encabezado al día si se agregaron columnas nuevas
+  estiloHeader_(hist.getRange(1, 1, 1, ENC_HISTORIAL.length).setValues([ENC_HISTORIAL]));
 
   SpreadsheetApp.flush();
   const filas = Math.max(tab.getLastRow() - 4, 1);
-  const datos = tab.getRange(5, 1, filas, ENC_HISTORIAL.length - 1).getValues()
+  const datos = tab.getRange(5, 1, filas, COLS_TABLERO_ACTUAL).getValues()
     .filter(function (r) { return r[0] !== '' && r[0] !== null; });
   if (!datos.length) return;
 
@@ -344,12 +397,14 @@ function guardarHistorial() {
   }
 
   const fecha = Utilities.parseDate(hoy, tz, 'yyyy-MM-dd');
-  const nuevas = datos.map(function (r) { return [fecha].concat(r); });
+  const vigente = ultimoCambioAvance_(ss) || '';
+  const nuevas = datos.map(function (r) { return [fecha].concat(r, [vigente]); });
   const desde = hist.getLastRow() + 1;
   hist.getRange(desde, 1, nuevas.length, ENC_HISTORIAL.length).setValues(nuevas).setHorizontalAlignment('center');
   hist.getRange(desde, 1, nuevas.length, 1).setNumberFormat('dd/mm/yyyy');
   hist.getRange(desde, 7, nuevas.length, 1).setNumberFormat('0.0%');
   hist.getRange(desde, 9, nuevas.length, 1).setNumberFormat('0%');
+  hist.getRange(desde, ENC_HISTORIAL.length, nuevas.length, 1).setNumberFormat('dd/mm/yyyy');
   // Línea separadora entre días
   hist.getRange(desde, 1, 1, ENC_HISTORIAL.length)
     .setBorder(true, null, null, null, null, null, '#1f3864', SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
