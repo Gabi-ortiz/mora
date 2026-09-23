@@ -220,6 +220,22 @@ avisa para borrarlas a mano.
   con avance y situación del plan al momento de la gestión.
 - **CRM_Auditoria**: acciones de supervisor (reasignaciones, usuarios).
 
+### Columnas de BASE que usa el CRM
+Lee **A a AG** por posición: A Responsable, B Solicitud, C Grupo, D Orden,
+E Modelo, F Sobrepauta, H Cliente, I-J Teléfonos, K Documento, N Avance,
+O Estado, P-Q Vendedor/Supervisor, R..AD = C2..C14, AE Forma de pago,
+AF Tipo de plan (hasta acá llega lo que viene de Fiat) y **AG Scoring**
+(lo carga el equipo; el texto de la llamada de bienvenida/calidad — tiene
+que seguir estando). Si cambia el orden de A..AG hay que ajustar las
+constantes `CRM_COL_*` / `COL_*`.
+
+De **AH en adelante** está el seguimiento viejo en texto libre. Menú
+"Mora" > "CRM: importar notas viejas de BASE" lo copia una vez a
+CRM_Gestiones (canal "Importado de planilla", sin fecha, así que no suma
+en las gestiones del mes). Se puede volver a correr: saltea los planes ya
+importados. Después de importar, esas columnas se pueden borrar de BASE
+y la ficha sigue mostrando el historial.
+
 ### Instalación
 El proyecto de Apps Script queda con **3 archivos separados** (no pegar
 todo en uno):

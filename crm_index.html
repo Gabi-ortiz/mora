@@ -52,6 +52,8 @@
   .cuota b { display: block; font-size: 13px; }
   .c-P { background: #e6f4ea; } .c-I { background: #fdecea; color: var(--p1); } .c-R { background: #e0e0e0; }
   .c-mes { outline: 2px solid var(--p2); }
+  .scoring { background: #f7f9fd; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; white-space: pre-wrap; }
+  .scoring > span:first-child { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
   section.bloque { border-top: 1px solid var(--line); padding-top: 12px; margin-top: 12px; }
   section.bloque h3 { font-size: 14px; margin: 0 0 8px; }
   .form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 8px 12px; }
@@ -387,9 +389,11 @@ function renderFicha(d) {
     dato('Teléfono alternativo', telLinks(p.telefonoAlt)) + dato('Modelo', esc(p.modelo)) +
     dato('Avance', esc(p.avance) + (p.situacion.medidoPorFiat ? ' — Fiat mide la cuota ' + esc(p.avance) + ' el mes próximo' : '')) +
     dato('Forma de pago', esc(p.formaPago)) + dato('Tipo de plan', esc(p.tipoPlan)) +
-    dato('Sobrepauta / cuota pactada', esc(p.sobrepauta)) + dato('Scoring', esc(p.scoring)) +
+    dato('Sobrepauta / cuota pactada', esc(p.sobrepauta)) +
     dato('Vendedor / Supervisor venta', esc(p.vendedor) + ' / ' + esc(p.supervisorVenta)) +
     dato('Responsable', esc(p.responsableNombre)) + '</div>';
+
+  h += '<div class="scoring"><span>Scoring (col. AG)</span>' + (esc(p.scoring) || '<span class="muted">Sin scoring cargado</span>') + '</div>';
 
   h += '<div class="muted" style="font-size:12px">Cuotas (C2…C14). Recuadrada: cuota del mes en curso.</div><div class="cuotas">' +
     p.cuotas.map(function (v, i) {

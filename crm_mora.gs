@@ -43,8 +43,8 @@ const CRM_COL_VENDEDOR = 16;     // P
 const CRM_COL_SUPERVISOR_VTA = 17; // Q
 const CRM_COL_FORMA_PAGO = 31;   // AE
 const CRM_COL_TIPO_PLAN = 32;    // AF
-const CRM_COL_SCORING = 33;      // AG
-const CRM_COL_PRIMERA_NOTA = 34; // AH en adelante: notas / seguimiento en texto libre
+const CRM_COL_SCORING = 33;      // AG — la carga el equipo; tiene que seguir en BASE
+const CRM_COL_PRIMERA_NOTA = 34; // AH en adelante: seguimiento viejo en texto libre (ver crmImportarNotasBase)
 const CRM_CANT_CUOTAS = 13;      // C2..C14
 
 const CRM_ROL_SUPERVISOR = 'SUPERVISOR';
@@ -80,6 +80,9 @@ const CRM_CANALES = ['Llamada', 'WhatsApp', 'SMS', 'Mail', 'Presencial', 'Sin co
 const CRM_RESULTADOS = ['Atendió', 'No atendió', 'Buzón / apagado', 'Mensaje enviado',
   'Respondió mensaje', 'Número erróneo', 'N/A'];
 const CRM_RESULTADOS_EFECTIVOS = ['Atendió', 'Respondió mensaje'];
+// Canal con el que quedan en CRM_Gestiones las notas importadas de BASE.
+// Van sin FechaHora, así no cuentan como gestiones del mes ni en la actividad.
+const CRM_CANAL_IMPORTADO = 'Importado de planilla';
 // Motivos de no pago: los códigos que ya usa el equipo (col. "ACT MOTIVO NO PAGO").
 const CRM_MOTIVOS_NO_PAGO = ['',
   'P/E - Problemas económicos',
@@ -183,6 +186,43 @@ function crmMoverHojasViejas_(ssDatos) {
     movidas.push(nombre);
   });
   return movidas;
+}
+
+/**
+ * Copia UNA vez el seguimiento viejo en texto libre de BASE (columnas AH en
+ * adelante) a CRM_Gestiones, una fila por celda con contenido, con canal
+ * CRM_CANAL_IMPORTADO. Salta los planes que ya tienen notas importadas, así
+ * que se puede volver a correr (por ejemplo, para planes nuevos) sin
+ * duplicar. Después de importar, esas columnas de BASE se pueden borrar:
+ * la ficha muestra lo importado.
+ */
+function crmImportarNotasBase() {
+  const ctx = crmContexto_();
+  const yaImportados = {};
+  crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+    if (g.Canal === CRM_CANAL_IMPORTADO) yaImportados[String(g.Solicitud)] = true;
+  });
+
+  const filas = [];
+  let planes = 0;
+  ctx.planes.forEach(function (p) {
+    if (yaImportados[p.solicitud] || !p.notasBase.length) return;
+    planes++;
+    p.notasBase.forEach(function (n) {
+      filas.push(['', '', 'Planilla BASE', p.solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
+        '[' + n.columna + '] ' + n.valor, p.avance, p.situacion.codigo]);
+    });
+  });
+
+  if (filas.length) {
+    const hoja = crmHoja_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
+    hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, CRM_ENC_GESTIONES.length).setValues(filas);
+  }
+  crmAuditar_(ctx.ss, Session.getEffectiveUser().getEmail(), 'Importar notas de BASE',
+    filas.length + ' notas de ' + planes + ' planes');
+  SpreadsheetApp.getUi().alert('Importación lista: ' + filas.length + ' notas de ' + planes + ' planes.' +
+    (Object.keys(yaImportados).length ? '\n(' + Object.keys(yaImportados).length + ' planes ya estaban importados y se saltearon.)' : '') +
+    '\n\nRevisá algunas fichas en el CRM antes de borrar las columnas AH en adelante de BASE (la AG, Scoring, se queda).');
 }
 
 /** Archivo de datos del CRM (hojas CRM_*). */
@@ -306,8 +346,21 @@ function crmFichaPlan(token, solicitud) {
   const p = crmBuscarPlan_(ctx, solicitud);
   if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
 
-  const gestiones = crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES)
-    .filter(function (g) { return String(g.Solicitud) === p.solicitud; })
+  const delPlan = crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES)
+    .filter(function (g) { return String(g.Solicitud) === p.solicitud; });
+
+  // Historial viejo: si ya se importó, sale de CRM_Gestiones (sirve aunque
+  // se borren las columnas de BASE); si no, de las columnas AH+ en vivo.
+  const importadas = delPlan.filter(function (g) { return g.Canal === CRM_CANAL_IMPORTADO; });
+  if (importadas.length) {
+    p.notasBase = importadas.map(function (g) {
+      const m = String(g.Nota).match(/^\[(.*?)\] ([\s\S]*)$/);
+      return m ? { columna: m[1], valor: m[2] } : { columna: '', valor: String(g.Nota) };
+    });
+  }
+
+  const gestiones = delPlan
+    .filter(function (g) { return g.Canal !== CRM_CANAL_IMPORTADO; })
     .map(function (g) {
       return {
         fechaHora: crmFmt(g.FechaHora, 'yyyy-MM-dd HH:mm'), usuario: g.UsuarioNombre || g.UsuarioEmail,
@@ -687,9 +740,22 @@ function crmNotasBase_(encabezados, fila) {
   for (let c = CRM_COL_PRIMERA_NOTA - 1; c < fila.length; c++) {
     const v = fila[c];
     if (v === '' || v === null) continue;
-    notas.push({ columna: String(encabezados[c] || '').trim() || ('Col ' + (c + 1)), valor: crmFmt(v) });
+    const letra = crmLetraColumna_(c + 1);
+    const titulo = String(encabezados[c] || '').trim();
+    notas.push({ columna: titulo ? titulo + ' (col ' + letra + ')' : 'Col ' + letra, valor: crmFmt(v) });
   }
   return notas;
+}
+
+/** 34 → "AH". */
+function crmLetraColumna_(n) {
+  let s = '';
+  while (n > 0) {
+    const r = (n - 1) % 26;
+    s = String.fromCharCode(65 + r) + s;
+    n = Math.floor((n - 1) / 26);
+  }
+  return s;
 }
 
 function crmBuscarPlan_(ctx, solicitud) {

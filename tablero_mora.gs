@@ -75,6 +75,7 @@ function onOpen() {
     .addItem('Instalar snapshot automático diario', 'instalarTriggerDiario')
     .addSeparator()
     .addItem('CRM: inicializar hojas y usuarios', 'crmInicializar') // ver crm_mora.gs
+    .addItem('CRM: importar notas viejas de BASE', 'crmImportarNotasBase')
     .addToUi();
 }
 
