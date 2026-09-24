@@ -461,10 +461,9 @@ function itemNav(it) {
     (it[3] ? '<span class="n">' + it[3] + '</span>' : '') + '</button>';
 }
 function encabezado() {
-  var d = new Date(), mes = MESES[d.getMonth()], sig = MESES[(d.getMonth() + 1) % 12];
+  var d = new Date(), mes = MESES[d.getMonth()];
   var t = {
-    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear() +
-      (S.ini.esSupervisor ? ' · avances que se miden en ' + sig + ': ' + S.ini.cuotasFiat.join(', ') : ' · cartera activa')],
+    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear()],
     objetivos: ['Objetivos', 'Qué tiene que trabajar cada responsable y hasta cuándo'],
     agenda: ['Agenda de hoy', 'Re-contactos agendados y promesas de pago vencidas sin pago'],
     bajas: ['Rescindidos y bajas', 'Solo consulta: no entran en la cola de trabajo'],
