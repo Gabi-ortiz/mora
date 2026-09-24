@@ -20,7 +20,7 @@ python procesar_extracto.py "08-2026 BANCO MACRO.xlsx" "Conciliacion Macro.xlsx"
 - `NORMA_REGISTRACION.md`: propuesta de cómo registrar en FBS para que el cruce sea automático.
 
 ```
-pip install openpyxl pymupdf
+pip install -r requirements.txt
 python conciliar.py "08-2026 BANCO MACRO.xlsx" mayor_e.pdf mayor_o.pdf salida.xlsx "Conciliaciones Bancos 07-2026.xlsx"
 ```
 
