@@ -19,6 +19,9 @@
  */
 
 // --- CONFIGURACIÓN CRM ---
+// Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
+// que los archivos pegados en Apps Script son de versiones distintas.
+const CRM_VERSION = '2026-09-25.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -359,6 +362,7 @@ function crmInicio(token) {
   const u = crmUsuarioActual_(token);
   const ss = crmDatos_();
   return {
+    version: CRM_VERSION,
     usuario: u,
     esSupervisor: u.rol === CRM_ROL_SUPERVISOR,
     // Solo responsables activos: a un supervisor no se le asignan planes.
