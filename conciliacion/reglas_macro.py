@@ -120,4 +120,10 @@ REGLAS = [
     ("1212", None, None, "GASTOS BANCARIOS", "Mantenimiento caja de seguridad", "Asiento gasto bancario (automático)"),
     ("1214", None, None, "GASTOS BANCARIOS", "IVA caja de seguridad", "Asiento gasto bancario (automático)"),
     ("1215", None, None, "GASTOS BANCARIOS", "Percepción IVA caja de seguridad", "Asiento gasto bancario (automático)"),
+    # --- Agregados con julio 2026 (Turin) ---
+    ("5",    None, None, "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente + IVA", "Asiento gasto bancario (automático)"),
+    ("1802", None, None, "GASTOS BANCARIOS", "Comisión cheque consulta + IVA", "Asiento gasto bancario (automático)"),
+    ("1479", None, None, "IMPUESTOS Y RETENCIONES", "Impuesto de sellos Córdoba (DGR)", "Asiento gasto bancario (automático)"),
+    ("1972", None, None, "IMPUESTOS Y RETENCIONES", "Retención IIBB Tucumán", "Asiento gasto bancario (automático)"),
+    ("4196", None, r"PLAN", "PLAN DE AHORRO / TERMINAL", "Débito plan de ahorro (Chevrolet, Fiat, etc.)", "Pago a terminal"),
 ]

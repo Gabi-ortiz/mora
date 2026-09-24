@@ -58,7 +58,7 @@ const VENTANA_SUGERIDO = 10;
 const VENTANA_ID = 31;
 const TOLERANCIA = 0.02;
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
-const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145'];
+const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972'];   // van al asiento mensual de gastos
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
 
@@ -140,7 +140,12 @@ const REGLAS_INICIALES = [
   ["3205", "Ambos", "", "GASTOS BANCARIOS", "IVA comisión"],
   ["1212", "Ambos", "", "GASTOS BANCARIOS", "Mantenimiento caja de seguridad"],
   ["1214", "Ambos", "", "GASTOS BANCARIOS", "IVA caja de seguridad"],
-  ["1215", "Ambos", "", "GASTOS BANCARIOS", "Percepción IVA caja de seguridad"]
+  ["1215", "Ambos", "", "GASTOS BANCARIOS", "Percepción IVA caja de seguridad"],
+  ["5", "Ambos", "", "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente + IVA"],
+  ["1802", "Ambos", "", "GASTOS BANCARIOS", "Comisión cheque consulta + IVA"],
+  ["1479", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos Córdoba (DGR)"],
+  ["1972", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Retención IIBB Tucumán"],
+  ["4196", "Ambos", "PLAN", "PLAN DE AHORRO / TERMINAL", "Débito plan de ahorro (Chevrolet, Fiat, etc.)"]
 ];
 
 // ------------------------------------------------------------------ menú
@@ -150,6 +155,8 @@ function onOpen() {
     .addItem('1. Crear hojas de entrada', 'crearHojasEntrada')
     .addItem('2. Procesar conciliación', 'procesarConciliacion')
     .addItem('3. Cerrar mes (guardar foto y pasar pendientes)', 'cerrarMes')
+    .addSeparator()
+    .addItem('Agregar reglas nuevas del script', 'agregarReglasNuevas')
     .addToUi();
 }
 
@@ -814,6 +821,11 @@ function compensacionesFbs_(fbs, mismaClave) {
 }
 
 function reversionesFbs_(fbs) {
+  // anulaciones: "Anulacion As ..." contra el registro anulado (del mes o de un pendiente anterior), mismo importe opuesto
+  fbs.filter(a => a.match === null && /ANULA/i.test(a.texto)).forEach(a => {
+    const o = fbs.find(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA && dias_(x.fecha, a.fecha) <= 60);
+    if (o) { a.match = []; o.match = []; a.metodo = o.metodo = 'Compensa dentro de FBS (anulación)'; }
+  });
   const grupos = new Map();
   fbs.forEach(f => {
     if (f.match !== null || f.origen !== 'Mes') return;
@@ -838,6 +850,7 @@ function lotes_(banco, fbs) {
     if (f.match !== null || f.origen !== 'Mes') return;
     push(gf, f.fecha.getTime() + '|' + claveLote_(f) + '|' + (f.importe > 0), f);
     push(gf, f.fecha.getTime() + '|*|' + (f.importe > 0), f);
+    if (f.asiento) push(gf, f.fecha.getTime() + '|as:' + f.asiento + '|' + (f.importe > 0), f);   // varias líneas de un mismo asiento
   });
   Array.from(gb.values()).sort((a, b) => a.fecha - b.fecha).forEach(g => {
     if (g.items.some(b => b.match !== null)) return;
@@ -854,11 +867,19 @@ function lotes_(banco, fbs) {
 
 function gastosAsiento_(banco, fbs) {
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)));
-  const f = fbs.filter(x => x.match === null && /GASTOS BANCARIOS \d{2}\/\d{4}/.test(x.texto.toUpperCase()));
+  // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /GASTOS BANCARIOS \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
+    !/LIQ/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
   const dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
   unir_(b, f, 'Asiento gastos bancarios (dif. ' + formato_(dif) + ')');
-  return dif;
+  let ajuste = null;
+  if (Math.abs(dif) > TOLERANCIA) {
+    // la diferencia queda como partida pendiente para que el control no la esconda
+    ajuste = partidaFbs_({ fecha: f[0].fecha, comentario: 'Diferencia asiento gastos bancarios (FBS vs. banco) - revisar',
+      referencia: '', asiento: f[0].asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+  }
+  return { dif, ajuste };
 }
 
 function conciliar_(banco, fbs) {
@@ -869,7 +890,7 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, porRef, '2. Referencia', 60, false);
   pasada_(banco, fbs, porNombre, '3. Nombre', 15, false);
   agrupados_(banco, fbs);
-  const difGastos = gastosAsiento_(banco, fbs);
+  const gastos = gastosAsiento_(banco, fbs);
   compensacionesFbs_(fbs, true);
   pasada_(banco, fbs, () => true, '4. Fecha + importe', 0, true);
   lotes_(banco, fbs);
@@ -878,7 +899,8 @@ function conciliar_(banco, fbs) {
   combinaciones_(banco, fbs);
   compensacionesFbs_(fbs, false);
   reversionesFbs_(fbs);
-  return difGastos;
+  if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
+  return gastos ? gastos.dif : null;
 }
 
 function sector_(p) {
@@ -887,19 +909,39 @@ function sector_(p) {
 }
 
 function gastosBancarios_(movs) {
-  const g = { com: 0, iva: 0, perc: 0, sircreb: 0, ret: 0, imp: 0 };
+  const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
   movs.forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
     if (m.causal === '1684' || m.causal === '1685') g.imp += d;
     else if (m.causal === '1297') g.sircreb += d;
     else if (m.causal === '4145') g.ret += d;
+    else if (m.causal === '1972') g.tuc += d;
+    else if (m.causal === '1479') g.sellos += d;
     else if (m.cat === 'GASTOS BANCARIOS') {
-      if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d; else if (t.includes('IVA')) g.iva += d; else g.com += d;
+      if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
+      else if (t.includes('IVA')) { if (m.causal === '5') g.iva105 += d; else g.iva += d; }
+      else if (m.causal === '5') g.int += d;
+      else g.com += d;
     }
   });
-  return [['Comisiones', g.com], ['IVA 21%', g.iva], ['Percepciones IVA', g.perc], ['Percepciones IIBB (SIRCREB)', g.sircreb],
-    ['Retenciones IIBB rentas financieras', g.ret], ['Imp. créditos y débitos (total)', g.imp],
+  const filas = [['Comisiones', g.com], ['IVA 21%', g.iva], ['Intereses', g.int], ['IVA 10,5%', g.iva105],
+    ['Percepciones IVA', g.perc], ['Percepciones IIBB (SIRCREB)', g.sircreb], ['Retenciones IIBB rentas financieras', g.ret],
+    ['Percepciones IIBB Tucumán', g.tuc], ['DGR Sellos Córdoba', g.sellos], ['Imp. créditos y débitos (total)', g.imp],
     ['    Crédito computable 33%', g.imp * 0.33], ['    Imp. créditos y débitos (gasto 67%)', g.imp * 0.67]];
+  const total = g.com + g.iva + g.int + g.iva105 + g.perc + g.sircreb + g.ret + g.tuc + g.sellos + g.imp;
+  return filas.filter(f => Math.abs(f[1]) > 0.004).concat([['TOTAL (debe coincidir con el asiento de FBS)', total]]);
+}
+
+/** Agrega a la hoja "Reglas" las reglas del script que todavía no están (no toca las existentes). */
+function agregarReglasNuevas() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = ss.getSheetByName(HOJA.reglas);
+  if (!sh) throw new Error('Falta la hoja "' + HOJA.reglas + '". Corré "1. Crear hojas de entrada".');
+  const clave = r => [String(r[0]).trim(), normalizar_(r[1]).charAt(0), String(r[2] || '').trim()].join('|');
+  const existentes = new Set(sh.getDataRange().getValues().slice(1).map(clave));
+  const nuevas = REGLAS_INICIALES.filter(r => !existentes.has(clave(r)));
+  if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, 5).setValues(nuevas);
+  SpreadsheetApp.getUi().alert(nuevas.length + ' reglas nuevas agregadas a "' + HOJA.reglas + '".');
 }
 
 /** Todo el proceso sobre matrices de valores (sin tocar hojas): se puede probar fuera de Sheets. */
