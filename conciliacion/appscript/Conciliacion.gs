@@ -232,7 +232,7 @@ function escribirTablero_(ss, res) {
   const filas = [];
   const estilos = [];   // 'titulo' | 'cab' | 'total' | 'dif' | ''
   const add = (fila, estilo) => { while (fila.length < 3) fila.push(''); filas.push(fila); estilos.push(estilo || ''); };
-  add(['CONCILIACIÓN BANCO MACRO — ' + (res.info.empresa || '') + ' — al ' + fechaTexto_(res.corte)], 'titulo');
+  add(['CONCILIACIÓN BANCO MACRO' + (res.info.empresa ? ' — ' + res.info.empresa : '') + ' — al ' + fechaTexto_(res.corte)], 'titulo');
   add([]);
   add(['Concepto', 'Importe', 'Partidas'], 'cab');
   add(['Cuenta E  ' + (res.infoE.cuenta || ''), res.saldoE]);
@@ -247,6 +247,12 @@ function escribirTablero_(ss, res) {
   add(['SALDO CONTABLE AJUSTADO', res.ajustado], 'total');
   add(['SALDO SEGÚN EXTRACTO al ' + fechaTexto_(res.corte), res.saldoBanco], 'total');
   add(['DIFERENCIA (control)', res.ajustado - res.saldoBanco], 'dif');
+  add([]);
+  add(['Control de apertura (inicio del mes)', 'Importe', ''], 'cab');
+  add(['  Saldo inicial FBS (E + O)', res.apertura.fbs]);
+  add(['  (+/-) Pendientes anteriores (neto)', res.apertura.pendientes]);
+  add(['  Saldo inicial del extracto', res.apertura.banco]);
+  add(['DIFERENCIA DE APERTURA', res.apertura.diferencia], 'dif');
   add([]);
   add(['Calidad del cruce — movimientos del extracto del mes', 'Importe', 'Cant.'], 'cab');
   Object.keys(res.metodos).sort().forEach(k => add(['  ' + k, res.metodos[k][1], res.metodos[k][0]]));
@@ -285,7 +291,8 @@ function escribirPendientes_(ss, nombre, res, sectores) {
   sh.getRange(1, 1).setValue(total).setFontWeight('bold');
   sh.getRange(2, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   if (filas.length) {
-    sh.getRange(3, 1, filas.length, cab.length).setValues(filas);
+    sh.getRange(3, 9, filas.length, 2).setNumberFormat('@');   // CUIT y referencias como texto
+    sh.getRange(3, 1, filas.length, cab.length).setValues(filas.map(f => f.map((v, i) => (i >= 8 ? String(v || '') : v))));
     sh.getRange(3, 3, filas.length, 1).setNumberFormat('dd/mm/yyyy');
     sh.getRange(3, 7, filas.length, 1).setNumberFormat(NUM_FMT);
   }
@@ -799,9 +806,17 @@ function conciliarTodo_(entrada) {
 
   const banco = movs.map(m => partidaBanco_(m, 'Mes'));
   const fbs = movimientosFbs_(e.asientos, o.asientos).map(a => partidaFbs_(a, 'Mes'));
-  leerAnteriores_(entrada.anteriores || [], desde).forEach(p => (p.lado === 'BANCO' ? banco : fbs).push(p));
-  if (!(entrada.anteriores || []).slice(1).some(r => String(r[0] || '').trim())) {
-    avisos.push('No hay "Pendientes anteriores": el control solo cierra si el mes anterior quedó conciliado sin partidas.');
+  const anteriores = leerAnteriores_(entrada.anteriores || [], desde);
+  anteriores.forEach(p => (p.lado === 'BANCO' ? banco : fbs).push(p));
+  // control de apertura: saldo FBS inicial + pendientes anteriores debe dar el saldo inicial del banco
+  const neto = anteriores.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0);
+  const saldoInicialBanco = redondear_(movs[0].saldo - movs[0].importe);
+  const apertura = { fbs: redondear_(e.info.saldoInicial + o.info.saldoInicial), pendientes: redondear_(neto),
+    banco: saldoInicialBanco };
+  apertura.diferencia = redondear_(apertura.fbs + apertura.pendientes - apertura.banco);
+  if (Math.abs(apertura.diferencia) >= 1000) {
+    avisos.unshift('La apertura no cierra por ' + formato_(apertura.diferencia) + ': faltan o sobran partidas en "' +
+      HOJA.anteriores + '" (pendientes del cierre anterior). Esa misma diferencia se arrastra al control del mes.');
   }
   const difGastos = conciliar_(banco, fbs);
 
@@ -835,7 +850,7 @@ function conciliarTodo_(entrada) {
   });
   fbs.forEach(f => { if (Array.isArray(f.match) && !f.match.length) conciliados.push([f.metodo, '', '', '', '', f.fecha, f.texto, f.importe, f.asiento, f.origen]); });
 
-  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado,
+  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura,
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
