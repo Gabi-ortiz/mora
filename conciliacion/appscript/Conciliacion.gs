@@ -13,6 +13,7 @@
  *   - "Pend. registrar en FBS"     : movimientos del banco sin registro en FBS (puntas 1 y 2).
  *   - "Pend. FBS sin banco"        : registros de FBS que el banco no muestra (puntas 3 y 4).
  *   - "Conciliados"                : cada cruce con el método usado (para auditar).
+ *   - "Historial"                  : una fila por mes cerrado, con los saldos y el link a la foto.
  *
  * Criterios de cruce (importe y sentido siempre iguales, tolerancia $0,02), en orden:
  *   1. CUIT/DNI  2. Referencia del banco en el comprobante FBS  3. Apellido
@@ -23,7 +24,9 @@
  *
  * Instalación: Extensiones > Apps Script, pegar este archivo, guardar y recargar la planilla.
  * Menú "Conciliación" > "1. Crear hojas de entrada" (una sola vez), pegar los archivos del mes y
- * "2. Procesar conciliación". Al cerrar el mes: "3. Pasar pendientes al mes siguiente".
+ * "2. Procesar conciliación". Al cerrar el mes: "3. Cerrar mes" guarda una copia completa de la planilla
+ * (foto) en la carpeta "Conciliaciones - Historial", la registra en la hoja "Historial" y pasa los
+ * pendientes a "Pendientes anteriores".
  */
 
 // ------------------------------------------------------------------ configuración
@@ -39,6 +42,8 @@ const HOJA = {
   pendBanco: 'Pend. registrar en FBS',
   pendFbs: 'Pend. FBS sin banco',
   conciliados: 'Conciliados',
+  historial: 'Historial',
+  foto: 'FOTO',
 };
 
 const SECTORES = [
@@ -144,7 +149,7 @@ function onOpen() {
   SpreadsheetApp.getUi().createMenu('Conciliación')
     .addItem('1. Crear hojas de entrada', 'crearHojasEntrada')
     .addItem('2. Procesar conciliación', 'procesarConciliacion')
-    .addItem('3. Pasar pendientes al mes siguiente', 'pasarPendientes')
+    .addItem('3. Cerrar mes (guardar foto y pasar pendientes)', 'cerrarMes')
     .addToUi();
 }
 
@@ -174,6 +179,16 @@ function crearHojasEntrada() {
 
 function procesarConciliacion() {
   const ss = SpreadsheetApp.getActive();
+  const res = procesar_(ss);
+  const dif = res.ajustado - res.saldoBanco;
+  ss.toast('Diferencia de control: ' + formato_(dif) + (res.avisos.length ? ' — ver avisos en el Tablero' : ''),
+    'Conciliación terminada', 10);
+}
+
+function procesar_(ss) {
+  if (ss.getSheetByName(HOJA.foto)) {
+    throw new Error('Esta planilla es una FOTO de un cierre y no se puede reprocesar. Trabajá en la planilla principal.');
+  }
   const leer = nombre => {
     const sh = ss.getSheetByName(nombre);
     if (!sh) throw new Error('Falta la hoja "' + nombre + '". Corré "1. Crear hojas de entrada".');
@@ -192,15 +207,108 @@ function procesarConciliacion() {
   escribirPendientes_(ss, HOJA.pendFbs, res, ['S3', 'S4']);
   escribirConciliados_(ss, res);
   ss.getSheetByName(HOJA.tablero).activate();
-  const dif = res.ajustado - res.saldoBanco;
-  ss.toast('Diferencia de control: ' + formato_(dif) + (res.avisos.length ? ' — ver avisos en el Tablero' : ''),
-    'Conciliación terminada', 10);
+  SpreadsheetApp.flush();
+  return res;
 }
 
-function pasarPendientes() {
+/**
+ * Cierre del mes:
+ *  1. reprocesa (para que la foto refleje exactamente lo que hay cargado),
+ *  2. guarda una COPIA COMPLETA de la planilla (entradas + tablero + pendientes) en la carpeta de historial,
+ *     protegida y marcada como foto para que nadie la reprocese,
+ *  3. agrega una fila en "Historial" con los saldos y el link a la foto,
+ *  4. pasa los pendientes a "Pendientes anteriores" y, si se confirma, vacía extracto y mayores.
+ */
+function cerrarMes() {
   const ss = SpreadsheetApp.getActive();
   const ui = SpreadsheetApp.getUi();
-  if (ui.alert('Reemplazar "' + HOJA.anteriores + '" con los pendientes de este cierre?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  const res = procesar_(ss);
+  const periodo = res.corte.getFullYear() + '-' + ('0' + (res.corte.getMonth() + 1)).slice(-2);
+  const empresa = res.info.empresa || '';
+  const dif = redondear_(res.ajustado - res.saldoBanco);
+
+  const hist = hojaHistorial_(ss);
+  const previos = hist.getLastRow() > 1 ? hist.getRange(2, 1, hist.getLastRow() - 1, 2).getValues() : [];
+  const yaCerrado = previos.some(r => String(r[0]) === periodo && String(r[1]) === empresa);
+  let msg = 'Cerrar ' + periodo + (empresa ? ' — ' + empresa : '') + '\n\nDiferencia de control: ' + formato_(dif) +
+    '\n\nSe va a guardar una foto de la conciliación en Drive y los pendientes pasan al mes siguiente.';
+  if (yaCerrado) msg += '\n\nATENCIÓN: este período ya tiene un cierre en "Historial". Se guarda una foto nueva (versión 2, 3...).';
+  if (Math.abs(dif) >= 1000) msg += '\n\nATENCIÓN: la diferencia de control no es cero.';
+  if (ui.alert('Cerrar mes', msg + '\n\n¿Continuar?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+
+  // 2. foto
+  const carpeta = carpetaHistorial_(ss);
+  let nombre = 'Conciliación Macro' + (empresa ? ' - ' + empresa : '') + ' - ' + periodo;
+  const version = previos.filter(r => String(r[0]) === periodo && String(r[1]) === empresa).length + 1;
+  if (version > 1) nombre += ' (v' + version + ')';
+  const archivo = DriveApp.getFileById(ss.getId()).makeCopy(nombre, carpeta);
+  marcarComoFoto_(SpreadsheetApp.openById(archivo.getId()), periodo, empresa);
+
+  // 3. historial
+  hist.appendRow([periodo, empresa, new Date(), Session.getActiveUser().getEmail(), res.saldoE, res.saldoO,
+    res.saldoE + res.saldoO, res.tot.S1, res.tot.S2, res.tot.S3, res.tot.S4, res.ajustado, res.saldoBanco, dif,
+    res.apertura.diferencia, archivo.getUrl()]);
+  const fila = hist.getLastRow();
+  hist.getRange(fila, 3).setNumberFormat('dd/mm/yyyy hh:mm');
+  hist.getRange(fila, 5, 1, 11).setNumberFormat(NUM_FMT);
+  hist.getRange(fila, 16).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir foto')
+    .setLinkUrl(archivo.getUrl()).build());
+
+  // 4. pendientes al mes siguiente
+  const n = pasarPendientes_(ss);
+  if (ui.alert('Mes cerrado', 'Foto guardada en la carpeta "' + carpeta.getName() + '" y registrada en "Historial".\n' + n +
+      ' partidas pasadas a "' + HOJA.anteriores + '".\n\n¿Vaciar las hojas Extracto, Mayor E y Mayor O para cargar el mes siguiente?',
+      ui.ButtonSet.YES_NO) === ui.Button.YES) {
+    [HOJA.extracto, HOJA.mayorE, HOJA.mayorO].forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
+  }
+  hist.activate();
+}
+
+function hojaHistorial_(ss) {
+  let sh = ss.getSheetByName(HOJA.historial);
+  if (sh) return sh;
+  sh = ss.insertSheet(HOJA.historial);
+  const cab = ['Período', 'Empresa', 'Fecha de cierre', 'Usuario', 'Saldo E', 'Saldo O', 'Saldo FBS', 'Dep. no registrados',
+    'Déb. no registrados', 'Dep. no acreditados', 'Pagos no debitados', 'Saldo ajustado', 'Saldo extracto',
+    'Diferencia control', 'Diferencia apertura', 'Foto'];
+  sh.getRange(1, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  sh.setFrozenRows(1);
+  sh.getRange('A:A').setNumberFormat('@');
+  return sh;
+}
+
+function carpetaHistorial_(ss) {
+  const nombre = 'Conciliaciones - Historial';
+  const padres = DriveApp.getFileById(ss.getId()).getParents();
+  const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  const it = padre.getFoldersByName(nombre);
+  return it.hasNext() ? it.next() : padre.createFolder(nombre);
+}
+
+/** Deja la copia como foto: hoja "FOTO" con los datos del cierre y todas las hojas protegidas (solo el dueño edita). */
+function marcarComoFoto_(copia, periodo, empresa) {
+  const info = copia.insertSheet(HOJA.foto, 0);
+  info.getRange(1, 1, 5, 2).setValues([
+    ['FOTO DE CIERRE — no modificar', ''],
+    ['Período', periodo],
+    ['Empresa', empresa],
+    ['Fecha de cierre', new Date()],
+    ['Cerrado por', Session.getActiveUser().getEmail()],
+  ]);
+  info.getRange(1, 1).setFontWeight('bold').setFontSize(14);
+  info.getRange(4, 2).setNumberFormat('dd/mm/yyyy hh:mm');
+  const yo = Session.getEffectiveUser();
+  copia.getSheets().forEach(sh => {
+    const p = sh.protect().setDescription('Foto de cierre ' + periodo);
+    p.addEditor(yo);
+    p.removeEditors(p.getEditors().filter(u => u.getEmail() !== yo.getEmail()));
+    if (p.canDomainEdit()) p.setDomainEdit(false);
+  });
+  const tablero = copia.getSheetByName(HOJA.tablero);
+  (tablero || info).activate();
+}
+
+function pasarPendientes_(ss) {
   const filas = [['Sector', 'Fecha', 'Concepto', 'Importe']];
   [HOJA.pendBanco, HOJA.pendFbs].forEach(nombre => {
     const sh = ss.getSheetByName(nombre);
@@ -210,12 +318,12 @@ function pasarPendientes() {
     const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe') };
     v.slice(2).forEach(r => { if (r[c.s]) filas.push([r[c.s], r[c.f], r[c.t], r[c.i]]); });
   });
-  let sh = ss.getSheetByName(HOJA.anteriores) || ss.insertSheet(HOJA.anteriores);
+  const sh = ss.getSheetByName(HOJA.anteriores) || ss.insertSheet(HOJA.anteriores);
   sh.clear();
   sh.getRange(1, 1, filas.length, 4).setValues(filas);
   sh.getRange(1, 1, 1, 4).setFontWeight('bold');
   sh.getRange(2, 4, Math.max(filas.length - 1, 1), 1).setNumberFormat(NUM_FMT);
-  ui.alert((filas.length - 1) + ' partidas pasadas a "' + HOJA.anteriores + '". Ya podés pegar el extracto y los mayores del mes siguiente.');
+  return filas.length - 1;
 }
 
 // ------------------------------------------------------------------ salida

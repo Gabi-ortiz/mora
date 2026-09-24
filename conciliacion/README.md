@@ -40,7 +40,9 @@ agosto 2026: mismos 4 totales y diferencia de control $143,21).
 3. Pegar desde A1 el extracto de Macro y las exportaciones a Excel del mayor E y O de FBS.
 4. **2. Procesar conciliación** → genera `Tablero` (4 puntas + control), `Pend. registrar en FBS`,
    `Pend. FBS sin banco` y `Conciliados`.
-5. Al cerrar el mes, **3. Pasar pendientes al mes siguiente** copia los pendientes a `Pendientes anteriores`.
+5. Al cerrar el mes, **3. Cerrar mes** guarda una copia completa y protegida de la planilla (foto) en la carpeta
+   `Conciliaciones - Historial`, agrega una fila en la hoja `Historial` con los saldos y el link, y pasa los
+   pendientes a `Pendientes anteriores`.
 
 La lógica de cruce no toca hojas (`conciliarTodo_` recibe matrices de valores), así que se puede probar con Node.
 
