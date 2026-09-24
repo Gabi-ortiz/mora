@@ -27,6 +27,7 @@ const CRM_HOJA_USUARIOS = 'CRM_Usuarios';
 const CRM_HOJA_CASOS = 'CRM_Casos';
 const CRM_HOJA_GESTIONES = 'CRM_Gestiones';
 const CRM_HOJA_AUDITORIA = 'CRM_Auditoria';
+const CRM_HOJA_OBJETIVOS = 'CRM_Objetivos';
 
 // Columnas de BASE que usa el CRM además de las de tablero_mora.gs.
 const CRM_COL_RESPONSABLE = 1;   // A — EZE / FABIO / SANTI
@@ -34,7 +35,8 @@ const CRM_COL_SOLICITUD = 2;     // B
 const CRM_COL_GRUPO = 3;         // C
 const CRM_COL_ORDEN = 4;         // D
 const CRM_COL_MODELO = 5;        // E
-const CRM_COL_SOBREPAUTA = 6;    // F
+const CRM_COL_SOBREPAUTA = 6;    // F — viene de la planilla de licitaciones
+const CRM_COL_EN_CONDICIONES = 7; // G — viene de la planilla de licitaciones
 const CRM_COL_CLIENTE = 8;       // H
 const CRM_COL_TELEFONO = 9;      // I
 const CRM_COL_TELEFONO_ALT = 10; // J
@@ -46,6 +48,10 @@ const CRM_COL_TIPO_PLAN = 32;    // AF
 const CRM_COL_SCORING = 33;      // AG — la carga el equipo; tiene que seguir en BASE
 const CRM_COL_PRIMERA_NOTA = 34; // AH en adelante: seguimiento viejo en texto libre (ver crmImportarNotasBase)
 const CRM_CANT_CUOTAS = 13;      // C2..C14
+// Columnas de AH+ que NO son seguimiento de mora sino datos de la etapa de
+// licitación (AO "ESTADO AGOSTO", AP "AGOSTO"): se muestran en la ficha como
+// datos de licitación y no entran en el historial de gestiones.
+const CRM_COLS_LICITACION = [41, 42]; // AO, AP
 
 const CRM_ROL_SUPERVISOR = 'SUPERVISOR';
 const CRM_ROL_RESPONSABLE = 'RESPONSABLE';
@@ -99,12 +105,13 @@ const CRM_MOTIVOS_NO_PAGO = ['',
 ];
 
 // Situación de cada plan según BASE (ver crmSituacion). "orden" define la
-// prioridad en la cola de trabajo.
+// prioridad en la cola de trabajo; "detalle" es la explicación que ve el
+// operador en la leyenda.
 const CRM_SITUACIONES = {
-  P1: { orden: 1, etiqueta: 'P1 · Atrasada (mide Fiat)' },
-  P2: { orden: 2, etiqueta: 'P2 · Cuota del mes (mide Fiat)' },
-  P3: { orden: 3, etiqueta: 'P3 · Atrasada' },
-  P4: { orden: 4, etiqueta: 'P4 · Cuota del mes' },
+  P1: { orden: 1, etiqueta: 'P1 · Atrasado', detalle: 'Tiene cuotas vencidas impagas y está en un avance que se mide el mes próximo.' },
+  P2: { orden: 2, etiqueta: 'P2 · Cuota del mes', detalle: 'Lo vencido está pago, falta la cuota de este mes, y está en un avance que se mide el mes próximo.' },
+  P3: { orden: 3, etiqueta: 'P3 · Atrasado', detalle: 'Tiene cuotas vencidas impagas, en el resto de los avances.' },
+  P4: { orden: 4, etiqueta: 'P4 · Cuota del mes', detalle: 'Lo vencido está pago, falta la cuota de este mes, en el resto de los avances.' },
   AL_DIA: { orden: 5, etiqueta: 'Al día' },
   RESCINDIDO: { orden: 8, etiqueta: 'Rescindido' },
   BAJA: { orden: 9, etiqueta: 'Baja' },
@@ -119,6 +126,10 @@ const CRM_ENC_GESTIONES = ['FechaHora', 'UsuarioEmail', 'UsuarioNombre', 'Solici
   'Resultado', 'EstadoCaso', 'MotivoNoPago', 'PromesaFecha', 'PromesaMonto',
   'ProximoContacto', 'Nota', 'AvanceAlMomento', 'SituacionAlMomento'];
 const CRM_ENC_AUDITORIA = ['FechaHora', 'UsuarioEmail', 'Accion', 'Detalle'];
+// Objetivos que el supervisor le pone a un responsable (o a todos, '*'):
+// un grupo de casos (por avance y prioridad) a gestionar entre dos fechas.
+const CRM_ENC_OBJETIVOS = ['Id', 'Titulo', 'ResponsableEmail', 'Avances', 'Situaciones', 'Meta',
+  'Desde', 'Hasta', 'CreadoPor', 'Activo'];
 
 // ---------------------------------------------------------------------------
 // Web App
@@ -144,6 +155,7 @@ function crmInicializar() {
   crmHoja_(ss, CRM_HOJA_CASOS, CRM_ENC_CASOS);
   crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
   crmHoja_(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA);
+  crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS);
 
   const usuarios = crmLeerUsuarios_(ss);
   const existentes = usuarios.map(function (u) { return u.email; });
@@ -206,9 +218,12 @@ function crmImportarNotasBase() {
   const filas = [];
   let planes = 0;
   ctx.planes.forEach(function (p) {
-    if (yaImportados[p.solicitud] || !p.notasBase.length) return;
+    // También las de licitación (AO/AP): así no se pierden si se borran esas
+    // columnas de BASE; la ficha las muestra aparte, no como seguimiento.
+    const notas = p.notasBase.concat(p.licitacion);
+    if (yaImportados[p.solicitud] || !notas.length) return;
     planes++;
-    p.notasBase.forEach(function (n) {
+    notas.forEach(function (n) {
       filas.push(['', '', 'Planilla BASE', p.solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
         '[' + n.columna + '] ' + n.valor, p.avance, p.situacion.codigo]);
     });
@@ -354,10 +369,14 @@ function crmFichaPlan(token, solicitud) {
   // se borren las columnas de BASE); si no, de las columnas AH+ en vivo.
   const importadas = delPlan.filter(function (g) { return g.Canal === CRM_CANAL_IMPORTADO; });
   if (importadas.length) {
-    p.notasBase = importadas.map(function (g) {
+    const notas = importadas.map(function (g) {
       const m = String(g.Nota).match(/^\[(.*?)\] ([\s\S]*)$/);
       return m ? { columna: m[1], valor: m[2] } : { columna: '', valor: String(g.Nota) };
     });
+    // Las columnas de licitación (si se importaron con una versión anterior)
+    // no son seguimiento: van al bloque de licitación, solo si BASE ya no las tiene.
+    p.notasBase = notas.filter(function (n) { return !crmEsNotaLicitacion_(n.columna); });
+    if (!p.licitacion.length) p.licitacion = notas.filter(function (n) { return crmEsNotaLicitacion_(n.columna); });
   }
 
   const gestiones = delPlan
@@ -554,6 +573,73 @@ function crmTableroSupervisor(token) {
 }
 
 // ---------------------------------------------------------------------------
+// Objetivos del supervisor
+// ---------------------------------------------------------------------------
+
+/**
+ * Objetivos vigentes. El responsable ve los suyos y los de "todos" que no
+ * vencieron; el supervisor ve todos los activos. El avance de cada uno lo
+ * calcula la pantalla con la cartera que ya tiene cargada (casos que
+ * cumplen el filtro y cuántos tienen una gestión desde la fecha "Desde").
+ */
+function crmListarObjetivos(token) {
+  const u = crmUsuarioActual_(token);
+  const hoy = crmHoyStr();
+  return crmLeerObjetos_(crmDatos_(), CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS)
+    .filter(function (o) { return crmBool_(o.Activo); })
+    .map(function (o) {
+      return {
+        id: String(o.Id), titulo: String(o.Titulo), responsableEmail: String(o.ResponsableEmail).toLowerCase(),
+        avances: String(o.Avances || '').split(',').filter(String).map(Number),
+        situaciones: String(o.Situaciones || '').split(',').filter(String),
+        meta: Number(o.Meta) || 100, desde: crmFmt(o.Desde), hasta: crmFmt(o.Hasta),
+        creadoPor: String(o.CreadoPor), vencido: crmFmt(o.Hasta) < hoy,
+      };
+    })
+    .filter(function (o) {
+      return u.rol === CRM_ROL_SUPERVISOR || (!o.vencido && (o.responsableEmail === '*' || o.responsableEmail === u.email));
+    });
+}
+
+/** Supervisor: alta de un objetivo. */
+function crmGuardarObjetivo(token, datos) {
+  const u = crmExigirSupervisor_(token);
+  const ss = crmDatos_();
+  const titulo = String(datos.titulo || '').trim();
+  if (!titulo) throw new Error('Poné un título para el objetivo.');
+  const resp = String(datos.responsableEmail || '').toLowerCase();
+  if (resp !== '*' && !crmLeerUsuarios_(ss).some(function (x) { return x.email === resp && x.activo && x.rol === CRM_ROL_RESPONSABLE; })) {
+    throw new Error('Elegí un responsable activo (o "Todos").');
+  }
+  const avances = (datos.avances || []).map(Number).filter(function (n) { return n >= 2 && n <= 20; });
+  const situaciones = (datos.situaciones || []).filter(function (x) { return ['P1', 'P2', 'P3', 'P4'].indexOf(x) >= 0; });
+  if (!situaciones.length) throw new Error('Elegí al menos una prioridad.');
+  const meta = Math.min(100, Math.max(1, Number(datos.meta) || 100));
+  if (!datos.desde || !datos.hasta || datos.hasta < datos.desde) throw new Error('Revisá las fechas: "hasta" tiene que ser igual o posterior a "desde".');
+
+  const fila = [Utilities.getUuid().slice(0, 8), titulo, resp, avances.join(','), situaciones.join(','), meta,
+    crmFecha(datos.desde), crmFecha(datos.hasta), u.email, true];
+  crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS).appendRow(fila);
+  crmAuditar_(ss, u.email, 'Alta objetivo', titulo + ' → ' + resp);
+  return crmListarObjetivos(token);
+}
+
+/** Supervisor: da de baja un objetivo (queda en la hoja como inactivo). */
+function crmBajaObjetivo(token, id) {
+  const u = crmExigirSupervisor_(token);
+  const ss = crmDatos_();
+  const hoja = crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS);
+  const filas = crmLeerObjetos_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS);
+  for (let i = 0; i < filas.length; i++) {
+    if (String(filas[i].Id) === String(id)) {
+      hoja.getRange(i + 2, CRM_ENC_OBJETIVOS.indexOf('Activo') + 1).setValue(false);
+      crmAuditar_(ss, u.email, 'Baja objetivo', String(filas[i].Titulo));
+    }
+  }
+  return crmListarObjetivos(token);
+}
+
+// ---------------------------------------------------------------------------
 // Acceso: login con mail @grupoantun.com.ar + clave
 // ---------------------------------------------------------------------------
 
@@ -720,6 +806,8 @@ function crmContexto_() {
       solicitud: solicitud,
       grupo: crmFmt(f[CRM_COL_GRUPO - 1]), orden: crmFmt(f[CRM_COL_ORDEN - 1]),
       modelo: crmFmt(f[CRM_COL_MODELO - 1]), sobrepauta: crmFmt(f[CRM_COL_SOBREPAUTA - 1]),
+      enCondiciones: crmFmt(f[CRM_COL_EN_CONDICIONES - 1]),
+      licitacion: crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION),
       cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), telefono: crmFmt(f[CRM_COL_TELEFONO - 1]),
       telefonoAlt: crmFmt(f[CRM_COL_TELEFONO_ALT - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
       avance: f[COL_AVANCE - 1], estado: crmFmt(f[COL_ESTADO - 1]),
@@ -737,17 +825,37 @@ function crmContexto_() {
   return { ss: ss, planes: planes, casos: casos, gestionesMes: gestionesMes };
 }
 
-/** Columnas de texto libre de BASE (AH en adelante) que tengan algo. */
+/** Columnas de texto libre de BASE (AH en adelante) que tengan algo, sin las de licitación. */
 function crmNotasBase_(encabezados, fila) {
-  const notas = [];
-  for (let c = CRM_COL_PRIMERA_NOTA - 1; c < fila.length; c++) {
-    const v = fila[c];
-    if (v === '' || v === null) continue;
-    const letra = crmLetraColumna_(c + 1);
-    const titulo = String(encabezados[c] || '').trim();
-    notas.push({ columna: titulo ? titulo + ' (col ' + letra + ')' : 'Col ' + letra, valor: crmFmt(v) });
+  const cols = [];
+  for (let c = CRM_COL_PRIMERA_NOTA; c <= fila.length; c++) {
+    if (CRM_COLS_LICITACION.indexOf(c) < 0) cols.push(c);
   }
-  return notas;
+  return crmColumnasBase_(encabezados, fila, cols);
+}
+
+/** [{columna: 'Título (col XX)', valor}] de las columnas (1-based) dadas que tengan algo. */
+function crmColumnasBase_(encabezados, fila, columnas) {
+  const out = [];
+  columnas.forEach(function (c) {
+    const v = fila[c - 1];
+    if (v === '' || v === null || v === undefined) return;
+    out.push({ columna: crmEtiquetaColumna_(encabezados, c), valor: crmFmt(v) });
+  });
+  return out;
+}
+
+function crmEtiquetaColumna_(encabezados, c) {
+  const letra = crmLetraColumna_(c);
+  const titulo = String(encabezados[c - 1] || '').trim();
+  return titulo ? titulo + ' (col ' + letra + ')' : 'Col ' + letra;
+}
+
+/** true si la etiqueta de una nota importada corresponde a una columna de licitación. */
+function crmEsNotaLicitacion_(etiqueta) {
+  return CRM_COLS_LICITACION.some(function (c) {
+    return String(etiqueta).slice(-(' (col ' + crmLetraColumna_(c) + ')').length) === ' (col ' + crmLetraColumna_(c) + ')';
+  });
 }
 
 /** 34 → "AH". */

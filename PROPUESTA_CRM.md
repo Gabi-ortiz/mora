@@ -128,3 +128,14 @@ para que el estado no dependa solo de lo que carga el responsable.
 - Metas por responsable (ej. % de P1+P2 contactados por semana).
 - Migrar las notas mensuales de texto libre de BASE como gestiones
   (hoy se muestran como "Notas anteriores de la planilla" en la ficha).
+
+## Para revisar con administración (24/09/2026)
+- **Criterio de prioridad** (hoy en `crmSituacion`): P1 = cuotas vencidas
+  impagas en avance medido (3, 5, 7, 9, 12); P2 = vencidas pagas pero falta
+  la cuota del mes, en avance medido; P3/P4 = lo mismo en el resto de los
+  avances. Dentro de cada una, primero los que hace más que no se
+  contactan; arriba de todo, lo pendiente de un objetivo del supervisor.
+- **AO / AP** (ESTADO AGOSTO / AGOSTO, planilla de licitaciones): ¿hacen
+  falta en el CRM? Hoy se muestran en la ficha como datos de licitación.
+- Estados del caso y resultados de contacto definitivos.
+

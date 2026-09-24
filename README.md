@@ -219,6 +219,10 @@ avisa para borrarlas a mano.
 - **CRM_Gestiones**: log append-only, una fila por intento de contacto,
   con avance y situación del plan al momento de la gestión.
 - **CRM_Auditoria**: acciones de supervisor (reasignaciones, usuarios).
+- **CRM_Objetivos**: objetivos que el supervisor le pone a un responsable
+  (o a todos): un grupo de casos (prioridades + avances) entre dos fechas,
+  con meta en % de casos gestionados. Esos casos le aparecen primero al
+  responsable, marcados con ◎.
 
 ### Columnas de BASE que usa el CRM
 Lee **A a AG** por posición: A Responsable, B Solicitud, C Grupo, D Orden,
@@ -228,6 +232,12 @@ AF Tipo de plan (hasta acá llega lo que viene de Fiat) y **AG Scoring**
 (lo carga el equipo; el texto de la llamada de bienvenida/calidad — tiene
 que seguir estando). Si cambia el orden de A..AG hay que ajustar las
 constantes `CRM_COL_*` / `COL_*`.
+
+**F (Sobrepauta) y G (En condiciones)** vienen de la planilla de
+licitaciones: la ficha las muestra en el bloque "Licitación", no como
+seguimiento. Lo mismo **AO (ESTADO AGOSTO) y AP (AGOSTO)**
+(`CRM_COLS_LICITACION`; pendiente confirmar con administración si hacen
+falta).
 
 De **AH en adelante** está el seguimiento viejo en texto libre. Menú
 "Mora" > "CRM: importar notas viejas de BASE" lo copia una vez a

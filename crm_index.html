@@ -31,6 +31,7 @@
   .nav.on { background: var(--side-2); color: #fff; }
   .nav .ic { width: 18px; text-align: center; opacity: .9; }
   .nav .n { margin-left: auto; background: var(--p1); color: #fff; border-radius: 999px; font-size: 11px; padding: 1px 7px; font-weight: 700; }
+  .nav[data-v=objetivos] .n { background: #3e4c6e; }
   .sec { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--side-mute); margin: 16px 12px 4px; }
   .yo { margin-top: auto; display: flex; gap: 10px; align-items: center; padding: 12px 8px 0; border-top: 1px solid #22304f; }
   .yo .nm { color: #fff; font-weight: 600; line-height: 1.2; }
@@ -114,6 +115,21 @@
   .mini i.M { background: #fff; outline: 2px solid var(--p2); outline-offset: -2px; }
   .mini i.M.P { background: #6ce9a6; outline: 0; }
   .nowrap { white-space: nowrap; }
+  .obj { color: #7a5af8; font-weight: 800; }
+  .activos { display: flex; gap: 8px; align-items: center; padding: 12px 14px 0; color: var(--muted); flex-wrap: wrap; }
+  .leyenda { padding: 12px 16px; background: #f9fafb; border-bottom: 1px solid var(--line); display: grid; gap: 6px; font-size: 13px; }
+  .objs { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; margin-bottom: 16px; }
+  .ob { background: #fff; border-radius: var(--radius); box-shadow: var(--shadow); padding: 14px 16px; border-left: 4px solid #7a5af8; }
+  .ob h5 { margin: 0 0 2px; font-size: 14px; }
+  .ob .meta { font-size: 12px; color: var(--muted); }
+  .ob .meter i { background: #7a5af8; }
+  .ob .meter.ok i { background: var(--ok); }
+  .ob .pie { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
+  .grupo td { background: #f9fafb; font-weight: 700; border-top: 2px solid var(--line); }
+  .sub td:first-child { padding-left: 34px; }
+  .sub { cursor: pointer; }
+  .sub:hover td { background: #f8faff; }
+  .ck { display: inline-flex; align-items: center; gap: 4px; margin-right: 10px; font-weight: 600; color: var(--ink-2); font-size: 13px; }
   .mas { padding: 14px; text-align: center; border-top: 1px solid var(--line); }
 
   /* ---------- Ficha (drawer) ---------- */
@@ -140,6 +156,7 @@
   .f2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
   .f2 .full { grid-column: 1 / -1; }
   .fl { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; }
+  .fl .in { font-weight: 400; color: var(--ink); font-size: 14px; }
   .promesa { border: 1px dashed #b2ccff; background: #f8faff; border-radius: 10px; padding: 10px; }
   .atajos { display: flex; gap: 4px; margin-top: 4px; }
   .acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
@@ -225,7 +242,7 @@
 <script>
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
-  filtro: { texto: '', situacion: '', estado: '', resp: '' }, seleccion: {},
+  filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
   cola: [], fichaTab: 'gestionar', ficha: null,
 };
 var MESES = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'];
@@ -371,7 +388,7 @@ function iniciar() {
     $('yoNom').textContent = ini.usuario.nombre;
     $('yoRol').textContent = ini.esSupervisor ? 'Supervisor' : 'Responsable';
     armarNav(); encabezado();
-    return cargarCartera();
+    return Promise.all([cargarObjetivos(), cargarCartera()]);
   }).catch(function (e) {
     if (e.sesion) return;
     $('main').innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>';
@@ -383,6 +400,26 @@ $('buscar').oninput = function (e) {
   clearTimeout(S._b); S._b = setTimeout(render, 200);
 };
 
+function cargarObjetivos() {
+  return api('crmListarObjetivos').then(function (o) { S.objetivos = o; armarNav(); }).catch(error);
+}
+// ¿El plan entra en el objetivo? (responsable, avance y prioridad)
+function enObjetivo(p, o) {
+  return (o.responsableEmail === '*' || o.responsableEmail === p.responsableEmail) &&
+    (!o.avances.length || o.avances.indexOf(p.avance) >= 0) && o.situaciones.indexOf(p.situacion.codigo) >= 0;
+}
+function gestionadoDesde(p, fecha) { return !!p.ultimaGestion && p.ultimaGestion.slice(0, 10) >= fecha; }
+function objetivosVigentes() { return S.objetivos.filter(function (o) { return !o.vencido; }); }
+function marcaObjetivo(p) {
+  return objetivosVigentes().some(function (o) { return enObjetivo(p, o) && !gestionadoDesde(p, o.desde); });
+}
+// Avance de un objetivo, opcionalmente para un solo responsable.
+function avanceObjetivo(o, email) {
+  var casos = S.planes.filter(function (p) { return enObjetivo(p, o) && (!email || p.responsableEmail === email); });
+  var hechos = casos.filter(function (p) { return gestionadoDesde(p, o.desde); }).length;
+  return { total: casos.length, hechos: hechos, fr: casos.length ? hechos / casos.length : 1 };
+}
+
 function cargarCartera() {
   return api('crmListarCartera').then(function (planes) { S.planes = planes; armarNav(); render(); }).catch(error);
 }
@@ -392,14 +429,14 @@ function armarNav() {
   var agenda = S.planes.filter(function (p) { return esActiva(p) && p.agendaHoy; }).length;
   var items = [['cartera', '▦', sup ? 'Carteras' : 'Mi cartera'], ['agenda', '◷', 'Agenda de hoy', agenda], ['bajas', '⊘', 'Rescindidos / bajas']];
   var h = items.map(itemNav).join('');
-  if (sup) h += '<div class="sec">Supervisión</div>' + [['tablero', '▤', 'Tablero'], ['usuarios', '☺', 'Usuarios']].map(itemNav).join('');
+  if (sup) h += '<div class="sec">Supervisión</div>' + [['tablero', '▤', 'Tablero'], ['objetivos', '◎', 'Objetivos', S.objetivos.length], ['usuarios', '☺', 'Usuarios']].map(itemNav).join('');
   h += '<div class="sec">Cuenta</div>' + itemNav(['clave', '⚿', 'Cambiar clave']);
   $('nav').innerHTML = h;
   cada('#nav .nav', null, function (b) {
     b.onclick = function () {
       var v = b.getAttribute('data-v');
       if (v === 'clave') return pantallaClave(false);
-      S.vista = v; S.filtro.situacion = ''; S.limite = 200; armarNav(); encabezado(); render();
+      S.vista = v; S.filtro.situacion = ''; S.filtro.avance = ''; S.filtro.objetivo = ''; S.limite = 200; armarNav(); encabezado(); render();
     };
   });
 }
@@ -410,20 +447,23 @@ function itemNav(it) {
 function encabezado() {
   var d = new Date(), mes = MESES[d.getMonth()], sig = MESES[(d.getMonth() + 1) % 12];
   var t = {
-    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear() + ' · en ' + sig + ' Fiat mide las cuotas ' + S.ini.cuotasFiat.join(', ')],
+    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear() +
+      (S.ini.esSupervisor ? ' · avances que se miden en ' + sig + ': ' + S.ini.cuotasFiat.join(', ') : ' · cartera activa')],
+    objetivos: ['Objetivos', 'Qué tiene que trabajar cada responsable y hasta cuándo'],
     agenda: ['Agenda de hoy', 'Re-contactos agendados y promesas de pago vencidas sin pago'],
     bajas: ['Rescindidos y bajas', 'Solo consulta: no entran en la cola de trabajo'],
     tablero: ['Tablero supervisor', 'Avance del equipo y proyección de lo que mide Fiat'],
     usuarios: ['Usuarios', 'Altas, roles, carteras y claves'],
   }[S.vista];
   $('titulo').textContent = t[0]; $('subtitulo').textContent = t[1];
-  $('buscar').hidden = S.vista === 'tablero' || S.vista === 'usuarios';
+  $('buscar').hidden = S.vista === 'tablero' || S.vista === 'usuarios' || S.vista === 'objetivos';
 }
 
 function render() {
   var m = $('main');
   if (S.vista === 'tablero') return renderTablero(m);
   if (S.vista === 'usuarios') return renderUsuarios(m);
+  if (S.vista === 'objetivos') return renderObjetivos(m);
   renderLista(m);
 }
 
@@ -445,12 +485,15 @@ function filtrados(lista) {
   var f = S.filtro, t = f.texto.toLowerCase();
   return lista.filter(function (p) {
     if (!coincide(p, f.situacion)) return false;
+    if (f.avance && p.avance !== Number(f.avance)) return false;
+    if (f.objetivo) { var o = S.objetivos.filter(function (x) { return x.id === f.objetivo; })[0]; if (o && !enObjetivo(p, o)) return false; }
     if (f.estado && p.estadoCaso !== f.estado) return false;
     if (t && (p.cliente + ' ' + p.solicitud + ' ' + p.telefono + ' ' + p.grupo).toLowerCase().indexOf(t) < 0) return false;
     return true;
-  }).sort(function (a, b) {
-    // Prioridad; dentro de cada una, primero los que hace más que no se gestionan.
-    return a.situacion.orden - b.situacion.orden || (a.ultimaGestion || '').localeCompare(b.ultimaGestion || '') || a.avance - b.avance;
+  }).map(function (p) { p._obj = marcaObjetivo(p); return p; }).sort(function (a, b) {
+    // Primero lo pendiente de un objetivo del supervisor; después la prioridad;
+    // dentro de cada una, primero los que hace más que no se gestionan.
+    return (b._obj - a._obj) || a.situacion.orden - b.situacion.orden || (a.ultimaGestion || '').localeCompare(b.ultimaGestion || '') || a.avance - b.avance;
   });
 }
 function proximaAccion(p) {
@@ -482,11 +525,12 @@ function renderLista(m) {
     h += '<div class="saludo"><span style="font-size:22px">' + (hoy.getHours() < 13 ? '☀️' : '👋') + '</span><div><b>' + (hoy.getHours() < 13 ? 'Buen día' : 'Hola') + ', ' + esc(nombre) + '</b>' +
       '<div class="muted">' + (sinG ? 'Quedan <b>' + sinG + '</b> casos P1+P2 sin gestión este mes' : '¡Todos los P1+P2 tienen al menos una gestión este mes!') +
       ' · faltan ' + fin + ' días para fin de mes.</div></div>' +
-      (S.cola.length ? '<button class="btn pri" id="empezar" style="margin-left:auto">Empezar por el primero →</button>' : '') + '</div>';
+      (S.cola.length && !sup ? '<button class="btn pri" id="empezar" style="margin-left:auto">Empezar por el primero →</button>' : '') + '</div>';
+    if (!sup) h += tarjetasObjetivos();
     h += '<div class="kpis">' +
-      kpi('P1', 'P1 · Atrasados que mide Fiat', cuenta('P1'), sinP1 + ' sin gestión este mes', 'var(--p1)') +
-      kpi('P2', 'P2 · Cuota del mes (Fiat)', cuenta('P2'), sinP2 + ' sin gestión este mes', 'var(--p2)') +
-      kpi('P34', 'P3 / P4 · Resto de cartera', cuenta('P34'), 'mora general', 'var(--p3)') +
+      kpi('P1', 'P1 · Atrasados', cuenta('P1'), sinP1 + ' sin gestión este mes', 'var(--p1)') +
+      kpi('P2', 'P2 · Cuota del mes', cuenta('P2'), sinP2 + ' sin gestión este mes', 'var(--p2)') +
+      kpi('P34', 'P3 / P4 · Resto de avances', cuenta('P34'), 'atrasados y cuota del mes', 'var(--p3)') +
       kpi('AL_DIA', 'Al día', cuenta('AL_DIA'), 'incluye la cuota del mes', 'var(--ok)') +
       '<div class="kpi" style="border-top-color:var(--accent);cursor:default"><div class="l">Avance del mes (P1+P2)</div><div class="v">' + Math.round(fr * 100) + '%</div>' +
       '<div class="meter"><i style="width:' + (fr * 100) + '%"></i></div></div></div>';
@@ -502,13 +546,21 @@ function renderLista(m) {
       S.ini.responsables.map(function (r) { return '<option value="' + esc(r.email) + '">' + esc(r.nombre) + '</option>'; }).join('') +
       '</select><button class="btn sm pri" id="reasBtn">Reasignar</button><button class="btn sm ghost" id="reasNo" style="color:#c8d1e6">Limpiar</button></div>';
   }
+  var activos = [];
+  if (S.filtro.objetivo) { var ob = S.objetivos.filter(function (x) { return x.id === S.filtro.objetivo; })[0]; activos.push(['objetivo', '◎ ' + (ob ? ob.titulo : 'Objetivo')]); }
+  if (S.filtro.avance) activos.push(['avance', 'Avance ' + S.filtro.avance]);
+  if (activos.length) h += '<div class="activos">Filtrando: ' + activos.map(function (a) { return '<button class="chip on" data-quitar="' + a[0] + '">' + esc(a[1]) + ' ✕</button>'; }).join('') + '</div>';
   h += '<div class="bar">' + tabs.map(function (t) {
     return '<button class="tab' + (S.filtro.situacion === t[0] ? ' on' : '') + '" data-sit="' + t[0] + '">' + t[1] + ' <small>' + (t[0] ? cuenta(t[0]) : lista.length) + '</small></button>';
-  }).join('') + '<div class="der"><select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Estado del caso: todos') + '</select>' +
+  }).join('') + '<button class="btn sm ghost" id="leyenda" title="¿Cómo se ordena?">ⓘ ¿Qué es P1, P2…?</button><div class="der"><select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Estado del caso: todos') + '</select>' +
     (sup ? '<select id="fResp"><option value="">Todos los responsables</option>' + S.ini.responsables.map(function (r) {
       return '<option value="' + esc(r.email) + '"' + (S.filtro.resp === r.email ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
     }).join('') + '</select>' : '') + '<button class="btn sm" id="refrescar" title="Volver a leer BASE">↻ Actualizar</button></div></div>';
 
+  h += '<div class="leyenda" id="leyendaTxt" hidden>' + ['P1', 'P2', 'P3', 'P4'].map(function (c) {
+    return '<div>' + pillSit({ codigo: c, etiqueta: S.ini.listas.situaciones[c].etiqueta }) + ' ' + esc(S.ini.listas.situaciones[c].detalle) +
+      (c === 'P1' ? ' <span class="muted">(avances ' + S.ini.cuotasFiat.join(', ') + ')</span>' : '') + '</div>';
+  }).join('') + '<div class="muted">Dentro de cada prioridad aparecen primero los que hace más tiempo que no se contactan. Los marcados con ◎ son parte de un objetivo del supervisor y van arriba de todo.</div></div>';
   if (!vis.length) {
     h += '<div class="vacio">' + (S.vista === 'agenda' ? '🎉 No tenés nada agendado para hoy.' : 'No hay planes para mostrar con estos filtros.') + '</div>';
   } else {
@@ -518,9 +570,9 @@ function renderLista(m) {
       vis.slice(0, S.limite).map(function (p) {
         return '<tr data-sol="' + esc(p.solicitud) + '">' +
           (sup ? '<td><input type="checkbox" class="sel" data-sol="' + esc(p.solicitud) + '"' + (S.seleccion[p.solicitud] ? ' checked' : '') + '></td>' : '') +
-          '<td>' + pillSit(p.situacion, true) + '</td>' +
+          '<td class="nowrap">' + pillSit(p.situacion, true) + (p._obj ? ' <span class="obj" title="Parte de un objetivo del supervisor">◎</span>' : '') + '</td>' +
           '<td class="cli"><b>' + esc(p.cliente) + '</b><span>Sol. ' + esc(p.solicitud) + ' · ' + esc(p.grupo) + '/' + esc(p.orden) + '</span></td>' +
-          '<td class="nowrap">' + esc(p.avance) + (p.situacion.medidoPorFiat ? '<span class="fiat">FIAT</span>' : '') + '</td>' +
+          '<td class="nowrap">' + esc(p.avance) + (sup && p.situacion.medidoPorFiat ? '<span class="fiat">FIAT</span>' : '') + '</td>' +
           '<td>' + miniCuotas(p) + '</td><td>' + pillCaso(p.estadoCaso) + '</td>' +
           '<td class="nowrap">' + (p.ultimaGestion ? haceCuanto(p.ultimaGestion) + ' <span class="muted">· ' + esc(p.ultimoCanal) + '</span>' : '<span class="muted">—</span>') + '</td>' +
           '<td class="nowrap">' + proximaAccion(p) + '</td>' +
@@ -534,6 +586,11 @@ function renderLista(m) {
     b.onclick = function () { var c = b.getAttribute('data-sit'); S.filtro.situacion = S.filtro.situacion === c && b.classList.contains('kpi') ? '' : c; S.limite = 200; render(); };
   });
   $('fEst').onchange = function (e) { S.filtro.estado = e.target.value; render(); };
+  $('leyenda').onclick = function () { $('leyendaTxt').hidden = !$('leyendaTxt').hidden; };
+  cada('[data-quitar]', m, function (b) { b.onclick = function () { S.filtro[b.getAttribute('data-quitar')] = ''; render(); }; });
+  cada('[data-trabajar]', m, function (b) {
+    b.onclick = function () { S.filtro.objetivo = b.getAttribute('data-trabajar'); S.filtro.situacion = ''; render(); if (S.cola.length) abrirFicha(S.cola[0]); };
+  });
   if ($('fResp')) $('fResp').onchange = function (e) { S.filtro.resp = e.target.value; render(); };
   $('refrescar').onclick = function () { toast('Actualizando…'); cargarCartera(); };
   if ($('mas')) $('mas').onclick = function () { S.limite += 300; render(); };
@@ -581,7 +638,7 @@ function renderFicha(d) {
     '</div><button class="btn ghost sm" id="cerrar" title="Cerrar (Esc)">✕</button></div>' +
     '<h2>' + esc(p.cliente) + '</h2><div class="row">' + pillSit(p.situacion) + pillCaso(c.estadoCaso || 'Sin gestionar') + '<span class="pill caso sin">' + esc(p.estado) + '</span></div>' +
     '<div class="muted" style="margin-top:8px">Sol. ' + esc(p.solicitud) + ' · Grupo ' + esc(p.grupo) + ' / Orden ' + esc(p.orden) + ' · Avance ' + esc(p.avance) +
-    (p.situacion.medidoPorFiat ? ' · <b style="color:var(--accent)">Fiat mide la cuota ' + esc(p.avance) + ' el mes próximo</b>' : '') + '</div>' +
+    (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
     (tel ? '<a class="btn pri" href="tel:' + tel + '" target="_blank">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>' : '<span class="muted">Sin teléfono cargado</span>') +
     (tel2 ? '<a class="btn" href="tel:' + tel2 + '" target="_blank">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : '') + '</div></div>' +
@@ -671,9 +728,11 @@ function tabDatos(d, el) {
   var p = d.plan;
   var dato = function (t, v) { return '<div><span>' + t + '</span>' + (v === '' || v == null ? '—' : esc(v)) + '</div>'; };
   el.innerHTML = '<div class="datos">' + dato('Solicitud', p.solicitud) + dato('Grupo / Orden', p.grupo + ' / ' + p.orden) + dato('Documento', p.documento) +
-    dato('Modelo', p.modelo) + dato('Tipo de plan', p.tipoPlan) + dato('Forma de pago', p.formaPago) + dato('Sobrepauta / cuota pactada', p.sobrepauta) +
+    dato('Modelo', p.modelo) + dato('Tipo de plan', p.tipoPlan) + dato('Forma de pago', p.formaPago) +
     dato('Estado en BASE', p.estado) + dato('Vendedor', p.vendedor) + dato('Supervisor de venta', p.supervisorVenta) +
     dato('Teléfono', p.telefono) + dato('Teléfono alternativo', p.telefonoAlt) + dato('Responsable', p.responsableNombre) + '</div>' +
+    '<div class="scoring"><h4>Licitación (estado para licitar)</h4><div class="datos">' + dato('En condiciones (col. G)', p.enCondiciones) + dato('Sobrepauta / cuota pactada (col. F)', p.sobrepauta) +
+    (p.licitacion || []).map(function (n) { return dato(esc(n.columna), n.valor); }).join('') + '</div></div>' +
     '<div class="scoring"><h4>Scoring (col. AG)</h4>' + (esc(p.scoring) || '<span class="muted">Sin scoring cargado.</span>') + '</div>' +
     '<div style="margin-top:18px"><h4>Cuotas</h4>' + cuotasGrandes(p) + '</div>' + (S.ini.esSupervisor ? bloqueReasignar(p) : '');
   enlazarReasignar(p);
@@ -711,54 +770,162 @@ function enlazarReasignar(p) {
   };
 }
 
+// ---------- Objetivos ----------
+function textoObjetivo(o) {
+  var sit = o.situaciones.join(' + '), av = o.avances.length ? 'avance ' + o.avances.join(', ') : 'todos los avances';
+  return sit + ' · ' + av + ' · del ' + ddmm(o.desde) + ' al ' + ddmm(o.hasta);
+}
+function diasHasta(f) { return -diasDesde(f); }
+// Tarjetas de objetivos del responsable (arriba de su cartera).
+function tarjetasObjetivos() {
+  var mios = objetivosVigentes();
+  if (!mios.length) return '';
+  return '<div class="objs">' + mios.map(function (o) {
+    var a = avanceObjetivo(o, S.ini.usuario.email), falta = diasHasta(o.hasta), ok = a.fr * 100 >= o.meta;
+    return '<div class="ob"><h5>◎ ' + esc(o.titulo) + '</h5><div class="meta">' + esc(textoObjetivo(o)) + '</div>' +
+      '<div class="meter' + (ok ? ' ok' : '') + '"><i style="width:' + Math.round(a.fr * 100) + '%"></i></div>' +
+      '<div class="pie"><span><b>' + a.hechos + ' de ' + a.total + '</b> gestionados · meta ' + o.meta + '% · ' +
+      (falta > 0 ? 'quedan ' + falta + ' días' : falta === 0 ? '<span class="alerta">vence hoy</span>' : '') + '</span>' +
+      (a.hechos < a.total ? '<button class="btn sm pri" data-trabajar="' + esc(o.id) + '">Trabajar →</button>' : '<span class="pill s-AL_DIA">¡Cumplido!</span>') + '</div></div>';
+  }).join('') + '</div>';
+}
+
+function renderObjetivos(m) {
+  var resp = S.ini.responsables, hoy = hoyStr(), fin = new Date(); fin.setMonth(fin.getMonth() + 1, 0);
+  var finStr = fin.getFullYear() + '-' + pad2(fin.getMonth() + 1) + '-' + pad2(fin.getDate());
+  var avances = S.planes.map(function (p) { return p.avance; }).filter(function (v, k, a) { return a.indexOf(v) === k; }).sort(function (a, b) { return a - b; });
+  var h = '<div class="card" style="margin-bottom:16px"><div class="card-h"><h3>Nuevo objetivo</h3><div class="d">Elegí un grupo de casos (prioridad y avance) y un plazo. Esos casos le aparecen arriba de todo al responsable, marcados con ◎, y se mide cuántos gestionó desde la fecha de inicio.</div></div>' +
+    '<form id="fObj" class="pad"><div class="f2"><label class="fl full">Título<input class="in" name="titulo" placeholder="Ej.: Llamar a todos los P1 de avance 3 antes del 10/10" required></label>' +
+    '<label class="fl">Responsable<select class="in" name="resp"><option value="*">Todos los responsables</option>' + resp.map(function (r) { return '<option value="' + esc(r.email) + '">' + esc(r.nombre) + '</option>'; }).join('') + '</select></label>' +
+    '<label class="fl">Meta (% de casos gestionados)<input class="in" type="number" name="meta" min="1" max="100" value="100"></label>' +
+    '<div class="fl full">Prioridades<div>' + ['P1', 'P2', 'P3', 'P4'].map(function (c) { return '<label class="ck"><input type="checkbox" name="sit" value="' + c + '"' + (c === 'P1' || c === 'P2' ? ' checked' : '') + '> ' + esc(S.ini.listas.situaciones[c].etiqueta) + '</label>'; }).join('') + '</div></div>' +
+    '<div class="fl full">Avances <span class="muted" style="font-weight:400">(ninguno marcado = todos)</span><div>' + avances.map(function (a) { return '<label class="ck"><input type="checkbox" name="av" value="' + a + '"> ' + a + (S.ini.cuotasFiat.indexOf(a) >= 0 ? ' <span class="fiat">FIAT</span>' : '') + '</label>'; }).join('') + '</div></div>' +
+    '<label class="fl">Desde<input class="in" type="date" name="desde" value="' + hoy + '" required></label>' +
+    '<label class="fl">Hasta<input class="in" type="date" name="hasta" value="' + finStr + '" required></label></div>' +
+    '<div class="acciones"><span class="muted" id="objPrev"></span><button class="btn pri" type="submit">Crear objetivo</button></div></form></div>';
+
+  var lista = S.objetivos.slice().sort(function (a, b) { return a.vencido - b.vencido || a.hasta.localeCompare(b.hasta); });
+  h += '<div class="card"><div class="card-h"><h3>Objetivos activos (' + lista.length + ')</h3><div class="d">Avance = casos del grupo con al menos una gestión desde la fecha de inicio. Los que se regularizan (quedan al día) salen del grupo.</div></div><div class="pad">' +
+    (lista.length ? lista.map(function (o) {
+      var quienes = o.responsableEmail === '*' ? resp : resp.filter(function (r) { return r.email === o.responsableEmail; });
+      return '<div class="ob" style="margin-bottom:12px;box-shadow:none;border:1px solid var(--line);border-left:4px solid ' + (o.vencido ? '#98a2b3' : '#7a5af8') + '">' +
+        '<div class="row" style="justify-content:space-between"><div><h5>◎ ' + esc(o.titulo) + (o.vencido ? ' <span class="pill caso sin">Vencido</span>' : '') + '</h5><div class="meta">' + esc(textoObjetivo(o)) + ' · meta ' + o.meta + '%</div></div>' +
+        '<button class="btn sm" data-baja="' + esc(o.id) + '">Dar de baja</button></div>' +
+        '<table style="margin-top:8px"><tbody>' + quienes.map(function (r) {
+          var a = avanceObjetivo(o, r.email);
+          return '<tr style="cursor:default"><td class="nowrap" style="width:200px"><span class="avatar sm" style="background:' + colorDe(r.email) + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
+            '<td><div class="pr"><div class="t"><i style="width:' + Math.round(a.fr * 100) + '%;background:' + (a.fr * 100 >= o.meta ? 'var(--ok)' : '#7a5af8') + '"></i></div>' + Math.round(a.fr * 100) + '%</div></td>' +
+            '<td class="nowrap">' + (a.total ? a.hechos + ' de ' + a.total + ' gestionados' : '<span class="muted">sin casos en el grupo</span>') + '</td></tr>';
+        }).join('') + '</tbody></table></div>';
+    }).join('') : '<div class="vacio">Todavía no hay objetivos. Creá el primero arriba.</div>') + '</div></div>';
+  m.innerHTML = h;
+
+  var f = $('fObj');
+  var previa = function () {
+    var o = datosObj(f); if (!o.situaciones.length) { $('objPrev').textContent = 'Elegí al menos una prioridad.'; return; }
+    var n = S.planes.filter(function (p) { return enObjetivo(p, o); }).length;
+    $('objPrev').textContent = 'Hoy entran ' + n + ' casos en este grupo.';
+  };
+  f.oninput = previa; previa();
+  f.onsubmit = function (e) {
+    e.preventDefault();
+    var o = datosObj(f), b = f.querySelector('button[type=submit]'); b.disabled = true;
+    api('crmGuardarObjetivo', { titulo: f.titulo.value, responsableEmail: o.responsableEmail, avances: o.avances, situaciones: o.situaciones, meta: f.meta.value, desde: f.desde.value, hasta: f.hasta.value })
+      .then(function (lista) { S.objetivos = lista; toast('✔ Objetivo creado'); armarNav(); render(); })
+      .catch(function (x) { b.disabled = false; error(x); });
+  };
+  cada('[data-baja]', m, function (b) {
+    b.onclick = function () {
+      if (b.getAttribute('data-ok') !== '1') { b.setAttribute('data-ok', '1'); b.textContent = '¿Confirmar baja?'; b.classList.add('pri'); return; }
+      api('crmBajaObjetivo', b.getAttribute('data-baja')).then(function (lista) { S.objetivos = lista; toast('Objetivo dado de baja'); armarNav(); render(); }).catch(error);
+    };
+  });
+}
+function datosObj(f) {
+  var marcados = function (n) { return Array.prototype.filter.call(f.querySelectorAll('input[name=' + n + ']'), function (x) { return x.checked; }).map(function (x) { return x.value; }); };
+  return { responsableEmail: f.resp.value, situaciones: marcados('sit'), avances: marcados('av').map(Number) };
+}
+
 // ---------- Tablero supervisor ----------
+// Todo lo de cartera se calcula con los planes ya cargados; del servidor
+// solo vienen las gestiones por día y los números del mes por responsable.
 function renderTablero(m) {
   m.innerHTML = '<div class="vacio"><span class="cargando"></span>Calculando tablero…</div>';
   api('crmTableroSupervisor').then(function (t) {
     var sum = function (arr, k) { return arr.reduce(function (a, x) { return a + (x[k] || 0); }, 0); };
-    var R = t.porResponsable, P = t.proyeccion;
+    var R = t.porResponsable, P = t.proyeccion, resp = S.ini.responsables;
     var tot = sum(P, 'carteraTotal'), piso = tot ? (sum(P, 'rescindidos') + sum(P, 'atrasados')) / tot : 0;
     var gest = sum(R, 'prioGestionados'), sinG = sum(R, 'prioSinGestion'), intentos = sum(R, 'intentosMes'), efect = sum(R, 'efectivosMes');
     var h = '<div class="kp4">' +
-      '<div class="k"><div class="muted">Mora proyectada Fiat (piso)</div><div class="v">' + pct(piso) + '</div><div class="muted" style="font-size:12px">cuotas ' + S.ini.cuotasFiat.join(', ') + ' · si nadie regulariza</div></div>' +
-      '<div class="k"><div class="muted">P1 + P2 gestionados</div><div class="v">' + (gest + sinG ? Math.round(gest / (gest + sinG) * 100) : 0) + '%</div><div class="muted" style="font-size:12px">' + gest + ' de ' + (gest + sinG) + '</div></div>' +
+      '<div class="k"><div class="muted">Mora proyectada en avances medidos</div><div class="v">' + pct(piso) + '</div><div class="muted" style="font-size:12px">rescindidos + atrasados, si nadie regulariza</div></div>' +
+      '<div class="k"><div class="muted">P1 + P2 gestionados este mes</div><div class="v">' + (gest + sinG ? Math.round(gest / (gest + sinG) * 100) : 0) + '%</div><div class="muted" style="font-size:12px">' + gest + ' de ' + (gest + sinG) + '</div></div>' +
       '<div class="k"><div class="muted">Promesas vigentes</div><div class="v">' + sum(R, 'promesasVigentes') + '</div><div class="' + (sum(R, 'promesasVencidas') ? 'alerta' : 'muted') + '" style="font-size:12px">' + sum(R, 'promesasVencidas') + ' vencidas sin pago</div></div>' +
       '<div class="k"><div class="muted">Contactos efectivos del mes</div><div class="v">' + efect + '</div><div class="muted" style="font-size:12px">de ' + intentos + ' intentos' + (intentos ? ' · ' + Math.round(efect / intentos * 100) + '%' : '') + '</div></div></div>';
 
-    var maxPct = Math.max.apply(null, P.map(function (r) { return r.pctSiNadiePaga; }).concat([0.05]));
-    h += '<div class="g2"><div class="card"><div class="card-h"><h3>Qué va a medir Fiat el mes próximo</h3><div class="d">Planes que hoy están en el avance de cada cuota. Rojo: ya es mora salvo que se regularice. Amarillo: se suma si no pagan la cuota del mes.</div></div><div class="pad">' +
-      P.map(function (r) {
-        var a = r.pctPiso / maxPct * 100, b = (r.pctSiNadiePaga - r.pctPiso) / maxPct * 100;
-        return '<div class="br"><b>Cuota ' + r.cuota + '</b><div class="track" title="' + r.carteraTotal + ' planes · ' + r.rescindidos + ' rescindidos · ' + r.atrasados + ' atrasados · ' + r.mesPendiente + ' con la cuota del mes pendiente">' +
-          '<i class="a" style="width:' + a + '%"></i><i class="b" style="left:' + a + '%;width:' + b + '%"></i></div><span>' + pct(r.pctPiso) + ' → ' + pct(r.pctSiNadiePaga) + '</span></div>';
-      }).join('') + '<div class="lg"><span><i style="background:#f97066"></i>Rescindidos + atrasados</span><span><i style="background:#fec84b"></i>Cuota del mes pendiente</span></div></div></div>';
-
-    var dias = Object.keys(t.actividad).sort(), quienes = {};
-    dias.forEach(function (d) { Object.keys(t.actividad[d]).forEach(function (q) { quienes[q] = 1; }); });
-    quienes = Object.keys(quienes).sort();
-    var colorQ = function (q) { var r = S.ini.responsables.filter(function (x) { return x.nombre === q; })[0]; return r ? colorDe(r.email) : COLORES[(quienes.indexOf(q) + 3) % COLORES.length]; };
-    var maxDia = Math.max.apply(null, dias.map(function (d) { return Object.keys(t.actividad[d]).reduce(function (a, q) { return a + t.actividad[d][q]; }, 0); }).concat([1]));
-    h += '<div class="card"><div class="card-h"><h3>Gestiones por día</h3><div class="d">Últimos 14 días, por responsable</div></div><div class="pad">' +
-      (dias.length ? '<div class="cols">' + dias.map(function (d) {
-        var tot = 0;
-        var segs = quienes.map(function (q) { var n = t.actividad[d][q] || 0; tot += n; return n ? '<i style="height:' + (n / maxDia * 120) + 'px;background:' + colorQ(q) + '" title="' + esc(q) + ': ' + n + '"></i>' : ''; }).join('');
-        return '<div class="col" title="' + ddmm(d) + ': ' + tot + ' gestiones">' + segs + '<span>' + ddmm(d) + '</span></div>';
-      }).join('') + '</div><div class="lg">' + quienes.map(function (q) { return '<span><i style="background:' + colorQ(q) + '"></i>' + esc(q) + '</span>'; }).join('') + '</div>'
-        : '<div class="vacio">Todavía no hay gestiones en los últimos 14 días.</div>') + '</div></div></div>';
-
-    R.sort(function (a, b) { return b.prioSinGestion - a.prioSinGestion; });
-    h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Equipo · mes en curso</h3><div class="d">Ordenado por casos P1+P2 sin gestión</div></div><div class="tw" style="padding:6px 4px 8px"><table><thead><tr>' +
-      '<th>Responsable</th><th>Cartera activa</th><th>P1</th><th>P2</th><th>P3+P4</th><th>P1+P2 gestionados</th><th>Sin gestión</th><th>Intentos</th><th>Efectivos</th><th>Promesas vig. / venc.</th><th>Gestionados y hoy al día</th><th>Rescind./bajas</th></tr></thead><tbody>' +
-      R.map(function (r) {
-        var tt = r.prioGestionados + r.prioSinGestion, fr = tt ? r.prioGestionados / tt : 0;
-        var rr = S.ini.responsables.filter(function (x) { return x.nombre === r.nombre; })[0];
-        return '<tr style="cursor:default"><td class="nowrap"><span class="avatar sm" style="background:' + (rr ? colorDe(rr.email) : '#98a2b3') + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
-          '<td>' + r.activa + '</td><td>' + r.p1 + '</td><td>' + r.p2 + '</td><td>' + r.p34 + '</td>' +
-          '<td><div class="pr"><div class="t"><i style="width:' + fr * 100 + '%"></i></div>' + Math.round(fr * 100) + '%</div></td>' +
-          '<td class="' + (r.prioSinGestion ? 'alerta' : '') + '">' + r.prioSinGestion + '</td><td>' + r.intentosMes + '</td><td>' + r.efectivosMes + '</td>' +
-          '<td>' + r.promesasVigentes + ' / <span class="' + (r.promesasVencidas ? 'alerta' : '') + '">' + r.promesasVencidas + '</span></td><td>' + r.regularizadosConGestion + '</td><td>' + r.bajas + '</td></tr>';
+    // Situación de cada avance medido, abierta por responsable.
+    var fila = function (lista, etiqueta, clase, attrs) {
+      var n = function (c) { return lista.filter(function (p) { return p.situacion.codigo === c; }).length; };
+      var total = lista.length, res = n('RESCINDIDO'), p1 = n('P1'), p2 = n('P2'), ok = n('AL_DIA');
+      var prio = lista.filter(esPrio), g = prio.filter(function (p) { return p.intentosMes > 0; }).length, fr = prio.length ? g / prio.length : 0;
+      var prom = lista.filter(function (p) { return p.estadoCaso === 'Promesa de pago' && p.promesaFecha >= hoyStr(); }).length;
+      return '<tr class="' + clase + '"' + (attrs || '') + '><td class="nowrap">' + etiqueta + '</td><td>' + total + '</td><td>' + res + '</td>' +
+        '<td class="' + (p1 ? 'alerta' : '') + '">' + p1 + '</td><td>' + p2 + '</td><td>' + ok + '</td>' +
+        '<td><b>' + pct(total ? (res + p1) / total : 0) + '</b></td><td>' + pct(total ? (res + p1 + p2) / total : 0) + '</td>' +
+        '<td>' + (prio.length ? '<div class="pr"><div class="t"><i style="width:' + fr * 100 + '%"></i></div>' + g + '/' + prio.length + '</div>' : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + (prom || '') + '</td></tr>';
+    };
+    h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Situación de los avances que se miden el mes próximo</h3>' +
+      '<div class="d">Planes que hoy están en cada avance, abiertos por responsable. "Mora hoy" = rescindidos + atrasados (P1). "Si no pagan el mes" suma la cuota del mes pendiente (P2). Tocá un responsable para ver esos casos.</div></div>' +
+      '<div class="tw" style="padding:6px 4px 8px"><table><thead><tr><th>Avance / responsable</th><th>Cartera</th><th>Rescindidos</th><th>P1 atrasados</th><th>P2 cuota mes</th><th>Al día</th><th>Mora hoy</th><th>Si no pagan el mes</th><th>P1+P2 gestionados</th><th>Promesas</th></tr></thead><tbody>' +
+      S.ini.cuotasFiat.map(function (c) {
+        var delAv = S.planes.filter(function (p) { return p.avance === c; });
+        var sub = resp.map(function (r) {
+          var suyos = delAv.filter(function (p) { return p.responsableEmail === r.email; });
+          return suyos.length ? fila(suyos, '<span class="avatar sm" style="background:' + colorDe(r.email) + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre), 'sub', ' data-av="' + c + '" data-resp="' + esc(r.email) + '"') : '';
+        }).join('');
+        var sinResp = delAv.filter(function (p) { return !p.responsableEmail; });
+        if (sinResp.length) sub += fila(sinResp, '(sin asignar)', 'sub', ' data-av="' + c + '" data-resp=""');
+        return fila(delAv, 'Avance ' + c + ' <span class="muted" style="font-weight:400">→ cuota ' + c + '</span>', 'grupo') + sub;
       }).join('') + '</tbody></table></div></div>';
+
+    // Equipo: gestiones de hoy / últimos 7 días + números del mes.
+    var porNombre = {};
+    Object.keys(t.actividad).forEach(function (d) {
+      var dd = diasDesde(d);
+      Object.keys(t.actividad[d]).forEach(function (q) {
+        porNombre[q] = porNombre[q] || { hoy: 0, semana: 0 };
+        if (dd === 0) porNombre[q].hoy += t.actividad[d][q];
+        if (dd <= 6) porNombre[q].semana += t.actividad[d][q];
+      });
+    });
+    R.sort(function (a, b) { return b.prioSinGestion - a.prioSinGestion; });
+    h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Equipo · mes en curso</h3><div class="d">Toda la cartera activa de cada responsable. Ordenado por casos P1+P2 sin gestión.</div></div><div class="tw" style="padding:6px 4px 8px"><table><thead><tr>' +
+      '<th>Responsable</th><th>Gestiones hoy</th><th>Últimos 7 días</th><th>Cartera activa</th><th>P1</th><th>P2</th><th>P3+P4</th><th>P1+P2 gestionados</th><th>Sin gestión</th><th>Contactos efectivos</th><th>Promesas vig. / venc.</th><th>Gestionados y hoy al día</th></tr></thead><tbody>' +
+      R.filter(function (r) { return r.activa || r.intentosMes; }).map(function (r) {
+        var tt = r.prioGestionados + r.prioSinGestion, fr = tt ? r.prioGestionados / tt : 0, a = porNombre[r.nombre] || { hoy: 0, semana: 0 };
+        var rr = resp.filter(function (x) { return x.nombre === r.nombre; })[0];
+        return '<tr style="cursor:default"><td class="nowrap"><span class="avatar sm" style="background:' + (rr ? colorDe(rr.email) : '#98a2b3') + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
+          '<td><b>' + a.hoy + '</b></td><td>' + a.semana + '</td><td>' + r.activa + '</td><td>' + r.p1 + '</td><td>' + r.p2 + '</td><td>' + r.p34 + '</td>' +
+          '<td><div class="pr"><div class="t"><i style="width:' + fr * 100 + '%"></i></div>' + Math.round(fr * 100) + '%</div></td>' +
+          '<td class="' + (r.prioSinGestion ? 'alerta' : '') + '">' + r.prioSinGestion + '</td><td>' + r.efectivosMes + ' <span class="muted">/ ' + r.intentosMes + '</span></td>' +
+          '<td>' + r.promesasVigentes + ' / <span class="' + (r.promesasVencidas ? 'alerta' : '') + '">' + r.promesasVencidas + '</span></td><td>' + r.regularizadosConGestion + '</td></tr>';
+      }).join('') + '</tbody></table></div></div>';
+
+    var vig = objetivosVigentes();
+    if (vig.length) {
+      h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Objetivos en curso</h3><div class="d">Detalle y altas en la sección Objetivos.</div></div><div class="pad"><div class="objs" style="margin:0">' + vig.map(function (o) {
+        var a = avanceObjetivo(o), who = o.responsableEmail === '*' ? 'Todos' : ((resp.filter(function (r) { return r.email === o.responsableEmail; })[0] || {}).nombre || o.responsableEmail);
+        return '<div class="ob" style="box-shadow:none;border:1px solid var(--line);border-left:4px solid #7a5af8"><h5>◎ ' + esc(o.titulo) + '</h5><div class="meta">' + esc(who) + ' · hasta ' + ddmm(o.hasta) + '</div>' +
+          '<div class="meter"><i style="width:' + Math.round(a.fr * 100) + '%"></i></div><div class="meta" style="margin-top:6px">' + a.hechos + ' de ' + a.total + ' gestionados · meta ' + o.meta + '%</div></div>';
+      }).join('') + '</div></div></div>';
+    }
     m.innerHTML = h;
+    cada('tr.sub', m, function (tr) {
+      tr.onclick = function () {
+        S.vista = 'cartera'; S.filtro = { texto: '', situacion: '', estado: '', resp: tr.getAttribute('data-resp'), avance: tr.getAttribute('data-av'), objetivo: '' };
+        $('buscar').value = ''; armarNav(); encabezado(); render();
+      };
+    });
   }).catch(function (e) { if (!e.sesion) m.innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>'; });
 }
 
