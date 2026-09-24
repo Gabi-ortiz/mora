@@ -282,7 +282,17 @@ function carpetaHistorial_(ss) {
   const padres = DriveApp.getFileById(ss.getId()).getParents();
   const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
   const it = padre.getFoldersByName(nombre);
-  return it.hasNext() ? it.next() : padre.createFolder(nombre);
+  if (it.hasNext()) return it.next();
+  try {
+    return padre.createFolder(nombre);
+  } catch (e) {
+    // sin permiso de edición en la carpeta de la planilla: se usa "Mi unidad"
+    const raiz = DriveApp.getRootFolder();
+    const r = raiz.getFoldersByName(nombre);
+    SpreadsheetApp.getActive().toast('No tengo permiso para crear carpetas en "' + padre.getName() +
+      '". La foto se guarda en "Mi unidad / ' + nombre + '".', 'Historial', 10);
+    return r.hasNext() ? r.next() : raiz.createFolder(nombre);
+  }
 }
 
 /** Deja la copia como foto: hoja "FOTO" con los datos del cierre y todas las hojas protegidas (solo el dueño edita). */
