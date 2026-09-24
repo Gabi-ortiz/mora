@@ -29,6 +29,21 @@ comprobante FBS, 3) apellido, agrupados del mismo CUIT/apellido y asiento mensua
 único, lotes del día (sueldos, VEP), 5) solo importe a ≤10 días (sugerido), combinaciones de 2-3 partidas (revisar).
 Los pases entre E y O y los registros FBS que se compensan entre sí no se consideran movimientos.
 
+## Versión Google Sheets (Apps Script)
+
+`appscript/Conciliacion.gs` es la misma lógica de cruce que `conciliar.py`, portada a Apps Script (validada con
+agosto 2026: mismos 4 totales y diferencia de control $143,21).
+
+1. En una planilla nueva: Extensiones > Apps Script, pegar `Conciliacion.gs`, guardar y recargar la planilla.
+2. Menú **Conciliación > 1. Crear hojas de entrada** (una sola vez): crea `Extracto`, `Mayor E`, `Mayor O`,
+   `Pendientes anteriores`, `Reglas` y `Empresas grupo`.
+3. Pegar desde A1 el extracto de Macro y las exportaciones a Excel del mayor E y O de FBS.
+4. **2. Procesar conciliación** → genera `Tablero` (4 puntas + control), `Pend. registrar en FBS`,
+   `Pend. FBS sin banco` y `Conciliados`.
+5. Al cerrar el mes, **3. Pasar pendientes al mes siguiente** copia los pendientes a `Pendientes anteriores`.
+
+La lógica de cruce no toca hojas (`conciliarTodo_` recibe matrices de valores), así que se puede probar con Node.
+
 ## Modelo de conciliación actual (hoja por banco)
 
 Saldo contable FBS = cuenta **E** (registrado, a confirmar) + cuenta **O** (confirmado contra banco).
