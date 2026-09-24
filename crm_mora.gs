@@ -53,6 +53,13 @@ const CRM_CANT_CUOTAS = 13;      // C2..C14
 // datos de licitación y no entran en el historial de gestiones.
 const CRM_COLS_LICITACION = [41, 42]; // AO, AP
 
+// Tramos de mora de Fiat: se leen de la "Tabla de incentivos por mora
+// (editable)" de la planilla del tablero (fila de encabezados CUOTA | TRAMO A
+// | TRAMO B DESDE | TRAMO B HASTA). Se busca primero en CRM_HOJA_TRAMOS y
+// después en el resto de las hojas; si no aparece, se usan estos valores.
+const CRM_HOJA_TRAMOS = 'PARAMETROS';
+const CRM_TRAMOS_DEFECTO = { 3: { a: 0.35, b: 0.41 }, 5: { a: 0.30, b: 0.36 }, 7: { a: 0.32, b: 0.38 }, 9: { a: 0.45, b: 0.51 }, 12: { a: 0.48, b: 0.54 } };
+
 const CRM_ROL_SUPERVISOR = 'SUPERVISOR';
 const CRM_ROL_RESPONSABLE = 'RESPONSABLE';
 
@@ -238,6 +245,47 @@ function crmImportarNotasBase() {
   SpreadsheetApp.getUi().alert('Importación lista: ' + filas.length + ' notas de ' + planes + ' planes.' +
     (Object.keys(yaImportados).length ? '\n(' + Object.keys(yaImportados).length + ' planes ya estaban importados y se saltearon.)' : '') +
     '\n\nRevisá algunas fichas en el CRM antes de borrar las columnas AH en adelante de BASE (la AG, Scoring, se queda).');
+}
+
+/**
+ * {cuota: {a, b}} con a = "tramo A: mora menor a" y b = "tramo B: hasta",
+ * como fracción (0.35). Ver CRM_HOJA_TRAMOS.
+ */
+function crmTramos_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hojas = [ss.getSheetByName(CRM_HOJA_TRAMOS)].concat(ss.getSheets().filter(function (h) {
+    const n = h.getName();
+    return n !== CRM_HOJA_TRAMOS && n !== HOJA_BASE && n.indexOf('CRM_') !== 0;
+  }));
+  for (let i = 0; i < hojas.length; i++) {
+    if (!hojas[i] || hojas[i].getLastRow() < 2) continue;
+    const t = crmBuscarTablaTramos_(hojas[i].getDataRange().getValues());
+    if (t) return t;
+  }
+  return CRM_TRAMOS_DEFECTO;
+}
+
+function crmBuscarTablaTramos_(valores) {
+  const txt = function (v) { return String(v || '').trim().toUpperCase(); };
+  const num = function (v) {
+    if (typeof v === 'number') return v > 1 ? v / 100 : v;
+    const n = parseFloat(String(v).replace('%', '').replace(',', '.'));
+    return isNaN(n) ? null : n / 100;
+  };
+  for (let r = 0; r < valores.length; r++) {
+    for (let c = 0; c < valores[r].length - 3; c++) {
+      if (txt(valores[r][c]) !== 'CUOTA' || txt(valores[r][c + 1]).indexOf('TRAMO A') !== 0) continue;
+      const tramos = {};
+      for (let k = r + 1; k < valores.length; k++) {
+        const cuota = Number(valores[k][c]);
+        if (!cuota) break;
+        const a = num(valores[k][c + 1]), b = num(valores[k][c + 3]);
+        if (a !== null && b !== null) tramos[cuota] = { a: a, b: b };
+      }
+      if (Object.keys(tramos).length) return tramos;
+    }
+  }
+  return null;
 }
 
 /** Archivo de datos del CRM (hojas CRM_*). */
@@ -569,7 +617,7 @@ function crmTableroSupervisor(token) {
     actividad[dia][quien] = (actividad[dia][quien] || 0) + 1;
   });
 
-  return { porResponsable: filas, proyeccion: proyeccion, actividad: actividad, hoy: hoy };
+  return { porResponsable: filas, proyeccion: proyeccion, actividad: actividad, hoy: hoy, tramos: crmTramos_() };
 }
 
 // ---------------------------------------------------------------------------

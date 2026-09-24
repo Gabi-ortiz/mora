@@ -246,6 +246,16 @@ en las gestiones del mes). Se puede volver a correr: saltea los planes ya
 importados. Después de importar, esas columnas se pueden borrar de BASE
 y la ficha sigue mostrando el historial.
 
+### Tablero supervisor: situación por avance
+Mismo formato que la hoja "Tablero Medición FIAT" (sin % incentivo), pero
+sobre los planes que HOY están en cada avance (lo que se va a medir el mes
+próximo): cartera, al día, en mora (alguna `I` en C2..C(N-1)), rescindidos,
+% mora, tramo A / B, tramo logrado y planes que faltan regularizar para
+cada tramo (solo avances medidos), más el trabajo del mes y los objetivos
+de cada responsable. Los tramos se leen de la "Tabla de incentivos por
+mora (editable)" (hoja `PARAMETROS`, se busca por el encabezado CUOTA |
+TRAMO A…); si no está, se usan `CRM_TRAMOS_DEFECTO`.
+
 ### Instalación
 El proyecto de Apps Script queda con **3 archivos separados** (no pegar
 todo en uno):
