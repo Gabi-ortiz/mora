@@ -219,6 +219,11 @@ avisa para borrarlas a mano.
 - **CRM_Gestiones**: log append-only, una fila por intento de contacto,
   con avance y situación del plan al momento de la gestión.
 - **CRM_Auditoria**: acciones de supervisor (reasignaciones, usuarios).
+- **CRM_DatosCliente**: correcciones de contacto hechas desde la ficha
+  (teléfono, teléfono alternativo, mail, nota). El CRM usa el dato
+  corregido y muestra el de BASE al lado; un teléfono vacío vuelve al de
+  BASE. BASE no se toca (la pisaría el IMPORTRANGE). Cada cambio queda en
+  CRM_Auditoria.
 - **CRM_Objetivos**: objetivos que el supervisor le pone a un responsable
   (o a todos): un grupo de casos (prioridades + avances) entre dos fechas,
   con meta en % de casos gestionados. Esos casos le aparecen primero al

@@ -169,6 +169,7 @@
   .acciones { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
   .datos { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; }
   .datos div span { display: block; font-size: 11px; color: var(--soft); font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+  .contacto { border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; }
   .scoring { background: #f8faff; border: 1px solid #dfe6ff; border-radius: 10px; padding: 12px 14px; margin-top: 16px; white-space: pre-wrap; }
   .tl { border-left: 2px solid var(--line); padding-left: 18px; margin-left: 6px; }
   .ev { position: relative; margin-bottom: 16px; }
@@ -248,7 +249,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-25.1';
+var VERSION = '2026-09-25.2';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -636,7 +637,7 @@ function kpi(cod, l, v, h, color) {
 
 // ---------- Ficha del plan ----------
 function abrirFicha(sol) {
-  $('ficha').hidden = false; S.fichaTab = 'gestionar';
+  $('ficha').hidden = false; S.fichaTab = 'gestionar'; S.editarContacto = false;
   $('dr').innerHTML = '<div class="vacio"><span class="cargando"></span>Abriendo plan ' + esc(sol) + '…</div>';
   api('crmFichaPlan', sol).then(renderFicha).catch(function (e) { cerrarFicha(); error(e); });
 }
@@ -656,12 +657,15 @@ function renderFicha(d) {
     (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
     (tel ? '<a class="btn pri" href="tel:' + tel + '" target="_blank">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>' : '<span class="muted">Sin teléfono cargado</span>') +
-    (tel2 ? '<a class="btn" href="tel:' + tel2 + '" target="_blank">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : '') + '</div></div>' +
+    (tel2 ? '<a class="btn" href="tel:' + tel2 + '" target="_blank">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : '') +
+    '<button class="btn ghost sm" id="corregir" title="Corregir teléfono o mail">✎ Corregir datos</button>' +
+    (p.contactoCorregido ? '<span class="pill caso" title="Corregido en el CRM">✔ corregido</span>' : '') + '</div></div>' +
     '<div class="dr-tabs">' + [['gestionar', 'Gestionar'], ['datos', 'Datos del plan'], ['historial', 'Historial (' + (d.gestiones.length + p.notasBase.length) + ')']].map(function (t) {
       return '<button data-t="' + t[0] + '" class="' + (S.fichaTab === t[0] ? 'on' : '') + '">' + t[1] + '</button>';
     }).join('') + '</div><div class="dr-b" id="drb"></div>';
   $('dr').innerHTML = h;
   $('cerrar').onclick = cerrarFicha;
+  $('corregir').onclick = function () { S.fichaTab = 'datos'; S.editarContacto = true; renderFicha(S.ficha); };
   if ($('ant')) $('ant').onclick = function () { abrirFicha(S.cola[i - 1]); };
   if ($('sig')) $('sig').onclick = function () { abrirFicha(S.cola[i + 1]); };
   cada('.dr-tabs button', $('dr'), function (b) { b.onclick = function () { S.fichaTab = b.getAttribute('data-t'); renderFicha(S.ficha); }; });
@@ -742,15 +746,53 @@ function sugerirEstado(f, res) {
 function tabDatos(d, el) {
   var p = d.plan;
   var dato = function (t, v) { return '<div><span>' + t + '</span>' + (v === '' || v == null ? '—' : esc(v)) + '</div>'; };
-  el.innerHTML = '<div class="datos">' + dato('Solicitud', p.solicitud) + dato('Grupo / Orden', p.grupo + ' / ' + p.orden) + dato('Documento', p.documento) +
+  el.innerHTML = bloqueContacto(p) + '<div class="datos" style="margin-top:16px">' + dato('Solicitud', p.solicitud) + dato('Grupo / Orden', p.grupo + ' / ' + p.orden) + dato('Documento', p.documento) +
     dato('Modelo', p.modelo) + dato('Tipo de plan', p.tipoPlan) + dato('Forma de pago', p.formaPago) +
     dato('Estado en BASE', p.estado) + dato('Vendedor', p.vendedor) + dato('Supervisor de venta', p.supervisorVenta) +
-    dato('Teléfono', p.telefono) + dato('Teléfono alternativo', p.telefonoAlt) + dato('Responsable', p.responsableNombre) + '</div>' +
+    dato('Responsable', p.responsableNombre) + '</div>' +
     '<div class="scoring"><h4>Licitación (estado para licitar)</h4><div class="datos">' + dato('En condiciones (col. G)', p.enCondiciones) + dato('Sobrepauta / cuota pactada (col. F)', p.sobrepauta) +
     (p.licitacion || []).map(function (n) { return dato(esc(n.columna), n.valor); }).join('') + '</div></div>' +
     '<div class="scoring"><h4>Scoring (col. AG)</h4>' + (esc(p.scoring) || '<span class="muted">Sin scoring cargado.</span>') + '</div>' +
     '<div style="margin-top:18px"><h4>Cuotas</h4>' + cuotasGrandes(p) + '</div>' + (S.ini.esSupervisor ? bloqueReasignar(p) : '');
   enlazarReasignar(p);
+  enlazarContacto(p);
+}
+
+// Datos de contacto: se ven siempre; con "Corregir" se editan. La corrección se
+// guarda en CRM MORA (BASE no se toca) y se muestra qué decía BASE.
+function bloqueContacto(p) {
+  var b = p.contactoBase || {}, c = p.contactoCorregido;
+  var difiere = function (actual, base) { return c && actual !== base ? ' <small class="muted">(en BASE: ' + (esc(base) || '—') + ')</small>' : ''; };
+  if (!S.editarContacto) {
+    return '<div class="contacto"><div class="row" style="justify-content:space-between"><h4 style="margin:0">Datos de contacto</h4><button class="btn sm" id="editarContacto">✎ Corregir</button></div>' +
+      '<div class="datos" style="margin-top:8px"><div><span>Teléfono</span>' + (esc(p.telefono) || '—') + difiere(p.telefono, b.telefono) + '</div>' +
+      '<div><span>Teléfono alternativo</span>' + (esc(p.telefonoAlt) || '—') + difiere(p.telefonoAlt, b.telefonoAlt) + '</div>' +
+      '<div><span>Mail</span>' + (esc(p.email) || '—') + '</div><div><span>Nota de contacto</span>' + (esc(p.notaContacto) || '—') + '</div></div>' +
+      (c ? '<div class="muted" style="font-size:12px;margin-top:6px">✔ Corregido en el CRM por ' + esc(c.por) + ' el ' + esc(c.fecha) + '.</div>' : '') + '</div>';
+  }
+  return '<form class="contacto" id="fContacto"><h4>Corregir datos de contacto</h4>' +
+    '<div class="muted" style="font-size:12px;margin-bottom:8px">Se guarda en el CRM; BASE no se modifica. Teléfonos con característica, sin 0 ni 15 (ej.: 3515551234). Dejá un teléfono vacío para volver al de BASE.</div>' +
+    '<div class="f2"><label class="fl">Teléfono<input class="in" name="telefono" inputmode="tel" value="' + esc(p.telefono) + '" placeholder="' + esc(b.telefono) + '">' +
+    '<span class="muted" style="font-weight:400">En BASE: ' + (esc(b.telefono) || '—') + '</span></label>' +
+    '<label class="fl">Teléfono alternativo<input class="in" name="telefonoAlt" inputmode="tel" value="' + esc(p.telefonoAlt) + '" placeholder="' + esc(b.telefonoAlt) + '">' +
+    '<span class="muted" style="font-weight:400">En BASE: ' + (esc(b.telefonoAlt) || '—') + '</span></label>' +
+    '<label class="fl">Mail<input class="in" name="email" type="email" value="' + esc(p.email) + '"></label>' +
+    '<label class="fl">Nota de contacto<input class="in" name="nota" value="' + esc(p.notaContacto) + '" placeholder="Ej.: llamar después de las 18 hs"></label></div>' +
+    '<div class="acciones"><button class="btn" type="button" id="cancelarContacto">Cancelar</button><button class="btn pri" type="submit">Guardar datos</button></div></form>';
+}
+function enlazarContacto(p) {
+  if ($('editarContacto')) $('editarContacto').onclick = function () { S.editarContacto = true; renderFicha(S.ficha); };
+  if ($('cancelarContacto')) $('cancelarContacto').onclick = function () { S.editarContacto = false; renderFicha(S.ficha); };
+  var f = $('fContacto');
+  if (!f) return;
+  f.telefono.focus();
+  f.onsubmit = function (e) {
+    e.preventDefault();
+    var b = f.querySelector('button[type=submit]'); b.disabled = true;
+    api('crmActualizarContacto', p.solicitud, { telefono: f.telefono.value, telefonoAlt: f.telefonoAlt.value, email: f.email.value, nota: f.nota.value })
+      .then(function (d2) { S.editarContacto = false; toast('✔ Datos de contacto guardados'); renderFicha(d2); cargarCartera(); })
+      .catch(function (x) { b.disabled = false; error(x); });
+  };
 }
 
 function eventoGestion(g) {

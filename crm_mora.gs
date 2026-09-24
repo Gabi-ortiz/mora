@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-25.1';
+const CRM_VERSION = '2026-09-25.2';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -31,6 +31,7 @@ const CRM_HOJA_CASOS = 'CRM_Casos';
 const CRM_HOJA_GESTIONES = 'CRM_Gestiones';
 const CRM_HOJA_AUDITORIA = 'CRM_Auditoria';
 const CRM_HOJA_OBJETIVOS = 'CRM_Objetivos';
+const CRM_HOJA_DATOS_CLIENTE = 'CRM_DatosCliente';
 
 // Columnas de BASE que usa el CRM además de las de tablero_mora.gs.
 const CRM_COL_RESPONSABLE = 1;   // A — EZE / FABIO / SANTI
@@ -140,6 +141,9 @@ const CRM_ENC_AUDITORIA = ['FechaHora', 'UsuarioEmail', 'Accion', 'Detalle'];
 // un grupo de casos (por avance y prioridad) a gestionar entre dos fechas.
 const CRM_ENC_OBJETIVOS = ['Id', 'Titulo', 'ResponsableEmail', 'Avances', 'Situaciones', 'Meta',
   'Desde', 'Hasta', 'CreadoPor', 'Activo'];
+// Correcciones de datos de contacto hechas desde el CRM (BASE no se toca: se
+// pisaría con el IMPORTRANGE). Vacío = se usa el dato de BASE.
+const CRM_ENC_DATOS_CLIENTE = ['Solicitud', 'Telefono', 'TelefonoAlt', 'Email', 'Nota', 'ActualizadoPor', 'Actualizado'];
 
 // ---------------------------------------------------------------------------
 // Web App
@@ -166,6 +170,7 @@ function crmInicializar() {
   crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
   crmHoja_(ss, CRM_HOJA_AUDITORIA, CRM_ENC_AUDITORIA);
   crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS);
+  crmHoja_(ss, CRM_HOJA_DATOS_CLIENTE, CRM_ENC_DATOS_CLIENTE);
 
   const usuarios = crmLeerUsuarios_(ss);
   const existentes = usuarios.map(function (u) { return u.email; });
@@ -486,6 +491,48 @@ function crmRegistrarGestion(token, solicitud, datos) {
       MotivoNoPago: datos.motivo || '',
       ActualizadoPor: u.email,
     });
+  } finally {
+    lock.releaseLock();
+  }
+  return crmFichaPlan(token, solicitud);
+}
+
+/**
+ * Corrige los datos de contacto de un plan (el responsable, solo en su
+ * cartera; el supervisor, en cualquiera). Un campo vacío vuelve al dato de BASE.
+ */
+function crmActualizarContacto(token, solicitud, datos) {
+  const u = crmUsuarioActual_(token);
+  const ctx = crmContexto_();
+  const p = crmBuscarPlan_(ctx, solicitud);
+  if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
+
+  const tel = function (v, nombre) {
+    v = String(v || '').trim();
+    if (v && !/^\+?[\d\s\-()]{6,20}$/.test(v)) throw new Error(nombre + ': solo números (con característica, sin 0 ni 15). Ej.: 3515551234');
+    return v.replace(/[^\d+]/g, '');
+  };
+  const telefono = tel(datos.telefono, 'Teléfono');
+  const telefonoAlt = tel(datos.telefonoAlt, 'Teléfono alternativo');
+  const email = String(datos.email || '').trim().toLowerCase();
+  if (email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) throw new Error('El mail no parece válido.');
+  const nota = String(datos.nota || '').trim().slice(0, 500);
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const hoja = crmHoja_(ctx.ss, CRM_HOJA_DATOS_CLIENTE, CRM_ENC_DATOS_CLIENTE);
+    const filas = crmLeerObjetos_(ctx.ss, CRM_HOJA_DATOS_CLIENTE, CRM_ENC_DATOS_CLIENTE);
+    const idx = filas.map(function (d) { return String(d.Solicitud); }).indexOf(p.solicitud);
+    // Si coincide con BASE no hace falta guardarlo como corrección.
+    // El apóstrofo guarda el teléfono como texto (si no, Sheets lo convierte en número).
+    const texto = function (v) { return v ? "'" + v : ''; };
+    const fila = [p.solicitud, texto(telefono === p.contactoBase.telefono ? '' : telefono),
+      texto(telefonoAlt === p.contactoBase.telefonoAlt ? '' : telefonoAlt), email, nota, u.email, new Date()];
+    if (idx >= 0) hoja.getRange(idx + 2, 1, 1, fila.length).setValues([fila]);
+    else hoja.appendRow(fila);
+    crmAuditar_(ctx.ss, u.email, 'Corregir contacto', p.solicitud + ': tel ' + (p.telefono || '—') + ' → ' + (telefono || p.contactoBase.telefono || '—') +
+      ' / alt ' + (p.telefonoAlt || '—') + ' → ' + (telefonoAlt || p.contactoBase.telefonoAlt || '—') + (email ? ' / mail ' + email : ''));
   } finally {
     lock.releaseLock();
   }
@@ -832,6 +879,11 @@ function crmContexto_() {
     };
   });
 
+  const corregidos = {};
+  crmLeerObjetos_(ss, CRM_HOJA_DATOS_CLIENTE, CRM_ENC_DATOS_CLIENTE).forEach(function (d) {
+    corregidos[String(d.Solicitud)] = d;
+  });
+
   const mes = crmFmt(new Date(), 'yyyy-MM');
   const gestionesMes = {};
   crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
@@ -860,8 +912,7 @@ function crmContexto_() {
       modelo: crmFmt(f[CRM_COL_MODELO - 1]), sobrepauta: crmFmt(f[CRM_COL_SOBREPAUTA - 1]),
       enCondiciones: crmFmt(f[CRM_COL_EN_CONDICIONES - 1]),
       licitacion: crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION),
-      cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), telefono: crmFmt(f[CRM_COL_TELEFONO - 1]),
-      telefonoAlt: crmFmt(f[CRM_COL_TELEFONO_ALT - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
+      cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
       avance: f[COL_AVANCE - 1], estado: crmFmt(f[COL_ESTADO - 1]),
       vendedor: crmFmt(f[CRM_COL_VENDEDOR - 1]), supervisorVenta: crmFmt(f[CRM_COL_SUPERVISOR_VTA - 1]),
       formaPago: crmFmt(f[CRM_COL_FORMA_PAGO - 1]), tipoPlan: crmFmt(f[CRM_COL_TIPO_PLAN - 1]),
@@ -873,8 +924,24 @@ function crmContexto_() {
       responsableEmail: resp ? resp.email : '',
       responsableNombre: resp ? resp.nombre : (alias || '(sin asignar)'),
     });
+    crmAplicarContacto_(planes[planes.length - 1], f, corregidos[solicitud]);
   }
   return { ss: ss, planes: planes, casos: casos, gestionesMes: gestionesMes };
+}
+
+/**
+ * Datos de contacto del plan: el corregido en el CRM si hay, si no el de
+ * BASE. Guarda también el de BASE (para mostrar qué se corrigió).
+ */
+function crmAplicarContacto_(p, fila, corr) {
+  const base = { telefono: crmFmt(fila[CRM_COL_TELEFONO - 1]), telefonoAlt: crmFmt(fila[CRM_COL_TELEFONO_ALT - 1]) };
+  corr = corr || {};
+  p.telefono = crmFmt(corr.Telefono) || base.telefono;
+  p.telefonoAlt = crmFmt(corr.TelefonoAlt) || base.telefonoAlt;
+  p.email = crmFmt(corr.Email);
+  p.notaContacto = crmFmt(corr.Nota);
+  p.contactoBase = base;
+  p.contactoCorregido = corr.Solicitud ? { por: crmFmt(corr.ActualizadoPor), fecha: crmFmt(corr.Actualizado, 'yyyy-MM-dd HH:mm') } : null;
 }
 
 /** Columnas de texto libre de BASE (AH en adelante) que tengan algo, sin las de licitación. */
