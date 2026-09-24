@@ -126,6 +126,9 @@
   .ob .meter.ok i { background: var(--ok); }
   .ob .pie { display: flex; justify-content: space-between; align-items: center; margin-top: 10px; gap: 8px; }
   .grupo td { background: #f9fafb; font-weight: 700; border-top: 2px solid var(--line); }
+  .grupo { cursor: pointer; }
+  .grupo.total td { background: #eef4ff; }
+  .tagobj { display: inline-block; background: #f4f0ff; color: #5925dc; border-radius: 6px; padding: 1px 7px; font-size: 12px; font-weight: 600; }
   .sub td:first-child { padding-left: 34px; }
   .sub { cursor: pointer; }
   .sub:hover td { background: #f8faff; }
@@ -846,6 +849,93 @@ function datosObj(f) {
   return { responsableEmail: f.resp.value, situaciones: marcados('sit'), avances: marcados('av').map(Number) };
 }
 
+// ---------- Tablero: situación por avance ----------
+// Atrasados = P1+P3, Cuota del mes = P2+P4 (mismo dato, sin importar si el avance se mide).
+// "Trabajo" = casos atrasados o con la cuota del mes pendiente que tuvieron al menos una gestión este mes.
+function numerosAvance(lista) {
+  var n = function (cods) { return lista.filter(function (p) { return cods.indexOf(p.situacion.codigo) >= 0; }).length; };
+  var total = lista.length, res = n(['RESCINDIDO']), at = n(['P1', 'P3']), cm = n(['P2', 'P4']), ok = n(['AL_DIA']);
+  var aTrabajar = lista.filter(function (p) { return ['P1', 'P2', 'P3', 'P4'].indexOf(p.situacion.codigo) >= 0; });
+  var hechos = aTrabajar.filter(function (p) { return p.intentosMes > 0; }).length;
+  return { total: total, res: res, at: at, cm: cm, ok: ok, moraHoy: total ? (res + at) / total : 0, moraMes: total ? (res + at + cm) / total : 0,
+    aTrabajar: aTrabajar.length, hechos: hechos, trabajo: aTrabajar.length ? hechos / aTrabajar.length : 0 };
+}
+function barraTrabajo(x) {
+  if (!x.aTrabajar) return '<span class="muted">—</span>';
+  var c = x.trabajo >= 0.8 ? 'var(--ok)' : x.trabajo >= 0.4 ? 'var(--accent)' : 'var(--p2)';
+  return '<div class="pr"><div class="t"><i style="width:' + x.trabajo * 100 + '%;background:' + c + '"></i></div><b>' + Math.round(x.trabajo * 100) + '%</b> <span class="muted">' + x.hechos + '/' + x.aTrabajar + '</span></div>';
+}
+function dibujarAvances() {
+  var el = $('avSec');
+  if (!el) return;
+  S.tabAv = S.tabAv || 'medidos'; S.abiertos = S.abiertos || {};
+  var resp = S.ini.responsables, medidos = S.ini.cuotasFiat;
+  var todos = S.planes.map(function (p) { return p.avance; }).filter(function (v, k, a) { return a.indexOf(v) === k; }).sort(function (a, b) { return a - b; });
+  var avances = S.tabAv === 'medidos' ? medidos : todos;
+  var abierto = function (a) { return S.abiertos[a] !== undefined ? S.abiertos[a] : S.tabAv === 'medidos'; };
+
+  var celdas = function (x) {
+    return '<td>' + x.total + '</td><td>' + x.res + '</td><td class="' + (x.at ? 'alerta' : '') + '">' + x.at + '</td><td>' + x.cm + '</td><td>' + x.ok + '</td>' +
+      '<td><b>' + pct(x.moraHoy) + '</b></td><td>' + pct(x.moraMes) + '</td><td>' + barraTrabajo(x) + '</td>';
+  };
+  // Avance de los objetivos vigentes que incluyen ese avance, para un responsable.
+  var objetivosDe = function (lista, email) {
+    return objetivosVigentes().map(function (o) {
+      var casos = lista.filter(function (p) { return enObjetivo(p, o) && p.responsableEmail === email; });
+      if (!casos.length) return '';
+      var hechos = casos.filter(function (p) { return gestionadoDesde(p, o.desde); }).length;
+      return '<span class="tagobj" title="' + esc(o.titulo) + '">◎ ' + hechos + '/' + casos.length + '</span>';
+    }).join(' ');
+  };
+
+  var h = '<div class="card-h" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3>Situación por avance</h3>' +
+    '<div class="d">Mora hoy = rescindidos + atrasados. Si no pagan el mes = suma la cuota del mes pendiente. Trabajo = casos atrasados o con la cuota del mes que tuvieron al menos una gestión este mes. ' +
+    'Tocá un avance para abrirlo y un responsable para ver sus casos.</div></div>' +
+    '<div class="row"><button class="tab' + (S.tabAv === 'medidos' ? ' on' : '') + '" data-tabav="medidos">Avances medidos (' + medidos.join(', ') + ')</button>' +
+    '<button class="tab' + (S.tabAv === 'todos' ? ' on' : '') + '" data-tabav="todos">Todos los avances</button>' +
+    '<button class="btn sm" id="abrirTodo">' + (avances.every(abierto) ? 'Cerrar todo' : 'Abrir todo') + '</button></div></div>' +
+    '<div class="tw" style="padding:6px 4px 8px"><table><thead><tr><th>Avance / responsable</th><th>Cartera</th><th>Rescindidos</th><th>Atrasados</th><th>Cuota del mes</th><th>Al día</th><th>Mora hoy</th><th>Si no pagan el mes</th><th>Trabajo del mes</th><th>Objetivos</th></tr></thead><tbody>';
+
+  // Fila de total (todos los avances de la vista) y por responsable.
+  var enVista = S.planes.filter(function (p) { return avances.indexOf(p.avance) >= 0; });
+  h += '<tr class="grupo total" data-av="total"><td class="nowrap">' + (abierto('total') ? '▾' : '▸') + ' Total ' + (S.tabAv === 'medidos' ? 'avances medidos' : 'cartera') + '</td>' + celdas(numerosAvance(enVista)) + '<td></td></tr>';
+  if (abierto('total')) h += filasResp(enVista, '', celdas, objetivosDe);
+
+  avances.forEach(function (a) {
+    var delAv = S.planes.filter(function (p) { return p.avance === a; });
+    h += '<tr class="grupo" data-av="' + a + '"><td class="nowrap">' + (abierto(a) ? '▾' : '▸') + ' Avance ' + a +
+      (medidos.indexOf(a) >= 0 ? ' <span class="fiat">FIAT</span>' : '') + '</td>' + celdas(numerosAvance(delAv)) + '<td></td></tr>';
+    if (abierto(a)) h += filasResp(delAv, a, celdas, objetivosDe);
+  });
+  el.innerHTML = h + '</tbody></table></div>';
+
+  cada('[data-tabav]', el, function (b) { b.onclick = function () { S.tabAv = b.getAttribute('data-tabav'); S.abiertos = {}; dibujarAvances(); }; });
+  $('abrirTodo').onclick = function () {
+    var valor = !avances.every(abierto);
+    avances.forEach(function (a) { S.abiertos[a] = valor; }); S.abiertos.total = valor; dibujarAvances();
+  };
+  cada('tr.grupo', el, function (tr) {
+    tr.onclick = function () { var a = tr.getAttribute('data-av'); a = a === 'total' ? a : Number(a); S.abiertos[a] = !abierto(a); dibujarAvances(); };
+  });
+  cada('tr.sub', el, function (tr) {
+    tr.onclick = function () {
+      S.vista = 'cartera'; S.filtro = { texto: '', situacion: '', estado: '', resp: tr.getAttribute('data-resp'), avance: tr.getAttribute('data-av'), objetivo: '' };
+      $('buscar').value = ''; armarNav(); encabezado(); render();
+    };
+  });
+}
+function filasResp(lista, avance, celdas, objetivosDe) {
+  var out = S.ini.responsables.map(function (r) {
+    var suyos = lista.filter(function (p) { return p.responsableEmail === r.email; });
+    if (!suyos.length) return '';
+    return '<tr class="sub" data-av="' + avance + '" data-resp="' + esc(r.email) + '"><td class="nowrap"><span class="avatar sm" style="background:' + colorDe(r.email) + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
+      celdas(numerosAvance(suyos)) + '<td class="nowrap">' + objetivosDe(suyos, r.email) + '</td></tr>';
+  }).join('');
+  var sinResp = lista.filter(function (p) { return !p.responsableEmail; });
+  if (sinResp.length) out += '<tr class="sub" data-av="' + avance + '" data-resp=""><td>(sin asignar)</td>' + celdas(numerosAvance(sinResp)) + '<td></td></tr>';
+  return out;
+}
+
 // ---------- Tablero supervisor ----------
 // Todo lo de cartera se calcula con los planes ya cargados; del servidor
 // solo vienen las gestiones por día y los números del mes por responsable.
@@ -862,31 +952,8 @@ function renderTablero(m) {
       '<div class="k"><div class="muted">Promesas vigentes</div><div class="v">' + sum(R, 'promesasVigentes') + '</div><div class="' + (sum(R, 'promesasVencidas') ? 'alerta' : 'muted') + '" style="font-size:12px">' + sum(R, 'promesasVencidas') + ' vencidas sin pago</div></div>' +
       '<div class="k"><div class="muted">Contactos efectivos del mes</div><div class="v">' + efect + '</div><div class="muted" style="font-size:12px">de ' + intentos + ' intentos' + (intentos ? ' · ' + Math.round(efect / intentos * 100) + '%' : '') + '</div></div></div>';
 
-    // Situación de cada avance medido, abierta por responsable.
-    var fila = function (lista, etiqueta, clase, attrs) {
-      var n = function (c) { return lista.filter(function (p) { return p.situacion.codigo === c; }).length; };
-      var total = lista.length, res = n('RESCINDIDO'), p1 = n('P1'), p2 = n('P2'), ok = n('AL_DIA');
-      var prio = lista.filter(esPrio), g = prio.filter(function (p) { return p.intentosMes > 0; }).length, fr = prio.length ? g / prio.length : 0;
-      var prom = lista.filter(function (p) { return p.estadoCaso === 'Promesa de pago' && p.promesaFecha >= hoyStr(); }).length;
-      return '<tr class="' + clase + '"' + (attrs || '') + '><td class="nowrap">' + etiqueta + '</td><td>' + total + '</td><td>' + res + '</td>' +
-        '<td class="' + (p1 ? 'alerta' : '') + '">' + p1 + '</td><td>' + p2 + '</td><td>' + ok + '</td>' +
-        '<td><b>' + pct(total ? (res + p1) / total : 0) + '</b></td><td>' + pct(total ? (res + p1 + p2) / total : 0) + '</td>' +
-        '<td>' + (prio.length ? '<div class="pr"><div class="t"><i style="width:' + fr * 100 + '%"></i></div>' + g + '/' + prio.length + '</div>' : '<span class="muted">—</span>') + '</td>' +
-        '<td>' + (prom || '') + '</td></tr>';
-    };
-    h += '<div class="card" style="margin-top:16px"><div class="card-h"><h3>Situación de los avances que se miden el mes próximo</h3>' +
-      '<div class="d">Planes que hoy están en cada avance, abiertos por responsable. "Mora hoy" = rescindidos + atrasados (P1). "Si no pagan el mes" suma la cuota del mes pendiente (P2). Tocá un responsable para ver esos casos.</div></div>' +
-      '<div class="tw" style="padding:6px 4px 8px"><table><thead><tr><th>Avance / responsable</th><th>Cartera</th><th>Rescindidos</th><th>P1 atrasados</th><th>P2 cuota mes</th><th>Al día</th><th>Mora hoy</th><th>Si no pagan el mes</th><th>P1+P2 gestionados</th><th>Promesas</th></tr></thead><tbody>' +
-      S.ini.cuotasFiat.map(function (c) {
-        var delAv = S.planes.filter(function (p) { return p.avance === c; });
-        var sub = resp.map(function (r) {
-          var suyos = delAv.filter(function (p) { return p.responsableEmail === r.email; });
-          return suyos.length ? fila(suyos, '<span class="avatar sm" style="background:' + colorDe(r.email) + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre), 'sub', ' data-av="' + c + '" data-resp="' + esc(r.email) + '"') : '';
-        }).join('');
-        var sinResp = delAv.filter(function (p) { return !p.responsableEmail; });
-        if (sinResp.length) sub += fila(sinResp, '(sin asignar)', 'sub', ' data-av="' + c + '" data-resp=""');
-        return fila(delAv, 'Avance ' + c + ' <span class="muted" style="font-weight:400">→ cuota ' + c + '</span>', 'grupo') + sub;
-      }).join('') + '</tbody></table></div></div>';
+    // Situación por avance (medidos o todos), abierta por responsable: se dibuja aparte para poder cambiar la vista sin volver a pedir datos.
+    h += '<div class="card" style="margin-top:16px" id="avSec"></div>';
 
     // Equipo: gestiones de hoy / últimos 7 días + números del mes.
     var porNombre = {};
@@ -920,12 +987,7 @@ function renderTablero(m) {
       }).join('') + '</div></div></div>';
     }
     m.innerHTML = h;
-    cada('tr.sub', m, function (tr) {
-      tr.onclick = function () {
-        S.vista = 'cartera'; S.filtro = { texto: '', situacion: '', estado: '', resp: tr.getAttribute('data-resp'), avance: tr.getAttribute('data-av'), objetivo: '' };
-        $('buscar').value = ''; armarNav(); encabezado(); render();
-      };
-    });
+    dibujarAvances();
   }).catch(function (e) { if (!e.sesion) m.innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>'; });
 }
 
