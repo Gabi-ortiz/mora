@@ -130,6 +130,7 @@
   .grupo.total td { background: #eef4ff; }
   .tmed th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
   .tmed td { text-align: center; } .tmed td:first-child { text-align: left; }
+  .asig { display: inline-block; min-width: 30px; padding: 2px 8px; border-radius: 6px; background: #eef4ff; color: var(--accent); }
   .tagobj { display: inline-block; background: #f4f0ff; color: #5925dc; border-radius: 6px; padding: 1px 7px; font-size: 12px; font-weight: 600; }
   .sub td:first-child { padding-left: 34px; }
   .sub { cursor: pointer; }
@@ -875,6 +876,25 @@ function calcTramo(x, t) {
   if (x.pct < t.a - e) faltaA = 0;
   return { logrado: x.pct < t.a - e ? 'A' : x.pct <= t.b + e ? 'B' : '', faltaA: faltaA, faltaB: faltaB };
 }
+// Reparte "total" planes a levantar entre responsables en proporción a su cartera
+// (resto mayor, así la suma da exacto), sin pasarse de los planes en mora de cada
+// uno: lo que no pueden levantar se redistribuye entre los demás.
+function repartir(total, grupos) {
+  var asign = grupos.map(function () { return 0; }), queda = total;
+  for (var vuelta = 0; vuelta < 10 && queda > 0; vuelta++) {
+    var abiertos = grupos.map(function (g, k) { return k; }).filter(function (k) { return asign[k] < grupos[k].tope; });
+    var peso = abiertos.reduce(function (a, k) { return a + grupos[k].cartera; }, 0);
+    if (!abiertos.length || !peso) break;
+    var partes = abiertos.map(function (k) { var ideal = queda * grupos[k].cartera / peso; return { k: k, base: Math.floor(ideal), resto: ideal - Math.floor(ideal) }; });
+    var usados = partes.reduce(function (a, x) { return a + x.base; }, 0);
+    partes.sort(function (a, b) { return b.resto - a.resto; }).forEach(function (x, i) { if (i < queda - usados) x.base++; });
+    partes.forEach(function (x) {
+      var dar = Math.min(x.base, grupos[x.k].tope - asign[x.k]);
+      asign[x.k] += dar; queda -= dar;
+    });
+  }
+  return asign;
+}
 function barraTrabajo(x) {
   if (!x.aTrabajar) return '<span class="muted">—</span>';
   var c = x.trabajo >= 0.8 ? 'var(--ok)' : x.trabajo >= 0.4 ? 'var(--accent)' : 'var(--p2)';
@@ -895,7 +915,10 @@ function dibujarAvances() {
     var color = tr ? (tr.logrado === 'A' ? 'var(--ok-ink)' : tr.logrado === 'B' ? 'var(--p2-ink)' : 'var(--p1-ink)') : '';
     var h = '<td>' + x.total + '</td><td>' + x.ok + '</td><td class="' + (x.mora ? 'alerta' : '') + '">' + x.mora + '</td><td>' + x.res + '</td>' +
       '<td><b style="color:' + color + '">' + pct(x.pct) + '</b></td>';
-    if (conTramo && tr) {
+    if (conTramo && conTramo.asignado) {
+      h += '<td></td><td></td><td></td><td><b class="asig" title="Planes en mora que le toca levantar para llegar al tramo A (según el peso de su cartera en el avance)">' + conTramo.a + '</b></td>' +
+        '<td><b class="asig" title="Planes en mora que le toca levantar para llegar al tramo B">' + conTramo.b + '</b></td>';
+    } else if (conTramo && tr) {
       h += '<td>' + pct(t.a) + '</td><td>' + pct(t.b) + '</td><td>' +
         (tr.logrado ? '<span class="pill s-AL_DIA">Tramo ' + tr.logrado + '</span>' : '<span class="pill s-P1">Sin cobro</span>') + '</td>' +
         '<td>' + tr.faltaA + '</td><td>' + tr.faltaB + '</td>';
@@ -914,20 +937,29 @@ function dibujarAvances() {
     }).join(' ');
   };
   var sub = function (lista, avance, t) {
-    var out = S.ini.responsables.map(function (r) {
-      var suyos = lista.filter(function (p) { return p.responsableEmail === r.email; });
-      if (!suyos.length) return '';
-      return '<tr class="sub" data-av="' + avance + '" data-resp="' + esc(r.email) + '"><td class="nowrap"><span class="avatar sm" style="background:' + colorDe(r.email) + '">' + iniciales(r.nombre) + '</span> ' + esc(r.nombre) + '</td>' +
-        celdas(numerosAvance(suyos), t, false) + '<td class="nowrap">' + objetivosDe(suyos, r.email) + '</td></tr>';
-    }).join('');
+    var filas = S.ini.responsables.map(function (r) {
+      return { r: r, lista: lista.filter(function (p) { return p.responsableEmail === r.email; }) };
+    }).filter(function (f) { return f.lista.length; });
     var sinResp = lista.filter(function (p) { return !p.responsableEmail; });
-    if (sinResp.length) out += '<tr class="sub" data-av="' + avance + '" data-resp=""><td>(sin asignar)</td>' + celdas(numerosAvance(sinResp), t, false) + '<td></td></tr>';
-    return out;
+    if (sinResp.length) filas.push({ r: null, lista: sinResp });
+    filas.forEach(function (f) { f.x = numerosAvance(f.lista); });
+    // En avances medidos: cuántos planes le toca levantar a cada uno para cada tramo.
+    if (t) {
+      var tr = calcTramo(numerosAvance(lista), t);
+      var grupos = filas.map(function (f) { return { cartera: f.x.total, tope: f.x.mora }; });
+      var aA = repartir(tr.faltaA, grupos), aB = repartir(tr.faltaB, grupos);
+      filas.forEach(function (f, k) { f.asig = { asignado: true, a: aA[k], b: aB[k] }; });
+    }
+    return filas.map(function (f) {
+      return '<tr class="sub" data-av="' + avance + '" data-resp="' + (f.r ? esc(f.r.email) : '') + '"><td class="nowrap">' +
+        (f.r ? '<span class="avatar sm" style="background:' + colorDe(f.r.email) + '">' + iniciales(f.r.nombre) + '</span> ' + esc(f.r.nombre) : '(sin asignar)') + '</td>' +
+        celdas(f.x, t, f.asig || false) + '<td class="nowrap">' + (f.r ? objetivosDe(f.lista, f.r.email) : '') + '</td></tr>';
+    }).join('');
   };
 
   var h = '<div class="card-h" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3>Situación por avance</h3>' +
     '<div class="d">Planes que hoy están en cada avance. En mora = alguna cuota vencida impaga (C2 a C(N-1)). % mora = (en mora + rescindidos) / cartera. ' +
-    'Tramos, tramo logrado y planes que faltan regularizar solo para los avances que se miden. Trabajo = casos atrasados o con la cuota del mes que tuvieron al menos una gestión este mes. ' +
+    'Tramos, tramo logrado y planes que faltan regularizar solo para los avances que se miden; en cada responsable, los planes que le toca levantar según el peso de su cartera en ese avance. Trabajo = casos atrasados o con la cuota del mes que tuvieron al menos una gestión este mes. ' +
     'Tocá un avance para abrirlo por responsable y un responsable para ver sus casos.</div></div>' +
     '<div class="row"><button class="tab' + (S.tabAv === 'medidos' ? ' on' : '') + '" data-tabav="medidos">Avances medidos (' + medidos.join(', ') + ')</button>' +
     '<button class="tab' + (S.tabAv === 'todos' ? ' on' : '') + '" data-tabav="todos">Todos los avances</button>' +

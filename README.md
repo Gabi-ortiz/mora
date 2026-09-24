@@ -252,7 +252,10 @@ sobre los planes que HOY están en cada avance (lo que se va a medir el mes
 próximo): cartera, al día, en mora (alguna `I` en C2..C(N-1)), rescindidos,
 % mora, tramo A / B, tramo logrado y planes que faltan regularizar para
 cada tramo (solo avances medidos), más el trabajo del mes y los objetivos
-de cada responsable. Los tramos se leen de la "Tabla de incentivos por
+de cada responsable. En la fila de cada responsable, los planes que faltan
+para cada tramo se reparten según el peso de su cartera en ese avance
+(resto mayor, la suma da el total), sin asignarle a nadie más planes de los
+que tiene en mora (el excedente pasa a los demás). Los tramos se leen de la "Tabla de incentivos por
 mora (editable)" (hoja `PARAMETROS`, se busca por el encabezado CUOTA |
 TRAMO A…); si no está, se usan `CRM_TRAMOS_DEFECTO`.
 
