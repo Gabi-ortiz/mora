@@ -14,6 +14,21 @@ python procesar_extracto.py Resumen_Macro.csv "Conciliacion Macro.xlsx"
 python procesar_extracto.py "08-2026 BANCO MACRO.xlsx" "Conciliacion Macro.xlsx"
 ```
 
+- `leer_mayor_fbs.py`: lee el PDF "Consulta del Mayor" de FBS (cuentas E y O) por posición de columnas.
+- `conciliar.py`: cruza extracto vs. mayor E + O (+ pendientes del mes anterior) y genera el tablero de 4 cuadros
+  con control, una hoja de detalle por cuadro y la hoja `Conciliados` con el método de cada cruce.
+- `NORMA_REGISTRACION.md`: propuesta de cómo registrar en FBS para que el cruce sea automático.
+
+```
+pip install openpyxl pymupdf
+python conciliar.py "08-2026 BANCO MACRO.xlsx" mayor_e.pdf mayor_o.pdf salida.xlsx "Conciliaciones Bancos 07-2026.xlsx"
+```
+
+Criterios de cruce (importe y sentido siempre iguales, tolerancia $0,02): 1) CUIT/DNI, 2) referencia del banco en el
+comprobante FBS, 3) apellido, agrupados del mismo CUIT/apellido y asiento mensual de gastos, 4) fecha + importe
+único, lotes del día (sueldos, VEP), 5) solo importe a ≤10 días (sugerido), combinaciones de 2-3 partidas (revisar).
+Los pases entre E y O y los registros FBS que se compensan entre sí no se consideran movimientos.
+
 ## Modelo de conciliación actual (hoja por banco)
 
 Saldo contable FBS = cuenta **E** (registrado, a confirmar) + cuenta **O** (confirmado contra banco).
