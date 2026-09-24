@@ -23,6 +23,13 @@
  *     evaluando C2..C(N-1). Cuotas medidas: 3, 5, 7, 9 y 12.
  */
 
+// --- CONSTANTES COMPARTIDAS CON EL CRM (crm_mora.gs las usa: no renombrar) ---
+const HOJA_BASE = 'BASE';
+const COL_AVANCE = 14; // N
+const COL_ESTADO = 15; // O
+const COL_C2 = 18;     // R = primera cuota (C2)
+const CUOTAS_TABLERO = [3, 5, 7, 9, 12]; // cuotas que mide FIAT
+
 const HOJAS = {
   PARAM: 'PARAMETROS',
   CALC: 'CALC',
@@ -61,6 +68,9 @@ function onOpen() {
     .addItem('Construir / reconstruir tableros', 'construirTableros')
     .addItem('Guardar foto de hoy en el historial', 'guardarHistorial')
     .addItem('Detectar cambio de avance ahora', 'detectarCambioAvance')
+    .addSeparator()
+    .addItem('CRM: inicializar hojas y usuarios', 'crmInicializar') // ver crm_mora.gs
+    .addItem('CRM: importar notas viejas de BASE', 'crmImportarNotasBase')
     .addToUi();
   // Al abrir el archivo también se revisa si la BASE cambió de avance
   try { detectarCambioAvance(); } catch (e) { console.log('detectarCambioAvance: ' + e); }
@@ -68,7 +78,7 @@ function onOpen() {
 
 function construirTableros() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss.getSheetByName('BASE')) throw new Error('No existe la hoja BASE');
+  if (!ss.getSheetByName(HOJA_BASE)) throw new Error('No existe la hoja ' + HOJA_BASE);
 
   crearParametros_(ss);
   asegurarCalendarioAvance_(ss);
@@ -182,7 +192,7 @@ const PROPORCION_CAMBIO = 0.5;       // si al menos la mitad sumó +1 al avance 
  */
 function detectarCambioAvance() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
-  const base = ss.getSheetByName('BASE');
+  const base = ss.getSheetByName(HOJA_BASE);
   const param = ss.getSheetByName(HOJAS.PARAM);
   if (!base || !param) return;
 
@@ -438,7 +448,8 @@ function activarHistorialDiario_() {
   let existe = false;
   ScriptApp.getProjectTriggers().forEach(function (t) {
     const fn = t.getHandlerFunction();
-    if (fn === 'guardarHistorial') ScriptApp.deleteTrigger(t); // disparador de la versión anterior
+    // disparadores de versiones anteriores (incluye snapshotDiario del script viejo)
+    if (fn === 'guardarHistorial' || fn === 'snapshotDiario') ScriptApp.deleteTrigger(t);
     if (fn === 'fotoDiariaAutomatica') existe = true;
   });
   if (!existe) {
