@@ -463,7 +463,7 @@ function itemNav(it) {
 function encabezado() {
   var d = new Date(), mes = MESES[d.getMonth()];
   var t = {
-    cartera: [S.ini.esSupervisor ? 'Carteras' : 'Mi cartera', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear()],
+    cartera: ['Carteras', mes.charAt(0).toUpperCase() + mes.slice(1) + ' ' + d.getFullYear()],
     objetivos: ['Objetivos', 'Qué tiene que trabajar cada responsable y hasta cuándo'],
     agenda: ['Agenda de hoy', 'Re-contactos agendados y promesas de pago vencidas sin pago'],
     bajas: ['Rescindidos y bajas', 'Solo consulta: no entran en la cola de trabajo'],
