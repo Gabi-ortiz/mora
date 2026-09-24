@@ -38,7 +38,7 @@ Cuanto más arriba se resuelva, más confiable es (el importe solo se repite muc
 
 - **$1.146M de débitos del mes sin registrar**: $1.144M son transferencias a cuentas propias (MacrOnline E-set M/T)
   y una suscripción de FCI. Son las más fáciles de normalizar.
-- **Cobranzas**: sin CUIT normalizado, 99 cruces salieron por coincidencia de apellido y 119 solo por importe (quedan como "Sugerido", a revisar).
+- **Cruces débiles**: sin CUIT normalizado, 99 movimientos cruzaron por coincidencia de apellido y 119 solo por importe (quedan como "Sugerido", a revisar).
 - **Posible duplicado**: `RM-390702` y `RM-390995` (ambos "BANCO MACRO Nº 20082026", $39.353.190,80) contra un solo
   pago AFIP en el banco.
 - **Partidas antiguas**: el sector *Depósitos no registrados* arrastra 219 partidas anteriores a agosto 2026
