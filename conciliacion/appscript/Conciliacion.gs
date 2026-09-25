@@ -45,6 +45,7 @@ const HOJA = {
   conciliados: 'E conciliado',
   analisisO: 'Análisis O',
   historial: 'Historial',
+  parametros: 'Parámetros',
   viejas: ['Pend. registrar en FBS', 'Pend. FBS sin banco', 'Conciliados'],   // nombres de versiones anteriores
   foto: 'FOTO',
 };
@@ -165,6 +166,20 @@ function onOpen() {
     .addToUi();
 }
 
+function crearParametros_(ss) {
+  if (ss.getSheetByName(HOJA.parametros)) return;
+  const sh = ss.insertSheet(HOJA.parametros);
+  sh.getRange(1, 1, 4, 2).setValues([
+    ['Parámetro', 'Valor'],
+    ['Modo de cruce', 'ESTRICTO'],
+    ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
+    ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
+  ]);
+  sh.getRange(1, 1, 1, 2).setFontWeight('bold');
+  sh.getRange(2, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['ESTRICTO', 'INTERMEDIO']).build());
+  sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 700);
+}
+
 function crearHojasEntrada() {
   const ss = SpreadsheetApp.getActive();
   const crear = (nombre, filas) => {
@@ -184,6 +199,7 @@ function crearHojasEntrada() {
   crear(HOJA.anteriores, [['Sector', 'Fecha', 'Concepto', 'Importe']]);
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
+  crearParametros_(ss);
   SpreadsheetApp.getUi().alert('Hojas de entrada listas. Pegá el extracto y los mayores E y O, y corré "2. Procesar conciliación".');
 }
 
@@ -213,6 +229,7 @@ function procesar_(ss) {
     anteriores: leer(HOJA.anteriores),
     reglas: leer(HOJA.reglas),
     empresas: leer(HOJA.empresas),
+    parametros: ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null,
   });
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirTablero_(ss, res);
@@ -705,7 +722,7 @@ function partidaFbs_(a, origen) {
   const partes = com.split('/').map(p => p.trim());
   const fr = a.fecha ? fechaEnTexto_(com, a.fecha) : null;
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
-    fechaRef: fr && dias_(fr, a.fecha) > 0 ? fr : null, cruces: '',
+    fechaRef: fr || null, cruces: '',
     ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', alerta: '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
@@ -811,9 +828,19 @@ function partidasE_(asientosE, asientosO) {
     }
     return null;
   };
+  // operaciones con el mismo número al inicio del comentario (ej. venta de cheques "25082026-Vta Cheques" y
+  // "25082026" con los gastos): el banco acredita el neto
+  const opDe = a => {
+    const t = String(a.comentario || '').trim();
+    const m = t.match(/^(\d{6,9})(\s*-|$)/);
+    return m && !/GASTOS|LIQ/i.test(t) ? 'OP ' + m[1] : null;
+  };
+  const cuentaOp = new Map();
+  asientosE.forEach(a => { const k = opDe(a); if (k) cuentaOp.set(k, (cuentaOp.get(k) || 0) + 1); });
   const sueltas = [], liqs = new Map();
   asientosE.forEach(a => {
-    const k = liqDe(a);
+    const op = opDe(a);
+    const k = liqDe(a) || (op && cuentaOp.get(op) > 1 ? op : null);
     if (!k) { const p = partidaFbs_(a, 'Mes'); p.cuenta = 'E'; sueltas.push(p); return; }
     if (!liqs.has(k)) liqs.set(k, []);
     liqs.get(k).push(a);
@@ -822,10 +849,12 @@ function partidasE_(asientosE, asientosO) {
     const neto = g.reduce((x, a) => x + a.debe - a.haber, 0);
     if (Math.abs(neto) <= TOLERANCIA) return;   // la liquidación se anula dentro de E
     const ult = g.reduce((m, a) => (a.fecha > m.fecha ? a : m), g[0]);
-    const p = partidaFbs_({ fecha: ult.fecha, comentario: 'Liquidación tarjeta ' + k.slice(4) + ' (neto cuenta E, ' + g.length + ' líneas)',
+    const nombre = k.startsWith('OP ') ? 'Operación ' + k.slice(3) : 'Liquidación tarjeta ' + k.slice(4);
+    const p = partidaFbs_({ fecha: ult.fecha, comentario: nombre + ' (neto cuenta E, ' + g.length + ' líneas)',
       referencia: '', asiento: Array.from(new Set(g.map(a => a.asiento))).join(' / '),
       debe: Math.max(neto, 0), haber: Math.max(-neto, 0) }, 'Mes');
     p.cuenta = 'E';
+    if (k.startsWith('OP ')) p.fechaRef = fechaEnTexto_(k.slice(3), ult.fecha);   // el número suele ser la fecha
     sueltas.push(p);
   });
   return sueltas;
@@ -907,6 +936,20 @@ function fechaEnTexto_(texto, base) {
     if (a < 100) a += 2000;
     if (!m[3] && mes > base.getMonth() + 1) a -= 1;
     ult = new Date(a, mes - 1, d);
+  }
+  if (!ult) {
+    // "Nº 4080226", "Nº 21082026", "Nº 210820261", "25082026-Vta Cheques": día + mes + año pegados
+    const c = String(texto).match(/(?:Nº\s*|^)(\d{6,9})(?!\d)/);
+    if (c) {
+      const t = c[1];
+      for (const ld of [2, 1]) {
+        const d = Number(t.slice(0, ld)), mes = Number(t.slice(ld, ld + 2)), resto = t.slice(ld + 2);
+        let a = resto.startsWith('20') && resto.length >= 4 ? Number(resto.slice(0, 4)) : Number(resto.slice(-2));
+        if (a < 100) a += 2000;
+        const f = new Date(a, mes - 1, d);
+        if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12 && a === base.getFullYear() && dias_(f, base) <= 62) { ult = f; break; }
+      }
+    }
   }
   return ult;
 }
@@ -1119,12 +1162,19 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
-  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), '3. Fecha del comentario + importe', 60, true);
+  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
   compensacionesFbs_(fbs, true);
   // regla: sin CUIT / referencia / nombre, solo se cruza si coincide la fecha y el importe es específico (no redondo)
   pasada_(banco, fbs, b => especifico_(b.importe), '4. Fecha + importe específico', 0, true);
+  if (CRUZAR_REDONDO_UNICO_DIA) unicoDelDia_(banco, fbs);
+  if (CRUZAR_REDONDO_UNICO_DIA >= 2) {
+    // transferencias propias / FCI contra pases, fondos o registros "BANCO ..." de E, hasta 3 días, candidato único
+    pasada_(banco, fbs, (b, f) => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat) && /PASE|FONDO|BANCO|RESCATE|SUSCRIP|FCI/i.test(f.texto),
+      '4c. Transferencia propia / FCI contra pase de E (revisar)', 3, true);
+  }
+  if (CRUZAR_REDONDO_UNICO_DIA >= 3) ventanaUnica_(banco, fbs, 3);
   lotes_(banco, fbs);
   asientosNetos_(banco, fbs);
   const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
@@ -1139,6 +1189,29 @@ function conciliar_(banco, fbs) {
 function especifico_(x) {
   const c = Math.round(Math.abs(x) * 100);
   return c % 100 !== 0 || (c / 100) % 100 !== 0;
+}
+
+/** Importe redondo: se cruza solo si ese día hay UN movimiento del banco y UN registro de E con ese importe. */
+let CRUZAR_REDONDO_UNICO_DIA = 0;   // 0 = ESTRICTO, 3 = INTERMEDIO (se lee de la hoja "Parámetros")
+function unicoDelDia_(banco, fbs) {
+  const clave = p => p.fecha.getTime() + '|' + p.importe.toFixed(2);
+  const cb = new Map(), cf = new Map();
+  banco.forEach(b => { if (b.origen === 'Mes') cb.set(clave(b), (cb.get(clave(b)) || []).concat([b])); });
+  fbs.forEach(f => { if (f.origen === 'Mes') cf.set(clave(f), (cf.get(clave(f)) || []).concat([f])); });
+  cb.forEach((bs, k) => {
+    const fs = cf.get(k) || [];
+    if (bs.length === 1 && fs.length === 1 && bs[0].match === null && fs[0].match === null) unir_(bs, fs, '4b. Fecha + importe redondo, único en el día (revisar)');
+  });
+}
+
+/** Importe (aunque sea redondo) único en ambos lados dentro de +-dias. */
+function ventanaUnica_(banco, fbs, d) {
+  banco.filter(b => b.match === null && b.origen === 'Mes').forEach(b => {
+    const fs = fbs.filter(f => f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= d);
+    if (fs.length !== 1) return;
+    const bs = banco.filter(x => x.match === null && Math.abs(x.importe - b.importe) <= TOLERANCIA && distancia_(x, fs[0]) <= d);
+    if (bs.length === 1) unir_([b], fs, '4d. Importe único en +-' + d + ' días (revisar)');
+  });
 }
 
 const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
@@ -1251,7 +1324,12 @@ function agregarReglasNuevas() {
 }
 
 /** Todo el proceso sobre matrices de valores (sin tocar hojas): se puede probar fuera de Sheets. */
-function conciliarTodo_(entrada) {
+function conciliarTodo_(entrada, redondoUnico) {
+  if (redondoUnico !== undefined) CRUZAR_REDONDO_UNICO_DIA = redondoUnico;
+  else if (entrada.parametros) {
+    const fila = entrada.parametros.find(r => /modo de cruce/i.test(String(r[0])));
+    CRUZAR_REDONDO_UNICO_DIA = fila && /INTERMEDIO/i.test(String(fila[1])) ? 3 : 0;
+  }
   const reglas = leerReglas_(entrada.reglas), empresas = leerEmpresas_(entrada.empresas);
   const ext = leerExtracto_(entrada.extracto, reglas, empresas);
   const e = leerMayor_(entrada.mayorE, HOJA.mayorE), o = leerMayor_(entrada.mayorO, HOJA.mayorO);
