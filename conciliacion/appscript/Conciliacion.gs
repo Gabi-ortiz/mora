@@ -766,6 +766,7 @@ function analisisO_(asientosO, anterioresFbs) {
     const debe = g.filter(p => p.importe > 0).reduce((x, p) => x + p.importe, 0);
     const haber = -g.filter(p => p.importe < 0).reduce((x, p) => x + p.importe, 0);
     resumen.push({ clave, lineas: g.length, debe, haber, neto: redondear_(debe - haber), pendientes: resto.length,
+      detallePend: resto.map(p => fechaTexto_(p.fecha) + ' ' + (p.importe > 0 ? 'debe ' : 'haber ') + formato_(Math.abs(p.importe))).join(' | '),
       desde: g.reduce((d, p) => (p.fecha < d ? p.fecha : d), g[0].fecha), texto: g[0].texto,
       anteriores: g.filter(p => p.origen === 'Arrastre').length });
   });
@@ -817,10 +818,10 @@ function partidasE_(asientosE, asientosO) {
 function escribirAnalisisO_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.analisisO);
   const cab = ['Estado', 'Comprobante / liquidación', 'Desde', 'Líneas', 'De meses anteriores', 'Debe', 'Haber', 'Neto',
-    'Líneas pendientes', 'Detalle'];
+    'Líneas sin confirmar', 'Cuáles quedan sin confirmar', 'Detalle'];
   const filas = res.analisisO.slice().sort((a, b) => (b.pendientes > 0) - (a.pendientes > 0) || a.desde - b.desde)
     .map(g => [g.pendientes ? 'Pendiente' : 'Confirmado', g.clave, g.desde, g.lineas, g.anteriores, g.debe, g.haber, g.neto,
-      g.pendientes, g.texto]);
+      g.pendientes, g.detallePend, g.texto]);
   const pend = res.analisisO.filter(g => g.pendientes).length;
   sh.getRange(1, 1).setValue('Cuenta O: ' + res.analisisO.length + ' comprobantes/liquidaciones, ' + (res.analisisO.length - pend) +
     ' confirmados (netean a cero) y ' + pend + ' con líneas pendientes').setFontWeight('bold');
@@ -832,7 +833,7 @@ function escribirAnalisisO_(ss, res) {
   }
   sh.setFrozenRows(2);
   sh.getRange(2, 1, filas.length + 1, cab.length).createFilter();
-  [90, 200, 90, 60, 80, 130, 130, 130, 80, 380].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [90, 200, 90, 60, 80, 130, 130, 130, 80, 260, 380].forEach((w, i) => sh.setColumnWidth(i + 1, w));
 }
 
 /** Hoja "Pendientes anteriores": Sector (S1..S4), Fecha, Concepto, Importe (positivo). */
