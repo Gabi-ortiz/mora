@@ -150,6 +150,16 @@ para que el estado no dependa solo de lo que carga el responsable.
   características de Argentina), 0 inicial, +54 / 549, espacios y guiones; si
   no queda en 10 dígitos, marcar "revisar número" y ofrecer corregirlo.
   Preseleccionar "Llamada" en el formulario al tocar Llamar.
+- **Central confirmada:** Asterisk, administrado por un proveedor (en la nube,
+  accesible por internet). Caminos posibles, según lo que ofrezca el proveedor:
+  A) API de CDR + descarga de grabaciones (el CRM las trae por el servidor con
+  la credencial guardada en Propiedades del script; solo supervisores);
+  B) click-to-call del proveedor (Asterisk llama al interno y después al
+  cliente; vincula cada llamada al plan);
+  C) sin API: CDR diario por mail/carpeta y cruce por número.
+  Preguntas al proveedor: API y autenticación, click-to-call, si el CDR trae
+  interno y número marcado, formato y retención de grabaciones, restricción
+  por IP (Apps Script no tiene IP fija). Pedir el interno de cada responsable.
 - **Etapa 2 – historial y grabaciones:** dependen de la central (no de Zoiper).
   Preguntas a sistemas: qué central es y dónde está (interna / nube); si graba
   y dónde quedan las grabaciones; si tiene API o exporta el registro de
