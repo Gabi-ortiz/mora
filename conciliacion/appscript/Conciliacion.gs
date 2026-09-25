@@ -145,7 +145,10 @@ const REGLAS_INICIALES = [
   ["1802", "Ambos", "", "GASTOS BANCARIOS", "Comisión cheque consulta + IVA"],
   ["1479", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos Córdoba (DGR)"],
   ["1972", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Retención IIBB Tucumán"],
-  ["4196", "Ambos", "PLAN", "PLAN DE AHORRO / TERMINAL", "Débito plan de ahorro (Chevrolet, Fiat, etc.)"]
+  ["4196", "Ambos", "PLAN", "PLAN DE AHORRO / TERMINAL", "Débito plan de ahorro (Chevrolet, Fiat, etc.)"],
+  ["*", "Crédito", "LIQ COMER (PRISMA|CABAL|PAYWAY)", "COBRANZA TARJETAS", "Liquidación de tarjetas (Prisma, Cabal, Payway)"],
+  ["*", "Crédito", "CCERR TARJETA NAR", "COBRANZA TARJETAS", "Liquidación Tarjeta Naranja (circuito cerrado)"],
+  ["*", "Crédito", "TARJETA NARANJA", "COBRANZA TARJETAS", "Liquidación Tarjeta Naranja (Datanet)"]
 ];
 
 // ------------------------------------------------------------------ menú
@@ -402,16 +405,26 @@ function escribirTablero_(ss, res) {
   sh.setColumnWidth(1, 520); sh.setColumnWidth(2, 170); sh.setColumnWidth(3, 80);
 }
 
+function observacion_(p) {
+  if (p.alerta) return p.alerta;
+  if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores';
+  if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
+  if (/Diferencia asiento gastos/.test(p.texto)) return 'Revisar asiento de gastos bancarios';
+  if (p.cuenta === 'O') return 'No confirmado (cuenta O)';
+  if (p.cuenta === 'E') return 'Pendiente en cuenta E: posible error de registración, revisar';
+  return '';
+}
+
 function escribirPendientes_(ss, nombre, res, sectores) {
   const sh = hojaLimpia_(ss, nombre);
   const cab = ['Sector', 'Cuadro', 'Fecha', 'Días', 'Origen', 'Concepto / Comprobante', 'Importe', 'Categoría',
-    'CUIT/DNI', 'Ref. banco / Asiento FBS'];
+    'CUIT/DNI', 'Ref. banco / Asiento FBS', 'Cuenta FBS', 'Observación'];
   const nombres = {};
   SECTORES.forEach(([s, n]) => { nombres[s] = n; });
   const filas = [];
   sectores.forEach(s => res.pend[s].slice().sort((a, b) => a.fecha - b.fecha).forEach(p => filas.push([
     s, nombres[s], p.fecha, dias_(res.corte, p.fecha), p.origen, p.texto, Math.abs(p.importe), p.cat,
-    p.cuit || p.dni, p.asiento || p.ref])));
+    p.cuit || p.dni, p.asiento || p.ref, p.cuenta || '', observacion_(p)])));
   const total = sectores.map(s => nombres[s] + ': ' + res.pend[s].length + ' partidas, ' + formato_(res.tot[s])).join('   |   ');
   sh.getRange(1, 1).setValue(total).setFontWeight('bold');
   sh.getRange(2, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
@@ -423,7 +436,7 @@ function escribirPendientes_(ss, nombre, res, sectores) {
   }
   sh.setFrozenRows(2);
   sh.getRange(2, 1, Math.max(filas.length, 1) + 1, cab.length).createFilter();
-  [60, 250, 90, 50, 80, 380, 130, 230, 110, 150].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [60, 250, 90, 50, 80, 380, 130, 230, 110, 150, 80, 330].forEach((w, i) => sh.setColumnWidth(i + 1, w));
 }
 
 function escribirConciliados_(ss, res) {
@@ -563,9 +576,13 @@ function leerEmpresas_(filas) {
 function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
   if (cuit && empresas[cuit]) return ['TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO', 'Movimiento con ' + empresas[cuit]];
   const sentido = importe < 0 ? 'D' : 'C';
-  for (const r of reglas) {
-    if (r.cod === causal && (r.sentido === null || r.sentido === sentido) && (!r.patron || r.patron.test(concepto))) {
-      return [r.cat, r.desc];
+  // primero las reglas con patrón (el patrón más largo gana), después las de todo el código; "*" = cualquier código
+  const ordenadas = reglas.filter(r => r.patron).sort((a, b) => b.patron.source.length - a.patron.source.length)
+    .concat(reglas.filter(r => !r.patron));
+  for (const conPatron of [true, false]) {
+    for (const r of ordenadas) {
+      if (!!r.patron === conPatron && (r.cod === causal || r.cod === '*') && (r.sentido === null || r.sentido === sentido) &&
+        (!r.patron || r.patron.test(concepto))) return [r.cat, r.desc];
     }
   }
   return ['A IDENTIFICAR', 'Código causal nuevo'];
@@ -671,23 +688,27 @@ function partidaFbs_(a, origen) {
   }
   const partes = com.split('/').map(p => p.trim());
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
-    ref: a.referencia || '', asiento: a.asiento || '', cuit, dni,
+    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', alerta: '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
 
 /** Une E y O descartando los pases entre ambas cuentas (mismo asiento e importe con signo opuesto). */
 function movimientosFbs_(asientosE, asientosO) {
-  const neto = new Map(), primero = new Map();
-  asientosE.concat(asientosO).forEach(a => {
+  const neto = new Map(), primero = new Map(), porCuenta = new Map();
+  [[asientosE, 'E'], [asientosO, 'O']].forEach(([lista, cta]) => lista.forEach(a => {
     const k = a.asiento + '|' + a.comentario + '|' + redondear_(Math.abs(a.debe - a.haber));
     neto.set(k, (neto.get(k) || 0) + a.debe - a.haber);
     if (!primero.has(k)) primero.set(k, a);
-  });
+    if (!porCuenta.has(k)) porCuenta.set(k, { E: 0, O: 0 });
+    porCuenta.get(k)[cta] += a.debe - a.haber;
+  }));
   const out = [];
   neto.forEach((v, k) => {
     if (Math.abs(v) > 0.005) {
       const a = Object.assign({}, primero.get(k));
+      const c = porCuenta.get(k);
       a.debe = Math.max(v, 0); a.haber = Math.max(-v, 0);
+      a.cuenta = Math.abs(c.E) > 0.005 && Math.abs(c.O) > 0.005 ? 'E+O' : Math.abs(c.E) > 0.005 ? 'E' : 'O';
       out.push(a);
     }
   });
@@ -865,6 +886,40 @@ function lotes_(banco, fbs) {
   });
 }
 
+/** Un movimiento del banco = neto de un asiento FBS con varias líneas (ej. Confirmación de Valores Agrupados
+ *  menos comisiones, o venta de cheques: cheques individuales menos comisiones). */
+function asientosNetos_(banco, fbs) {
+  const grupos = new Map();
+  fbs.forEach(f => {
+    if (f.match !== null || f.origen !== 'Mes' || !f.asiento) return;
+    if (!grupos.has(f.asiento)) grupos.set(f.asiento, []);
+    grupos.get(f.asiento).push(f);
+  });
+  grupos.forEach(g => {
+    if (g.length < 2 || g.some(f => f.match !== null)) return;
+    const neto = g.reduce((x, f) => x + f.importe, 0);
+    let mejor = null;
+    banco.forEach(b => {
+      if (b.match !== null || b.origen !== 'Mes' || Math.abs(b.importe - neto) > TOLERANCIA || dias_(b.fecha, g[0].fecha) > 7) return;
+      if (!mejor || dias_(b.fecha, g[0].fecha) < dias_(mejor.fecha, g[0].fecha)) mejor = b;
+    });
+    if (mejor) unir_([mejor], g, 'Asiento FBS neto (tarjetas / venta de cheques)');
+  });
+}
+
+/** Marca pendientes de FBS que parecen duplicados de otro registro (mismo importe y mismo detalle). */
+function marcarDuplicados_(fbs) {
+  // solo comprobantes con formato "COMPROBANTE / detalle" (recibos RC, órdenes de pago RM, etc.)
+  const detalle = f => f.texto.split(' / ').slice(1).join(' / ').replace(/\s+/g, ' ').trim().toUpperCase();
+  fbs.forEach(f => {
+    if (f.match !== null || f.origen !== 'Mes' || !detalle(f)) return;
+    const otro = fbs.find(x => x !== f && x.origen === 'Mes' && x.asiento !== f.asiento && Math.abs(x.importe - f.importe) <= TOLERANCIA &&
+      detalle(x) === detalle(f) && dias_(x.fecha, f.fecha) <= 31);
+    if (otro) f.alerta = 'Posible duplicado de ' + (otro.texto.split('/')[0].trim() || 'asiento ' + otro.asiento) +
+      ' (asiento ' + otro.asiento + ')';
+  });
+}
+
 function gastosAsiento_(banco, fbs) {
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)));
   // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
@@ -894,12 +949,14 @@ function conciliar_(banco, fbs) {
   compensacionesFbs_(fbs, true);
   pasada_(banco, fbs, () => true, '4. Fecha + importe', 0, true);
   lotes_(banco, fbs);
+  asientosNetos_(banco, fbs);
   pasada_(banco, fbs, () => true, '5. Sugerido (solo importe)', VENTANA_SUGERIDO, false);
   pasada_(banco, fbs, b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat), '5. Sugerido (importe en el mes)', 31, true);
   combinaciones_(banco, fbs);
   compensacionesFbs_(fbs, false);
   reversionesFbs_(fbs);
   if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
+  marcarDuplicados_(fbs);
   return gastos ? gastos.dif : null;
 }
 
@@ -984,6 +1041,12 @@ function conciliarTodo_(entrada) {
   banco.concat(fbs).forEach(p => { if (p.match === null) pend[sector_(p)].push(p); });
   const tot = {};
   Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + Math.abs(p.importe), 0)); });
+  const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
+  const enE = fbsPend.filter(p => p.cuenta === 'E' && !/Diferencia asiento gastos/.test(p.texto));
+  const dup = fbsPend.filter(p => p.alerta);
+  if (dup.length) avisos.push(dup.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
+  if (enE.length) avisos.push(enE.length + ' pendientes quedaron en la cuenta E por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
+    ': según el procedimiento son posibles errores de registración, revisar.');
   const saldoE = e.info.saldoFinal, saldoO = o.info.saldoFinal;
   const saldoBanco = movs[movs.length - 1].saldo;
   const ajustado = redondear_(saldoE + saldoO + tot.S1 - tot.S2 - tot.S3 + tot.S4);

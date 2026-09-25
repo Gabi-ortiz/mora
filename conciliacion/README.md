@@ -44,6 +44,14 @@ agosto 2026: mismos 4 totales y diferencia de control $143,21).
    `Conciliaciones - Historial`, agrega una fila en la hoja `Historial` con los saldos y el link, y pasa los
    pendientes a `Pendientes anteriores`.
 
+Alineado con el procedimiento de administración (Indicaciones conciliación bancaria Macro):
+- Pendientes de la cuenta **O** = valores no confirmados; pendientes que quedan en la cuenta **E** = posibles
+  errores de registración (se marcan en la columna *Observación* y en los avisos del Tablero).
+- Tarjetas y venta de cheques: un crédito del banco contra el **neto de un asiento FBS** (confirmación o
+  cheques menos comisiones).
+- Importes similares: se marcan **posibles duplicados** (mismo importe y mismo detalle en otro asiento).
+- Reglas con código `*` (cualquier código causal) para LIQ COMER PRISMA / CABAL / PAYWAY y Tarjeta Naranja.
+
 La lógica de cruce no toca hojas (`conciliarTodo_` recibe matrices de valores), así que se puede probar con Node.
 
 ## Modelo de conciliación actual (hoja por banco)
