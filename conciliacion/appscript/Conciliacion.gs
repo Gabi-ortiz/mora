@@ -57,7 +57,6 @@ const SECTORES = [
 ];
 
 const VENTANA_DIAS = 10;
-const VENTANA_SUGERIDO = 10;
 const VENTANA_ID = 31;
 const TOLERANCIA = 0.02;
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
@@ -967,23 +966,6 @@ function agrupados_(banco, fbs) {
   });
 }
 
-function combinaciones_(banco, fbs) {
-  [[banco, fbs, true], [fbs, banco, false]].forEach(([uno, varios, esBanco]) => {
-    uno.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(u => {
-      if (u.match !== null || u.origen !== 'Mes') return;
-      const cands = varios.filter(v => v.match === null && v.origen === 'Mes' && dias_(u.fecha, v.fecha) <= 7)
-        .sort((a, b) => dias_(u.fecha, a.fecha) - dias_(u.fecha, b.fecha)).slice(0, 40);
-      for (let n = 2; n <= 3; n++) {
-        const combo = primeraCombinacion_(cands, n, u.importe);
-        if (combo) {
-          if (esBanco) unir_([u], combo, 'Combinación (revisar)'); else unir_(combo, [u], 'Combinación (revisar)');
-          break;
-        }
-      }
-    });
-  });
-}
-
 function claveLote_(f) {
   const m = f.texto.match(/Nº\s*(.+)$/);
   return m ? m[1].trim() : f.texto.split(/[\s/-]/)[0];
@@ -1035,7 +1017,7 @@ function reversionesFbs_(fbs) {
 
 function lotes_(banco, fbs) {
   const gb = new Map(), gf = new Map();
-  const push = (m, k, x) => { if (!m.has(k)) m.set(k, { fecha: x.fecha, signo: x.importe > 0, items: [] }); m.get(k).items.push(x); };
+  const push = (m, k, x) => { if (!m.has(k)) m.set(k, { fecha: x.fecha, signo: x.importe > 0, clave: k.split('|')[1], items: [] }); m.get(k).items.push(x); };
   banco.forEach(b => { if (b.match === null && b.origen === 'Mes') push(gb, b.fecha.getTime() + '|' + b.causal + '|' + (b.importe > 0), b); });
   fbs.forEach(f => {
     if (f.match !== null || f.origen !== 'Mes') return;
@@ -1048,7 +1030,8 @@ function lotes_(banco, fbs) {
     const total = g.items.reduce((s, b) => s + b.importe, 0);
     for (const h of gf.values()) {
       if (h.signo === g.signo && dias_(h.fecha, g.fecha) <= 3 && h.items.every(f => f.match === null) &&
-        Math.abs(h.items.reduce((s, f) => s + f.importe, 0) - total) <= TOLERANCIA && (g.items.length > 1 || h.items.length > 1)) {
+        Math.abs(h.items.reduce((s, f) => s + f.importe, 0) - total) <= TOLERANCIA && (g.items.length > 1 || h.items.length > 1) &&
+        (h.clave !== '*' || especifico_(total))) {
         unir_(g.items, h.items, 'Lote (suma del día)');
         break;
       }
@@ -1070,7 +1053,8 @@ function asientosNetos_(banco, fbs) {
     const neto = g.reduce((x, f) => x + f.importe, 0);
     let mejor = null;
     banco.forEach(b => {
-      if (b.match !== null || b.origen !== 'Mes' || Math.abs(b.importe - neto) > TOLERANCIA || dias_(b.fecha, g[0].fecha) > 7) return;
+      if (b.match !== null || b.origen !== 'Mes' || Math.abs(b.importe - neto) > TOLERANCIA || dias_(b.fecha, g[0].fecha) > 7 ||
+        !especifico_(b.importe)) return;
       if (!mejor || dias_(b.fecha, g[0].fecha) < dias_(mejor.fecha, g[0].fecha)) mejor = b;
     });
     if (mejor) unir_([mejor], g, 'Asiento FBS neto (tarjetas / venta de cheques)');
@@ -1135,23 +1119,26 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
-  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 1, '3. Fecha del comentario', 60, true);
+  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), '3. Fecha del comentario + importe', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
   compensacionesFbs_(fbs, true);
-  pasada_(banco, fbs, () => true, '4. Fecha + importe', 0, true);
+  // regla: sin CUIT / referencia / nombre, solo se cruza si coincide la fecha y el importe es específico (no redondo)
+  pasada_(banco, fbs, b => especifico_(b.importe), '4. Fecha + importe específico', 0, true);
   lotes_(banco, fbs);
   asientosNetos_(banco, fbs);
   const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
-  pasada_(banco, fbs, () => true, '5. Sugerido (solo importe)', VENTANA_SUGERIDO, false);
-  pasada_(banco, fbs, b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat), '5. Sugerido (importe en el mes)', 31, true);
-  combinaciones_(banco, fbs);
-  compensacionesFbs_(fbs, false);
   reversionesFbs_(fbs);
   if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
   ajustesTarjeta.forEach(a => fbs.push(a));
   marcarDuplicados_(fbs);
   return gastos ? gastos.dif : null;
+}
+
+/** Importe "específico": tiene centavos o no termina en 00 (123.852,68 sí; 500.000 o 71.100 no). */
+function especifico_(x) {
+  const c = Math.round(Math.abs(x) * 100);
+  return c % 100 !== 0 || (c / 100) % 100 !== 0;
 }
 
 const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
@@ -1168,8 +1155,8 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   pasada_(antBanco, eItems, MISMO_ID_, 'Pendiente anterior: CUIT/DNI', v, false);
   pasada_(antBanco, eItems, POR_REF_, 'Pendiente anterior: referencia', v, false);
   pasada_(antBanco, eItems, POR_NOMBRE_, 'Pendiente anterior: nombre', v, false);
-  pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 3, 'Pendiente anterior: fecha del comentario', v, false);
-  pasada_(antBanco, eItems, () => true, 'Pendiente anterior: importe único (revisar)', v, true);
+  pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe),
+    'Pendiente anterior: fecha del comentario + importe', v, true);
   antFbs.forEach(a => {
     if (a.match !== null) return;
     const f = eItems.find(x => x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
@@ -1201,8 +1188,8 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
     const e = eItems.find(x => mismoSigno(x, p) && parecido(x, p));
     if (e) marcas.push('Cuenta E asiento ' + e.asiento + ': ' + desc(e) + (e.match !== null ? ' [conciliado]' : ' [sin cruzar]'));
     let b = bancoMes.find(x => mismoSigno(x, p) && distancia_(x, p) <= 15 && parecido(x, p)), soloImporte = false;
-    if (!b) { b = bancoMes.find(x => x.match === null && mismoSigno(x, p) && distancia_(x, p) <= 5); soloImporte = !!b; }
-    if (b) marcas.push('Banco' + (soloImporte ? ' (solo por importe y fecha)' : '') + ': ' + desc(b) +
+    if (!b && especifico_(p.importe)) { b = bancoMes.find(x => x.match === null && mismoSigno(x, p) && distancia_(x, p) === 0); soloImporte = !!b; }
+    if (b) marcas.push('Banco' + (soloImporte ? ' (misma fecha e importe específico)' : '') + ': ' + desc(b) +
       (b.match !== null ? ' [conciliado con E]' : ' [sin registrar]'));
     p.cruces = marcas.join(' | ');
   });
@@ -1210,6 +1197,15 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
     if (b.match !== null) return;
     const o = oPend.find(x => mismoSigno(x, b) && distancia_(b, x) <= 15 && parecido(b, x));
     if (o) b.cruces = 'Posible recibo de O sin confirmar: ' + desc(o);
+  });
+  // sugerencias que NO se cruzan (regla: importe redondo o sin dato que lo identifique): misma fecha e importe
+  bancoMes.forEach(b => {
+    if (b.match !== null) return;
+    const cands = eItems.filter(f => f.match === null && mismoSigno(f, b) && distancia_(b, f) === 0);
+    if (cands.length !== 1) return;
+    const f = cands[0], txt = 'Sugerencia (no cruzado, importe sin dato que lo identifique): ';
+    b.cruces = (b.cruces ? b.cruces + ' | ' : '') + txt + 'E asiento ' + f.asiento + ' ' + desc(f);
+    f.cruces = (f.cruces ? f.cruces + ' | ' : '') + txt + 'banco ' + desc(b);
   });
 }
 
