@@ -264,6 +264,16 @@ que tiene en mora (el excedente pasa a los demás). Los tramos se leen de la "Ta
 mora (editable)" (hoja `PARAMETROS`, se busca por el encabezado CUOTA |
 TRAMO A…); si no está, se usan `CRM_TRAMOS_DEFECTO`.
 
+### Llamadas por Zoiper
+El botón "Llamar" de la ficha abre `tel:` con el formato de Zoiper:
+`CRM_PREFIJO_MARCADO` (0) + característica + número, sin 15
+(351 15 3625692 → `03513625692`). El número se normaliza en el servidor
+(`crmNormalizarTelefono_`: saca espacios, 0, 15, +54 / 549; usa
+`CRM_CARACTERISTICAS_3` para saber dónde está el 15). Si no queda en 10
+dígitos, la ficha muestra "⚠ revisar" en lugar del botón. WhatsApp usa el
+mismo número limpio con su formato (`wa.me/549…`). En cada PC, Zoiper tiene
+que estar como app predeterminada para los protocolos TEL / CALLTO.
+
 ### Instalación
 El proyecto de Apps Script queda con **3 archivos separados** (no pegar
 todo en uno):

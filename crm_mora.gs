@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-25.2';
+const CRM_VERSION = '2026-09-25.3';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -63,6 +63,15 @@ const CRM_COLS_LICITACION = [41, 42]; // AO, AP
 // después en el resto de las hojas; si no aparece, se usan estos valores.
 const CRM_HOJA_TRAMOS = 'PARAMETROS';
 const CRM_TRAMOS_DEFECTO = { 3: { a: 0.35, b: 0.41 }, 5: { a: 0.30, b: 0.36 }, 7: { a: 0.32, b: 0.38 }, 9: { a: 0.45, b: 0.51 }, 12: { a: 0.48, b: 0.54 } };
+
+// Marcado por Zoiper: prefijo + característica + número, sin 15 (ej.:
+// 351 15 3625692 → 03513625692). Ver crmNormalizarTelefono_.
+const CRM_PREFIJO_MARCADO = '0';
+// Características de 3 dígitos (sin el 0). La única de 2 es 11 (AMBA); el resto
+// son de 4. Sirve para saber dónde está el 15 en un celular cargado con 15.
+const CRM_CARACTERISTICAS_3 = ['220', '221', '223', '230', '236', '237', '249', '260', '261', '263', '264', '266',
+  '280', '291', '294', '297', '298', '299', '336', '341', '342', '343', '345', '348', '351', '353', '358', '362',
+  '364', '370', '376', '379', '380', '381', '383', '385', '387', '388'];
 
 const CRM_ROL_SUPERVISOR = 'SUPERVISOR';
 const CRM_ROL_RESPONSABLE = 'RESPONSABLE';
@@ -507,10 +516,12 @@ function crmActualizarContacto(token, solicitud, datos) {
   const p = crmBuscarPlan_(ctx, solicitud);
   if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
 
+  // Se guarda ya normalizado (característica + número, 10 dígitos).
   const tel = function (v, nombre) {
-    v = String(v || '').trim();
-    if (v && !/^\+?[\d\s\-()]{6,20}$/.test(v)) throw new Error(nombre + ': solo números (con característica, sin 0 ni 15). Ej.: 3515551234');
-    return v.replace(/[^\d+]/g, '');
+    if (!String(v || '').trim()) return '';
+    const n = crmNormalizarTelefono_(v);
+    if (!n) throw new Error(nombre + ': tiene que tener característica + número (10 dígitos, sin 0 ni 15). Ej.: 3513625692');
+    return n;
   };
   const telefono = tel(datos.telefono, 'Teléfono');
   const telefonoAlt = tel(datos.telefonoAlt, 'Teléfono alternativo');
@@ -938,10 +949,35 @@ function crmAplicarContacto_(p, fila, corr) {
   corr = corr || {};
   p.telefono = crmFmt(corr.Telefono) || base.telefono;
   p.telefonoAlt = crmFmt(corr.TelefonoAlt) || base.telefonoAlt;
+  // Característica + número en 10 dígitos ('' si no se puede armar): de acá
+  // salen el número para Zoiper y el de WhatsApp.
+  p.tel10 = crmNormalizarTelefono_(p.telefono);
+  p.telAlt10 = crmNormalizarTelefono_(p.telefonoAlt);
+  p.prefijoMarcado = CRM_PREFIJO_MARCADO;
   p.email = crmFmt(corr.Email);
   p.notaContacto = crmFmt(corr.Nota);
   p.contactoBase = base;
   p.contactoCorregido = corr.Solicitud ? { por: crmFmt(corr.ActualizadoPor), fecha: crmFmt(corr.Actualizado, 'yyyy-MM-dd HH:mm') } : null;
+}
+
+/**
+ * Teléfono argentino → característica + número en 10 dígitos, sin 0 ni 15
+ * (ej.: '351 15 3625692', '0351-3625692', '+54 9 351 3625692' → '3513625692').
+ * Devuelve '' si no queda un número válido (ej.: sin característica).
+ */
+function crmNormalizarTelefono_(v) {
+  let d = String(v || '').replace(/\D/g, '');
+  if (d.indexOf('00') === 0) d = d.slice(2);
+  if (d.indexOf('54') === 0 && d.length >= 12) {
+    d = d.slice(2);
+    if (d.charAt(0) === '9' && d.length === 11) d = d.slice(1);
+  }
+  if (d.charAt(0) === '0') d = d.slice(1);
+  if (d.length === 12) {
+    const largo = d.indexOf('11') === 0 ? 2 : CRM_CARACTERISTICAS_3.indexOf(d.slice(0, 3)) >= 0 ? 3 : 4;
+    if (d.substr(largo, 2) === '15') d = d.slice(0, largo) + d.slice(largo + 2);
+  }
+  return /^[1-9]\d{9}$/.test(d) ? d : '';
 }
 
 /** Columnas de texto libre de BASE (AH en adelante) que tengan algo, sin las de licitación. */

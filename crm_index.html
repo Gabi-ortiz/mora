@@ -249,7 +249,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-25.2';
+var VERSION = '2026-09-25.3';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -648,7 +648,9 @@ document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$
 function renderFicha(d) {
   S.ficha = d;
   var p = d.plan, c = d.caso, i = S.cola.indexOf(p.solicitud);
-  var tel = String(p.telefono || '').replace(/\D/g, ''), tel2 = String(p.telefonoAlt || '').replace(/\D/g, '');
+  // Zoiper marca prefijo + 10 dígitos (03513625692); WhatsApp usa 549 + 10 dígitos.
+  var tel = p.tel10, tel2 = p.telAlt10, pre = p.prefijoMarcado || '';
+  var revisar = function (t) { return '<span class="pill s-P2" title="No tiene característica + número (10 dígitos). Corregilo para poder llamar.">⚠ revisar ' + esc(t) + '</span>'; };
   var h = '<div class="dr-h"><div class="row" style="justify-content:space-between"><div class="dr-nav">' +
     (i >= 0 ? '<button class="btn sm" id="ant"' + (i === 0 ? ' disabled' : '') + '>‹</button> ' + (i + 1) + ' de ' + S.cola.length + ' <button class="btn sm" id="sig"' + (i === S.cola.length - 1 ? ' disabled' : '') + '>›</button>' : '') +
     '</div><button class="btn ghost sm" id="cerrar" title="Cerrar (Esc)">✕</button></div>' +
@@ -656,8 +658,9 @@ function renderFicha(d) {
     '<div class="muted" style="margin-top:8px">Sol. ' + esc(p.solicitud) + ' · Grupo ' + esc(p.grupo) + ' / Orden ' + esc(p.orden) + ' · Avance ' + esc(p.avance) +
     (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
-    (tel ? '<a class="btn pri" href="tel:' + tel + '" target="_blank">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>' : '<span class="muted">Sin teléfono cargado</span>') +
-    (tel2 ? '<a class="btn" href="tel:' + tel2 + '" target="_blank">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : '') +
+    (tel ? '<a class="btn pri" href="tel:' + pre + tel + '" target="_blank" title="Marca ' + pre + tel + '">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>'
+      : p.telefono ? revisar(p.telefono) : '<span class="muted">Sin teléfono cargado</span>') +
+    (tel2 ? '<a class="btn" href="tel:' + pre + tel2 + '" target="_blank" title="Marca ' + pre + tel2 + '">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : p.telefonoAlt ? revisar(p.telefonoAlt) : '') +
     '<button class="btn ghost sm" id="corregir" title="Corregir teléfono o mail">✎ Corregir datos</button>' +
     (p.contactoCorregido ? '<span class="pill caso" title="Corregido en el CRM">✔ corregido</span>' : '') + '</div></div>' +
     '<div class="dr-tabs">' + [['gestionar', 'Gestionar'], ['datos', 'Datos del plan'], ['historial', 'Historial (' + (d.gestiones.length + p.notasBase.length) + ')']].map(function (t) {
@@ -771,7 +774,7 @@ function bloqueContacto(p) {
       (c ? '<div class="muted" style="font-size:12px;margin-top:6px">✔ Corregido en el CRM por ' + esc(c.por) + ' el ' + esc(c.fecha) + '.</div>' : '') + '</div>';
   }
   return '<form class="contacto" id="fContacto"><h4>Corregir datos de contacto</h4>' +
-    '<div class="muted" style="font-size:12px;margin-bottom:8px">Se guarda en el CRM; BASE no se modifica. Teléfonos con característica, sin 0 ni 15 (ej.: 3515551234). Dejá un teléfono vacío para volver al de BASE.</div>' +
+    '<div class="muted" style="font-size:12px;margin-bottom:8px">Se guarda en el CRM; BASE no se modifica. Teléfonos con característica, sin 0 ni 15 (ej.: 3513625692); si lo cargás con 0 o 15 se corrige solo. Dejá un teléfono vacío para volver al de BASE.</div>' +
     '<div class="f2"><label class="fl">Teléfono<input class="in" name="telefono" inputmode="tel" value="' + esc(p.telefono) + '" placeholder="' + esc(b.telefono) + '">' +
     '<span class="muted" style="font-weight:400">En BASE: ' + (esc(b.telefono) || '—') + '</span></label>' +
     '<label class="fl">Teléfono alternativo<input class="in" name="telefonoAlt" inputmode="tel" value="' + esc(p.telefonoAlt) + '" placeholder="' + esc(b.telefonoAlt) + '">' +
