@@ -139,3 +139,19 @@ para que el estado no dependa solo de lo que carga el responsable.
   falta en el CRM? Hoy se muestran en la ficha como datos de licitación.
 - Estados del caso y resultados de contacto definitivos.
 
+
+## Integración con Zoiper (pendiente, a definir con sistemas)
+- **Etapa 1 – llamar desde el CRM:** el botón "Llamar" abre `tel:`; en cada PC
+  se configura Zoiper como app para los protocolos TEL/CALLTO.
+  **Formato de marcado confirmado:** `0` + característica + número, sin 15
+  (ej.: 351 15 3625692 → `03513625692`). En la muestra de BASE todos los
+  teléfonos vienen en 10 dígitos (característica + número sin 15), así que
+  alcanza con anteponer el 0. Normalizar además: quitar 15 (con la lista de
+  características de Argentina), 0 inicial, +54 / 549, espacios y guiones; si
+  no queda en 10 dígitos, marcar "revisar número" y ofrecer corregirlo.
+  Preseleccionar "Llamada" en el formulario al tocar Llamar.
+- **Etapa 2 – historial y grabaciones:** dependen de la central (no de Zoiper).
+  Preguntas a sistemas: qué central es y dónde está (interna / nube); si graba
+  y dónde quedan las grabaciones; si tiene API o exporta el registro de
+  llamadas (CDR); si cada responsable tiene su interno. Grabaciones solo para
+  supervisores (Ley 25.326).
