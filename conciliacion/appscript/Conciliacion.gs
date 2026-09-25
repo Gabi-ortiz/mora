@@ -42,6 +42,7 @@ const HOJA = {
   pendBanco: 'Pend. registrar en FBS',
   pendFbs: 'Pend. FBS sin banco',
   conciliados: 'Conciliados',
+  analisisO: 'Análisis O',
   historial: 'Historial',
   foto: 'FOTO',
 };
@@ -216,6 +217,7 @@ function procesar_(ss) {
   escribirPendientes_(ss, HOJA.pendBanco, res, ['S1', 'S2']);
   escribirPendientes_(ss, HOJA.pendFbs, res, ['S3', 'S4']);
   escribirConciliados_(ss, res);
+  escribirAnalisisO_(ss, res);
   ss.getSheetByName(HOJA.tablero).activate();
   SpreadsheetApp.flush();
   return res;
@@ -715,6 +717,124 @@ function movimientosFbs_(asientosE, asientosO) {
   return out;
 }
 
+// ------------------------------------------------------------------ análisis de la cuenta O y armado de la cuenta E
+
+/** Clave para netear dentro de la cuenta O: número de comprobante (RC / RM) o número de liquidación de tarjeta. */
+function claveO_(texto) {
+  const t = String(texto || '').replace(/\s+/g, ' ').trim().toUpperCase();
+  let m = t.match(/^(RC-[A-Z]-\d{4}-\d{8}|RM-\d+)/);
+  if (m) return m[1];
+  m = t.match(/^(\d{4,})\s*-\s*LIQ/);
+  if (m && !/GASTOS/.test(t)) return 'LIQ ' + m[1];
+  return t;
+}
+
+/** Busca dentro de "lista" combinaciones que se anulan (1 contra 1..4 del signo contrario). Devuelve las que quedan. */
+function netear_(lista) {
+  const libres = lista.slice();
+  const usar = x => { x.match = []; x.metodo = 'Confirmado en O'; };
+  libres.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(u => {
+    if (u.match !== null) return;
+    const cands = libres.filter(v => v.match === null && v !== u && (v.importe > 0) !== (u.importe > 0)).slice(0, 25);
+    for (let n = 1; n <= 4; n++) {
+      const combo = primeraCombinacion_(cands, n, -u.importe);
+      if (combo) { [u].concat(combo).forEach(usar); break; }
+    }
+  });
+  let resto = libres.filter(x => x.match === null);
+  if (resto.length > 1 && Math.abs(resto.reduce((x, p) => x + p.importe, 0)) <= TOLERANCIA) { resto.forEach(usar); resto = []; }
+  return resto;
+}
+
+/**
+ * Paso 1 del procedimiento: se analiza la cuenta O sola. Cada comprobante (o liquidación) se registra y después se
+ * confirma en la misma cuenta; lo que netea a cero está confirmado. Lo que queda es "no confirmado" y va directo a
+ * Depósitos no acreditados / Cheques no debitados, sin cruzarlo con el banco. Los pendientes anteriores de FBS con
+ * comprobante (RC / RM / liquidación) participan del neteo: si este mes se confirmaron, desaparecen.
+ */
+function analisisO_(asientosO, anterioresFbs) {
+  const lineas = asientosO.map(a => { const p = partidaFbs_(a, 'Mes'); p.cuenta = 'O'; return p; });
+  const grupos = new Map();
+  const agregar = p => { const k = claveO_(p.texto); if (!grupos.has(k)) grupos.set(k, []); grupos.get(k).push(p); };
+  lineas.forEach(agregar);
+  const usadosAnteriores = [];
+  anterioresFbs.forEach(p => { if (/^(RC-|RM-|LIQ )/.test(claveO_(p.texto)) && grupos.has(claveO_(p.texto))) { p.cuenta = 'O'; agregar(p); usadosAnteriores.push(p); } });
+  const pendientes = [], resumen = [];
+  grupos.forEach((g, clave) => {
+    const resto = netear_(g);
+    resto.forEach(p => pendientes.push(p));
+    const debe = g.filter(p => p.importe > 0).reduce((x, p) => x + p.importe, 0);
+    const haber = -g.filter(p => p.importe < 0).reduce((x, p) => x + p.importe, 0);
+    resumen.push({ clave, lineas: g.length, debe, haber, neto: redondear_(debe - haber), pendientes: resto.length,
+      desde: g.reduce((d, p) => (p.fecha < d ? p.fecha : d), g[0].fecha), texto: g[0].texto,
+      anteriores: g.filter(p => p.origen === 'Arrastre').length });
+  });
+  return { pendientes, resumen, usadosAnteriores };
+}
+
+/**
+ * Paso 2: la cuenta E se cruza con el banco. Las líneas de una misma liquidación de tarjeta (la "Confirmación de
+ * Valores Agrupados" del asiento que confirma la liquidación en O, y el asiento con el número de liquidación) se
+ * juntan en un solo neto, que es lo que acredita el banco.
+ */
+function partidasE_(asientosE, asientosO) {
+  const liqPorAsiento = new Map(), numeros = new Set();
+  asientosO.forEach(a => {
+    const k = claveO_(a.comentario);
+    if (k.startsWith('LIQ ')) { liqPorAsiento.set(String(a.asiento), k); numeros.add(k.slice(4)); }
+  });
+  const liqDe = a => {
+    if (liqPorAsiento.has(String(a.asiento))) return liqPorAsiento.get(String(a.asiento));
+    const k = claveO_(a.comentario);
+    if (k.startsWith('LIQ ')) return k;
+    const d = String(a.comentario || '').trim().match(/^(\d{4,})\b/);
+    if (d) {
+      const num = Array.from(numeros).filter(n => d[1].startsWith(n)).sort((x, y) => y.length - x.length)[0];
+      if (num) return 'LIQ ' + num;
+    }
+    return null;
+  };
+  const sueltas = [], liqs = new Map();
+  asientosE.forEach(a => {
+    const k = liqDe(a);
+    if (!k) { const p = partidaFbs_(a, 'Mes'); p.cuenta = 'E'; sueltas.push(p); return; }
+    if (!liqs.has(k)) liqs.set(k, []);
+    liqs.get(k).push(a);
+  });
+  liqs.forEach((g, k) => {
+    const neto = g.reduce((x, a) => x + a.debe - a.haber, 0);
+    if (Math.abs(neto) <= TOLERANCIA) return;   // la liquidación se anula dentro de E
+    const ult = g.reduce((m, a) => (a.fecha > m.fecha ? a : m), g[0]);
+    const p = partidaFbs_({ fecha: ult.fecha, comentario: 'Liquidación tarjeta ' + k.slice(4) + ' (neto cuenta E, ' + g.length + ' líneas)',
+      referencia: '', asiento: Array.from(new Set(g.map(a => a.asiento))).join(' / '),
+      debe: Math.max(neto, 0), haber: Math.max(-neto, 0) }, 'Mes');
+    p.cuenta = 'E';
+    sueltas.push(p);
+  });
+  return sueltas;
+}
+
+function escribirAnalisisO_(ss, res) {
+  const sh = hojaLimpia_(ss, HOJA.analisisO);
+  const cab = ['Estado', 'Comprobante / liquidación', 'Desde', 'Líneas', 'De meses anteriores', 'Debe', 'Haber', 'Neto',
+    'Líneas pendientes', 'Detalle'];
+  const filas = res.analisisO.slice().sort((a, b) => (b.pendientes > 0) - (a.pendientes > 0) || a.desde - b.desde)
+    .map(g => [g.pendientes ? 'Pendiente' : 'Confirmado', g.clave, g.desde, g.lineas, g.anteriores, g.debe, g.haber, g.neto,
+      g.pendientes, g.texto]);
+  const pend = res.analisisO.filter(g => g.pendientes).length;
+  sh.getRange(1, 1).setValue('Cuenta O: ' + res.analisisO.length + ' comprobantes/liquidaciones, ' + (res.analisisO.length - pend) +
+    ' confirmados (netean a cero) y ' + pend + ' con líneas pendientes').setFontWeight('bold');
+  sh.getRange(2, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  if (filas.length) {
+    sh.getRange(3, 1, filas.length, cab.length).setValues(filas);
+    sh.getRange(3, 3, filas.length, 1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(3, 6, filas.length, 3).setNumberFormat(NUM_FMT);
+  }
+  sh.setFrozenRows(2);
+  sh.getRange(2, 1, filas.length + 1, cab.length).createFilter();
+  [90, 200, 90, 60, 80, 130, 130, 130, 80, 380].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+}
+
 /** Hoja "Pendientes anteriores": Sector (S1..S4), Fecha, Concepto, Importe (positivo). */
 function leerAnteriores_(filas, desde) {
   const out = [];
@@ -920,6 +1040,30 @@ function marcarDuplicados_(fbs) {
   });
 }
 
+/** Liquidaciones de tarjeta (neto de la cuenta E) contra acreditaciones de tarjetas del banco: se admite hasta
+ *  $1 de diferencia por redondeos; la diferencia queda como partida a ajustar para no esconderla en el control. */
+function liquidacionesTarjeta_(banco, fbs) {
+  const ajustes = [];
+  fbs.filter(f => f.match === null && /^Liquidación tarjeta/.test(f.texto)).forEach(f => {
+    let mejor = null;
+    banco.forEach(b => {
+      if (b.match !== null || b.origen !== 'Mes' || b.cat !== 'COBRANZA TARJETAS' || (b.importe > 0) !== (f.importe > 0) ||
+        Math.abs(b.importe - f.importe) > 1 || dias_(b.fecha, f.fecha) > 10) return;
+      if (!mejor || dias_(b.fecha, f.fecha) < dias_(mejor.fecha, f.fecha)) mejor = b;
+    });
+    if (!mejor) return;
+    const dif = redondear_(mejor.importe - f.importe);
+    unir_([mejor], [f], 'Liquidación de tarjeta' + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
+    if (Math.abs(dif) > 0.005) {
+      const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.split(' (')[0].toLowerCase() + ' - ajustar',
+        referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+      a.cuenta = 'E';
+      ajustes.push(a);
+    }
+  });
+  return ajustes;
+}
+
 function gastosAsiento_(banco, fbs) {
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)));
   // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
@@ -950,12 +1094,14 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, () => true, '4. Fecha + importe', 0, true);
   lotes_(banco, fbs);
   asientosNetos_(banco, fbs);
+  const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
   pasada_(banco, fbs, () => true, '5. Sugerido (solo importe)', VENTANA_SUGERIDO, false);
   pasada_(banco, fbs, b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat), '5. Sugerido (importe en el mes)', 31, true);
   combinaciones_(banco, fbs);
   compensacionesFbs_(fbs, false);
   reversionesFbs_(fbs);
   if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
+  ajustesTarjeta.forEach(a => fbs.push(a));
   marcarDuplicados_(fbs);
   return gastos ? gastos.dif : null;
 }
@@ -1022,9 +1168,13 @@ function conciliarTodo_(entrada) {
     Array.from(new Set(nuevos.map(m => m.causal))).join(', ') + '). Agregalos en "' + HOJA.reglas + '".');
 
   const banco = movs.map(m => partidaBanco_(m, 'Mes'));
-  const fbs = movimientosFbs_(e.asientos, o.asientos).map(a => partidaFbs_(a, 'Mes'));
   const anteriores = leerAnteriores_(entrada.anteriores || [], desde);
-  anteriores.forEach(p => (p.lado === 'BANCO' ? banco : fbs).push(p));
+  anteriores.filter(p => p.lado === 'BANCO').forEach(p => banco.push(p));
+  // paso 1: cuenta O sola (con los pendientes anteriores que tienen comprobante)
+  const anterioresFbs = anteriores.filter(p => p.lado === 'FBS');
+  const ao = analisisO_(o.asientos, anterioresFbs);
+  // paso 2: la cuenta E (y los pendientes anteriores que no se resolvieron en O) contra el banco
+  const fbs = partidasE_(e.asientos, o.asientos).concat(anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0));
   // control de apertura: saldo FBS inicial + pendientes anteriores debe dar el saldo inicial del banco
   const neto = anteriores.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0);
   const saldoInicialBanco = redondear_(movs[0].saldo - movs[0].importe);
@@ -1039,14 +1189,18 @@ function conciliarTodo_(entrada) {
 
   const pend = { S1: [], S2: [], S3: [], S4: [] };
   banco.concat(fbs).forEach(p => { if (p.match === null) pend[sector_(p)].push(p); });
+  ao.pendientes.forEach(p => pend[sector_(p)].push(p));   // no confirmados en O: directo a pendientes
   const tot = {};
   Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + Math.abs(p.importe), 0)); });
   const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
   const enE = fbsPend.filter(p => p.cuenta === 'E' && !/Diferencia asiento gastos/.test(p.texto));
   const dup = fbsPend.filter(p => p.alerta);
   if (dup.length) avisos.push(dup.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
-  if (enE.length) avisos.push(enE.length + ' pendientes quedaron en la cuenta E por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
+  if (enE.length) avisos.push(enE.length + ' registros de la cuenta E no se encontraron en el banco, por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
     ': según el procedimiento son posibles errores de registración, revisar.');
+  const noConf = pend.S3.concat(pend.S4).filter(p => p.cuenta === 'O');
+  if (noConf.length) avisos.push(noConf.length + ' líneas de la cuenta O sin confirmar, por ' +
+    formato_(noConf.reduce((x, p) => x + Math.abs(p.importe), 0)) + ' (detalle en "' + HOJA.analisisO + '").');
   const saldoE = e.info.saldoFinal, saldoO = o.info.saldoFinal;
   const saldoBanco = movs[movs.length - 1].saldo;
   const ajustado = redondear_(saldoE + saldoO + tot.S1 - tot.S2 - tot.S3 + tot.S4);
@@ -1073,7 +1227,7 @@ function conciliarTodo_(entrada) {
   });
   fbs.forEach(f => { if (Array.isArray(f.match) && !f.match.length) conciliados.push([f.metodo, '', '', '', '', f.fecha, f.texto, f.importe, f.asiento, f.origen]); });
 
-  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura,
+  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen,
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 

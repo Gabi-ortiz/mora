@@ -44,6 +44,13 @@ agosto 2026: mismos 4 totales y diferencia de control $143,21).
    `Conciliaciones - Historial`, agrega una fila en la hoja `Historial` con los saldos y el link, y pasa los
    pendientes a `Pendientes anteriores`.
 
+Flujo (igual al procedimiento de administración):
+1. **Cuenta O sola**: se agrupa por comprobante (RC / RM) o número de liquidación de tarjeta, junto con los
+   pendientes anteriores; lo que netea a cero está confirmado y el resto queda "no confirmado" (puntas 3 y 4).
+   Hoja `Análisis O` con cada grupo.
+2. **Cuenta E contra el banco**: las líneas de una liquidación de tarjeta (Confirmación de Valores Agrupados +
+   asiento con el número de liquidación) se juntan en un neto, que es lo que acredita el banco.
+
 Alineado con el procedimiento de administración (Indicaciones conciliación bancaria Macro):
 - Pendientes de la cuenta **O** = valores no confirmados; pendientes que quedan en la cuenta **E** = posibles
   errores de registración (se marcan en la columna *Observación* y en los avisos del Tablero).
