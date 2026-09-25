@@ -45,11 +45,13 @@ agosto 2026: mismos 4 totales y diferencia de control $143,21).
    pendientes a `Pendientes anteriores`.
 
 Flujo (igual al procedimiento de administración):
-1. **Cuenta O sola**: se agrupa por comprobante (RC / RM) o número de liquidación de tarjeta, junto con los
-   pendientes anteriores; lo que netea a cero está confirmado y el resto queda "no confirmado" (puntas 3 y 4).
-   Hoja `Análisis O` con cada grupo.
-2. **Cuenta E contra el banco**: las líneas de una liquidación de tarjeta (Confirmación de Valores Agrupados +
-   asiento con el número de liquidación) se juntan en un neto, que es lo que acredita el banco.
+1. **Cuenta O** (hoja `Análisis O` y `O sin confirmar`): se netea por comprobante (RC / RM) o número de liquidación,
+   junto con los pendientes anteriores. Lo que no netea queda "no confirmado" (puntas 3 y 4) y se marca, en la columna
+   *Cruces encontrados*, si coincide con un pendiente anterior, con la cuenta E o con el extracto (solo marca).
+2. **Cuenta E**: primero contra los pendientes de la conciliación anterior (movimientos del banco que el mes pasado no
+   estaban registrados, o pendientes de FBS revertidos), después contra el extracto. Si el comentario trae una fecha
+   (ej. "... 16/04/2026") se usa también para buscar en el banco. Lo cruzado va a `E conciliado`; lo que no, a
+   `E sin cruzar` (posibles errores de registración) y `Banco sin registrar`.
 
 Alineado con el procedimiento de administración (Indicaciones conciliación bancaria Macro):
 - Pendientes de la cuenta **O** = valores no confirmados; pendientes que quedan en la cuenta **E** = posibles

@@ -39,11 +39,13 @@ const HOJA = {
   reglas: 'Reglas',
   empresas: 'Empresas grupo',
   tablero: 'Tablero',
-  pendBanco: 'Pend. registrar en FBS',
-  pendFbs: 'Pend. FBS sin banco',
-  conciliados: 'Conciliados',
+  pendO: 'O sin confirmar',
+  pendFbs: 'E sin cruzar',
+  pendBanco: 'Banco sin registrar',
+  conciliados: 'E conciliado',
   analisisO: 'Análisis O',
   historial: 'Historial',
+  viejas: ['Pend. registrar en FBS', 'Pend. FBS sin banco', 'Conciliados'],   // nombres de versiones anteriores
   foto: 'FOTO',
 };
 
@@ -213,11 +215,16 @@ function procesar_(ss) {
     reglas: leer(HOJA.reglas),
     empresas: leer(HOJA.empresas),
   });
+  HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirTablero_(ss, res);
-  escribirPendientes_(ss, HOJA.pendBanco, res, ['S1', 'S2']);
-  escribirPendientes_(ss, HOJA.pendFbs, res, ['S3', 'S4']);
-  escribirConciliados_(ss, res);
   escribirAnalisisO_(ss, res);
+  escribirPendientes_(ss, HOJA.pendO, res, res.listas.O,
+    'Paso 1 — Cuenta O: líneas que no netean (no confirmadas). Van a Depósitos no acreditados / Cheques no debitados.');
+  escribirConciliados_(ss, res);
+  escribirPendientes_(ss, HOJA.pendFbs, res, res.listas.E,
+    'Paso 2 — Cuenta E que no se cruzó ni con pendientes anteriores ni con el extracto (posibles errores de registración).');
+  escribirPendientes_(ss, HOJA.pendBanco, res, res.listas.B,
+    'Movimientos del extracto (y pendientes anteriores del banco) que no están en la cuenta E.');
   ss.getSheetByName(HOJA.tablero).activate();
   SpreadsheetApp.flush();
   return res;
@@ -332,7 +339,7 @@ function marcarComoFoto_(copia, periodo, empresa) {
 
 function pasarPendientes_(ss) {
   const filas = [['Sector', 'Fecha', 'Concepto', 'Importe']];
-  [HOJA.pendBanco, HOJA.pendFbs].forEach(nombre => {
+  [HOJA.pendO, HOJA.pendFbs, HOJA.pendBanco].forEach(nombre => {
     const sh = ss.getSheetByName(nombre);
     if (!sh) throw new Error('Primero corré "2. Procesar conciliación".');
     const v = sh.getDataRange().getValues();
@@ -370,8 +377,14 @@ function escribirTablero_(ss, res) {
   add(['SALDO CONTABLE FBS (E + O)', res.saldoE + res.saldoO], 'total');
   add([]);
   SECTORES.forEach(([s, nombre, signo]) => {
-    const hoja = (s === 'S1' || s === 'S2') ? HOJA.pendBanco : HOJA.pendFbs;
-    add(['(' + signo + ') ' + nombre + '  — ver "' + hoja + '"', res.tot[s], res.pend[s].length]);
+    let detalle;
+    if (s === 'S1' || s === 'S2') detalle = 'ver "' + HOJA.pendBanco + '"';
+    else {
+      const o = res.pend[s].filter(p => res.listas.O.indexOf(p) >= 0);
+      detalle = 'O sin confirmar: ' + o.length + ' por ' + formato_(o.reduce((x, p) => x + Math.abs(p.importe), 0)) +
+        ' / E sin cruzar: ' + (res.pend[s].length - o.length);
+    }
+    add(['(' + signo + ') ' + nombre + '  — ' + detalle, res.tot[s], res.pend[s].length]);
   });
   add([]);
   add(['SALDO CONTABLE AJUSTADO', res.ajustado], 'total');
@@ -409,7 +422,7 @@ function escribirTablero_(ss, res) {
 
 function observacion_(p) {
   if (p.alerta) return p.alerta;
-  if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores';
+  if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores' + (p.cuenta === 'O' ? ' (sigue sin confirmar en O)' : '');
   if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
   if (/Diferencia asiento gastos/.test(p.texto)) return 'Revisar asiento de gastos bancarios';
   if (p.cuenta === 'O') return 'No confirmado (cuenta O)';
@@ -417,33 +430,35 @@ function observacion_(p) {
   return '';
 }
 
-function escribirPendientes_(ss, nombre, res, sectores) {
+function escribirPendientes_(ss, nombre, res, items, titulo) {
   const sh = hojaLimpia_(ss, nombre);
   const cab = ['Sector', 'Cuadro', 'Fecha', 'Días', 'Origen', 'Concepto / Comprobante', 'Importe', 'Categoría',
-    'CUIT/DNI', 'Ref. banco / Asiento FBS', 'Cuenta FBS', 'Observación'];
+    'CUIT/DNI', 'Ref. banco / Asiento FBS', 'Cuenta FBS', 'Observación', 'Cruces encontrados'];
   const nombres = {};
   SECTORES.forEach(([s, n]) => { nombres[s] = n; });
-  const filas = [];
-  sectores.forEach(s => res.pend[s].slice().sort((a, b) => a.fecha - b.fecha).forEach(p => filas.push([
-    s, nombres[s], p.fecha, dias_(res.corte, p.fecha), p.origen, p.texto, Math.abs(p.importe), p.cat,
-    p.cuit || p.dni, p.asiento || p.ref, p.cuenta || '', observacion_(p)])));
-  const total = sectores.map(s => nombres[s] + ': ' + res.pend[s].length + ' partidas, ' + formato_(res.tot[s])).join('   |   ');
-  sh.getRange(1, 1).setValue(total).setFontWeight('bold');
+  const filas = items.slice().sort((a, b) => sector_(a).localeCompare(sector_(b)) || a.fecha - b.fecha).map(p => [
+    sector_(p), nombres[sector_(p)], p.fecha, dias_(res.corte, p.fecha), p.origen === 'Arrastre' ? 'Mes anterior' : 'Mes',
+    p.texto, Math.abs(p.importe), p.cat, p.cuit || p.dni, p.asiento || p.ref, p.cuenta || '', observacion_(p), p.cruces || '']);
+  const porSector = {};
+  items.forEach(p => { const k = sector_(p); porSector[k] = porSector[k] || [0, 0]; porSector[k][0]++; porSector[k][1] += Math.abs(p.importe); });
+  const total = Object.keys(porSector).sort().map(k => nombres[k] + ': ' + porSector[k][0] + ' partidas, ' + formato_(porSector[k][1])).join('   |   ');
+  sh.getRange(1, 1).setValue(titulo + '   —   ' + (total || 'sin partidas')).setFontWeight('bold');
   sh.getRange(2, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   if (filas.length) {
     sh.getRange(3, 9, filas.length, 2).setNumberFormat('@');   // CUIT y referencias como texto
+    sh.getRange(3, 13, filas.length, 1).setWrap(true);
     sh.getRange(3, 1, filas.length, cab.length).setValues(filas.map(f => f.map((v, i) => (i >= 8 ? String(v || '') : v))));
     sh.getRange(3, 3, filas.length, 1).setNumberFormat('dd/mm/yyyy');
     sh.getRange(3, 7, filas.length, 1).setNumberFormat(NUM_FMT);
   }
   sh.setFrozenRows(2);
   sh.getRange(2, 1, Math.max(filas.length, 1) + 1, cab.length).createFilter();
-  [60, 250, 90, 50, 80, 380, 130, 230, 110, 150, 80, 330].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [60, 230, 90, 50, 90, 360, 130, 200, 110, 150, 80, 280, 420].forEach((w, i) => sh.setColumnWidth(i + 1, w));
 }
 
 function escribirConciliados_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.conciliados);
-  const cab = ['Método', 'Fecha banco', 'Concepto banco', 'Importe banco', 'Origen banco',
+  const cab = ['Cruce', 'Fecha banco', 'Concepto banco / pendiente anterior', 'Importe banco', 'Origen banco',
     'Fecha FBS', 'Comprobante FBS', 'Importe FBS', 'Asiento FBS', 'Origen FBS'];
   const filas = res.conciliados;
   sh.getRange(1, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
@@ -676,7 +691,7 @@ function partidaBanco_(m, origen) {
   const cuit = m.cuit || extraerCuit_(m.concepto);
   return { lado: 'BANCO', origen: origen || 'Mes', fecha: m.fecha, importe: redondear_(m.importe), texto: m.concepto,
     ref: String(m.ref || ''), cuit, dni: cuit ? cuit.slice(2, 10) : '', nombre: tokens_(m.nombre || m.concepto),
-    cat: m.cat || '', causal: m.causal || '', match: null, metodo: '' };
+    cat: m.cat || '', causal: m.causal || '', match: null, metodo: '', cruces: '' };
 }
 
 function partidaFbs_(a, origen) {
@@ -689,7 +704,9 @@ function partidaFbs_(a, origen) {
     if (d) dni = ('0' + d[1]).slice(-8);
   }
   const partes = com.split('/').map(p => p.trim());
+  const fr = a.fecha ? fechaEnTexto_(com, a.fecha) : null;
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
+    fechaRef: fr && dias_(fr, a.fecha) > 0 ? fr : null, cruces: '',
     ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', alerta: '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
@@ -851,15 +868,48 @@ function leerAnteriores_(filas, desde) {
     } else {
       out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: sec === 'S3' ? v : 0, haber: sec === 'S4' ? v : 0 }, 'Arrastre'));
     }
+    out[out.length - 1].sectorOriginal = sec;
   });
   return out;
 }
 
 // ------------------------------------------------------------------ cruce
 
+let CRUCES_ = [];   // registro de todos los cruces de la corrida (para la hoja "E conciliado")
+
 function unir_(banco, fbs, metodo) {
   banco.forEach(b => { b.match = fbs; b.metodo = metodo; });
   fbs.forEach(f => { f.match = banco; f.metodo = metodo; });
+  CRUCES_.push({ metodo, banco, fbs });
+}
+
+/** Registros de FBS que se anulan entre sí (no pasan por el banco). */
+function compensar_(items, metodo) {
+  items.forEach(x => { x.match = []; x.metodo = metodo; });
+  CRUCES_.push({ metodo, banco: [], fbs: items });
+}
+
+/** Días entre dos partidas; si el comentario del recibo trae una fecha (ej. "... 16/04/2026"), también se usa. */
+function distancia_(a, b) {
+  let d = dias_(a.fecha, b.fecha);
+  if (a.fechaRef) d = Math.min(d, dias_(a.fechaRef, b.fecha));
+  if (b.fechaRef) d = Math.min(d, dias_(a.fecha, b.fechaRef));
+  return d;
+}
+
+/** Última fecha dd/mm o dd/mm/aaaa escrita en un comentario (sin tomar "30052/9" ni "7/2026"). */
+function fechaEnTexto_(texto, base) {
+  const re = /(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d\/])/g;
+  let m, ult = null;
+  while ((m = re.exec(texto)) !== null) {
+    const d = Number(m[1]), mes = Number(m[2]);
+    if (d < 1 || d > 31 || mes < 1 || mes > 12) continue;
+    let a = m[3] ? Number(m[3]) : base.getFullYear();
+    if (a < 100) a += 2000;
+    if (!m[3] && mes > base.getMonth() + 1) a -= 1;
+    ult = new Date(a, mes - 1, d);
+  }
+  return ult;
 }
 
 function primeraCombinacion_(cands, n, objetivo) {
@@ -888,12 +938,12 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
     if (b.match !== null) return;
     const k = Math.round(b.importe), cands = [];
     [k - 1, k, k + 1].forEach(kk => (libres.get(kk) || []).forEach(f => {
-      if (f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && dias_(b.fecha, f.fecha) <= ventana && criterio(b, f)) cands.push(f);
+      if (f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= ventana && criterio(b, f)) cands.push(f);
     }));
     if (!cands.length || (unico && cands.length > 1)) return;
     let mejor = cands[0];
     cands.forEach(f => {
-      const d1 = dias_(b.fecha, f.fecha), d0 = dias_(b.fecha, mejor.fecha);
+      const d1 = distancia_(b, f), d0 = distancia_(b, mejor);
       if (d1 < d0 || (d1 === d0 && Math.abs(f.importe - b.importe) < Math.abs(mejor.importe - b.importe))) mejor = f;
     });
     unir_([b], [mejor], metodo);
@@ -904,7 +954,7 @@ function agrupados_(banco, fbs) {
   [[banco, fbs, true], [fbs, banco, false]].forEach(([uno, varios, esBanco]) => {
     uno.forEach(u => {
       if (u.match !== null || !(u.dni || u.nombre.size)) return;
-      const cands = varios.filter(v => v.match === null && dias_(u.fecha, v.fecha) <= VENTANA_DIAS &&
+      const cands = varios.filter(v => v.match === null && distancia_(u, v) <= VENTANA_DIAS &&
         (v.importe > 0) === (u.importe > 0) && ((u.dni && v.dni === u.dni) || comparten_(u.nombre, v.nombre))).slice(0, 12);
       for (let n = 2; n <= Math.min(cands.length, 6); n++) {
         const combo = primeraCombinacion_(cands, n, u.importe);
@@ -954,7 +1004,7 @@ function compensacionesFbs_(fbs, mismaClave) {
       for (let n = 1; n <= 4; n++) {
         const combo = primeraCombinacion_(cands, n, -u.importe);
         if (combo) {
-          [u].concat(combo).forEach(x => { x.match = []; x.metodo = 'Compensa dentro de FBS'; });
+          compensar_([u].concat(combo), 'Compensa dentro de FBS');
           break;
         }
       }
@@ -966,7 +1016,7 @@ function reversionesFbs_(fbs) {
   // anulaciones: "Anulacion As ..." contra el registro anulado (del mes o de un pendiente anterior), mismo importe opuesto
   fbs.filter(a => a.match === null && /ANULA/i.test(a.texto)).forEach(a => {
     const o = fbs.find(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA && dias_(x.fecha, a.fecha) <= 60);
-    if (o) { a.match = []; o.match = []; a.metodo = o.metodo = 'Compensa dentro de FBS (anulación)'; }
+    if (o) compensar_([a, o], 'Compensa dentro de FBS (anulación)');
   });
   const grupos = new Map();
   fbs.forEach(f => {
@@ -978,8 +1028,7 @@ function reversionesFbs_(fbs) {
   grupos.forEach(g => {
     const pos = g.filter(f => f.importe > 0), neg = g.filter(f => f.importe < 0);
     for (let i = 0; i < Math.min(pos.length, neg.length); i++) {
-      pos[i].match = []; neg[i].match = [];
-      pos[i].metodo = neg[i].metodo = 'Compensa dentro de FBS';
+      compensar_([pos[i], neg[i]], 'Compensa dentro de FBS (reversión)');
     }
   });
 }
@@ -1083,12 +1132,10 @@ function gastosAsiento_(banco, fbs) {
 }
 
 function conciliar_(banco, fbs) {
-  const mismoId = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
-  const porRef = (b, f) => b.ref.length >= 5 && (f.texto + ' ' + f.ref).replace(/\./g, '').indexOf(b.ref) >= 0;
-  const porNombre = (b, f) => comparten_(b.nombre, f.nombre);
-  pasada_(banco, fbs, mismoId, '1. CUIT/DNI', VENTANA_ID, false);
-  pasada_(banco, fbs, porRef, '2. Referencia', 60, false);
-  pasada_(banco, fbs, porNombre, '3. Nombre', 15, false);
+  pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
+  pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
+  pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
+  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 1, '3. Fecha del comentario', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
   compensacionesFbs_(fbs, true);
@@ -1105,6 +1152,65 @@ function conciliar_(banco, fbs) {
   ajustesTarjeta.forEach(a => fbs.push(a));
   marcarDuplicados_(fbs);
   return gastos ? gastos.dif : null;
+}
+
+const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
+const POR_REF_ = (b, f) => b.ref.length >= 5 && (f.texto + ' ' + f.ref).replace(/\./g, '').indexOf(b.ref) >= 0;
+const POR_NOMBRE_ = (b, f) => comparten_(b.nombre, f.nombre);
+
+/**
+ * Paso 2a: la cuenta E contra los pendientes de la conciliación anterior.
+ *  - Movimientos del banco que el mes pasado no estaban registrados y este mes se registraron en E.
+ *  - Pendientes anteriores de FBS que este mes se revierten en E (mismo importe, signo contrario).
+ */
+function cruzarAnteriores_(eItems, antBanco, antFbs) {
+  const v = 400;
+  pasada_(antBanco, eItems, MISMO_ID_, 'Pendiente anterior: CUIT/DNI', v, false);
+  pasada_(antBanco, eItems, POR_REF_, 'Pendiente anterior: referencia', v, false);
+  pasada_(antBanco, eItems, POR_NOMBRE_, 'Pendiente anterior: nombre', v, false);
+  pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 3, 'Pendiente anterior: fecha del comentario', v, false);
+  pasada_(antBanco, eItems, () => true, 'Pendiente anterior: importe único (revisar)', v, true);
+  antFbs.forEach(a => {
+    if (a.match !== null) return;
+    const f = eItems.find(x => x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
+      (claveO_(x.texto) === claveO_(a.texto) || comparten_(x.nombre, a.nombre) || /ANULA|REVERS/i.test(x.texto)));
+    if (f) compensar_([a, f], 'Pendiente anterior: revertido en E');
+  });
+}
+
+/**
+ * Marca con qué se cruza cada línea de O sin confirmar (pendiente anterior, cuenta E, extracto) y cada
+ * movimiento del banco sin registrar que parece un recibo de O sin confirmar. Solo marca: no resuelve nada.
+ */
+function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
+  const desc = p => fechaTexto_(p.fecha) + ' ' + p.texto.slice(0, 45) + ' ' + formato_(p.importe);
+  // apellido del comprobante FBS ("RC-... / ... / APELLIDO, NOMBRE") presente del otro lado, o 2 palabras en común
+  const apellido = p => { const t = p.texto.split(' / '); return t.length > 1 ? (t[t.length - 1].toUpperCase().match(/[A-ZÑ]{3,}/) || [''])[0] : ''; };
+  const mismoNombre = (a, b) => {
+    const comunes = Array.from(a.nombre).filter(x => b.nombre.has(x));
+    return comunes.length >= 2 || [a, b].some(x => x.lado === 'FBS' && apellido(x) && comunes.indexOf(apellido(x)) >= 0);
+  };
+  const parecido = (a, b) => (a.cuit && a.cuit === b.cuit) || (a.dni && a.dni === b.dni) || mismoNombre(a, b) ||
+    (a.lado === 'FBS' && b.lado === 'FBS' && claveO_(a.texto) === claveO_(b.texto));
+  const mismoSigno = (a, b) => Math.abs(a.importe - b.importe) <= TOLERANCIA;
+  const cualquierSigno = (a, b) => Math.abs(Math.abs(a.importe) - Math.abs(b.importe)) <= TOLERANCIA;
+  oPend.forEach(p => {
+    const marcas = [];
+    const ant = anteriores.find(x => x !== p && (x.lado === 'BANCO' ? mismoSigno(x, p) : cualquierSigno(x, p)) && parecido(x, p));
+    if (ant) marcas.push('Pendiente anterior ' + ant.sectorOriginal + ': ' + desc(ant) + (ant.match !== null ? ' [ya resuelto]' : ''));
+    const e = eItems.find(x => mismoSigno(x, p) && parecido(x, p));
+    if (e) marcas.push('Cuenta E asiento ' + e.asiento + ': ' + desc(e) + (e.match !== null ? ' [conciliado]' : ' [sin cruzar]'));
+    let b = bancoMes.find(x => mismoSigno(x, p) && distancia_(x, p) <= 15 && parecido(x, p)), soloImporte = false;
+    if (!b) { b = bancoMes.find(x => x.match === null && mismoSigno(x, p) && distancia_(x, p) <= 5); soloImporte = !!b; }
+    if (b) marcas.push('Banco' + (soloImporte ? ' (solo por importe y fecha)' : '') + ': ' + desc(b) +
+      (b.match !== null ? ' [conciliado con E]' : ' [sin registrar]'));
+    p.cruces = marcas.join(' | ');
+  });
+  bancoMes.forEach(b => {
+    if (b.match !== null) return;
+    const o = oPend.find(x => mismoSigno(x, b) && distancia_(b, x) <= 15 && parecido(b, x));
+    if (o) b.cruces = 'Posible recibo de O sin confirmar: ' + desc(o);
+  });
 }
 
 function sector_(p) {
@@ -1168,14 +1274,19 @@ function conciliarTodo_(entrada) {
   if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos con código causal sin regla (' +
     Array.from(new Set(nuevos.map(m => m.causal))).join(', ') + '). Agregalos en "' + HOJA.reglas + '".');
 
-  const banco = movs.map(m => partidaBanco_(m, 'Mes'));
+  CRUCES_ = [];
+  const bancoMes = movs.map(m => partidaBanco_(m, 'Mes'));
   const anteriores = leerAnteriores_(entrada.anteriores || [], desde);
-  anteriores.filter(p => p.lado === 'BANCO').forEach(p => banco.push(p));
-  // paso 1: cuenta O sola (con los pendientes anteriores que tienen comprobante)
+  const anterioresBanco = anteriores.filter(p => p.lado === 'BANCO');
   const anterioresFbs = anteriores.filter(p => p.lado === 'FBS');
+  // PASO 1: cuenta O sola, neteando por comprobante / liquidación junto con los pendientes anteriores
   const ao = analisisO_(o.asientos, anterioresFbs);
-  // paso 2: la cuenta E (y los pendientes anteriores que no se resolvieron en O) contra el banco
-  const fbs = partidasE_(e.asientos, o.asientos).concat(anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0));
+  // PASO 2: cuenta E -> primero contra los pendientes anteriores, después contra el extracto
+  const eItems = partidasE_(e.asientos, o.asientos);
+  const antFbsRestantes = anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0);
+  cruzarAnteriores_(eItems, anterioresBanco, antFbsRestantes);
+  const banco = bancoMes.concat(anterioresBanco);
+  const fbs = eItems.concat(antFbsRestantes);
   // control de apertura: saldo FBS inicial + pendientes anteriores debe dar el saldo inicial del banco
   const neto = anteriores.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0);
   const saldoInicialBanco = redondear_(movs[0].saldo - movs[0].importe);
@@ -1187,6 +1298,7 @@ function conciliarTodo_(entrada) {
       HOJA.anteriores + '" (pendientes del cierre anterior). Esa misma diferencia se arrastra al control del mes.');
   }
   const difGastos = conciliar_(banco, fbs);
+  marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
   const pend = { S1: [], S2: [], S3: [], S4: [] };
   banco.concat(fbs).forEach(p => { if (p.match === null) pend[sector_(p)].push(p); });
@@ -1197,11 +1309,13 @@ function conciliarTodo_(entrada) {
   const enE = fbsPend.filter(p => p.cuenta === 'E' && !/Diferencia asiento gastos/.test(p.texto));
   const dup = fbsPend.filter(p => p.alerta);
   if (dup.length) avisos.push(dup.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
+  const conMarca = ao.pendientes.filter(p => p.cruces).length;
+  if (conMarca) avisos.push(conMarca + ' líneas de O sin confirmar tienen un posible cruce (columna "Cruces encontrados" en "' + HOJA.pendO + '").');
   if (enE.length) avisos.push(enE.length + ' registros de la cuenta E no se encontraron en el banco, por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
     ': según el procedimiento son posibles errores de registración, revisar.');
   const noConf = pend.S3.concat(pend.S4).filter(p => p.cuenta === 'O');
   if (noConf.length) avisos.push(noConf.length + ' líneas de la cuenta O sin confirmar, por ' +
-    formato_(noConf.reduce((x, p) => x + Math.abs(p.importe), 0)) + ' (detalle en "' + HOJA.analisisO + '").');
+    formato_(noConf.reduce((x, p) => x + Math.abs(p.importe), 0)) + ' (detalle en "' + HOJA.pendO + '").');
   const saldoE = e.info.saldoFinal, saldoO = o.info.saldoFinal;
   const saldoBanco = movs[movs.length - 1].saldo;
   const ajustado = redondear_(saldoE + saldoO + tot.S1 - tot.S2 - tot.S3 + tot.S4);
@@ -1214,21 +1328,17 @@ function conciliarTodo_(entrada) {
     metodos[k][0]++; metodos[k][1] += Math.abs(p.importe);
   });
 
-  const conciliados = [], vistos = new Set();
-  banco.forEach(b => {
-    if (b.match === null || vistos.has(b.match)) return;
-    const grupoF = b.match;
-    vistos.add(grupoF);
-    const grupoB = grupoF.length ? grupoF[0].match : [b];
-    for (let i = 0; i < Math.max(grupoB.length, grupoF.length); i++) {
-      const x = grupoB[i], y = grupoF[i];
-      conciliados.push([b.metodo, x ? x.fecha : '', x ? x.texto : '', x ? x.importe : '', x ? x.origen : '',
-        y ? y.fecha : '', y ? y.texto : '', y ? y.importe : '', y ? y.asiento : '', y ? y.origen : '']);
+  const conciliados = [];
+  CRUCES_.forEach(c => {
+    for (let i = 0; i < Math.max(c.banco.length, c.fbs.length, 1); i++) {
+      const x = c.banco[i], y = c.fbs[i];
+      conciliados.push([c.metodo, x ? x.fecha : '', x ? x.texto : '', x ? x.importe : '', x ? x.origen : '',
+        y ? y.fecha : '', y ? y.texto : '', y ? y.importe : '', y ? y.asiento : '', y ? (y.origen === 'Arrastre' ? 'Pendiente anterior' : 'Cuenta ' + (y.cuenta || 'E')) : '']);
     }
   });
-  fbs.forEach(f => { if (Array.isArray(f.match) && !f.match.length) conciliados.push([f.metodo, '', '', '', '', f.fecha, f.texto, f.importe, f.asiento, f.origen]); });
+  const listas = { O: ao.pendientes, E: fbs.filter(p => p.match === null), B: banco.filter(p => p.match === null) };
 
-  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen,
+  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
