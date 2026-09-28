@@ -286,17 +286,17 @@ function crearCalc_(ss) {
   iTot, MMULT(imp, uno),
   iVen, MMULT(imp*(nro<avM), uno),
   iMes, MMULT(imp*(nro=avM), uno),
-  iVen2, MMULT(imp*(nro<avM-1), uno),
+  iVenAnt, MMULT(imp*(nro<avM-1), uno),
   cF, av-1,
   mide, ISNUMBER(MATCH(cF, {3;5;7;9;12}, 0)),
-  cF2, av-2,
-  mide2, ISNUMBER(MATCH(cF2, {3;5;7;9;12}, 0)),
+  cuotaAnt, av-2,
+  mideAnt, ISNUMBER(MATCH(cuotaAnt, {3;5;7;9;12}, 0)),
   estAct, IF(resc, "RESCINDIDO", IF(iTot>0, "MORA", "AL DIA")),
   estF, IF(mide, IF(resc, "RESCINDIDO", IF(iVen>0, "MORA", "AL DIA")), ""),
-  estF2, IF(mide2, IF(resc, "RESCINDIDO", IF(iVen2>0, "MORA", "AL DIA")), ""),
+  estAnt, IF(mideAnt, IF(resc, "RESCINDIDO", IF(iVenAnt>0, "MORA", "AL DIA")), ""),
   VSTACK(
     {"SOLICITUD","GRUPO","ORDEN","CLIENTE","TELEFONO","RESPONSABLE","VENDEDOR","SUPERVISOR","AVANCE","ESTADO BASE","ESTADO ACTUAL","CUOTAS IMPAGAS","IMPAGAS VENCIDAS","DEBE CUOTA DEL MES","CUOTA FIAT N-1","ESTADO FIAT N-1","CUOTA FIAT N-2","ESTADO FIAT N-2"},
-    HSTACK(CHOOSECOLS(d,2,3,4,8,9,1,16,17), av, es, estAct, iTot, iVen, IF(iMes>0,"SI","NO"), IF(mide,cF,""), estF, IF(mide2,cF2,""), estF2)
+    HSTACK(CHOOSECOLS(d,2,3,4,8,9,1,16,17), av, es, estAct, iTot, iVen, IF(iMes>0,"SI","NO"), IF(mide,cF,""), estF, IF(mideAnt,cuotaAnt,""), estAnt)
   )
 ))`;
   sh.getRange('A1').setFormula(f);
@@ -450,11 +450,11 @@ function crearDetalleFiat_(ss) {
   titulo_(sh, 'Planes en MORA en las mediciones FIAT abiertas (N-1 y N-2)');
   sh.getRange('A3').setFormula('=LET(' + letF_() + ', ' +
     'h, CALC!A1:R1, ' +
-    'm1, IFERROR(SORT(FILTER(CALC!A2:R, CALC!P2:P="MORA"), 15, TRUE, 6, TRUE), "Sin planes en mora"), ' +
-    'm2, IFERROR(SORT(FILTER(CALC!A2:R, CALC!R2:R="MORA"), 17, TRUE, 6, TRUE), "Sin planes en mora"), ' +
-    't1, "▶ PERÍODO "&UPPER(TEXT(f,"mmmm yyyy"))&" (avance N-1)  —  Fiat mide el "&TEXT(EOMONTH(f,1),"dd/mm/yyyy"), ' +
-    't2, "▶ PERÍODO "&UPPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&" (avance N-2)  —  Fiat mide el "&TEXT(EOMONTH(f,0),"dd/mm/yyyy"), ' +
-    'IFNA(VSTACK(t1, h, m1, "", t2, h, m2), ""))');
+    'planesN1, IFERROR(SORT(FILTER(CALC!A2:R, CALC!P2:P="MORA"), 15, TRUE, 6, TRUE), "Sin planes en mora"), ' +
+    'planesN2, IFERROR(SORT(FILTER(CALC!A2:R, CALC!R2:R="MORA"), 17, TRUE, 6, TRUE), "Sin planes en mora"), ' +
+    'tituloN1, "▶ PERÍODO "&UPPER(TEXT(f,"mmmm yyyy"))&" (avance N-1)  —  Fiat mide el "&TEXT(EOMONTH(f,1),"dd/mm/yyyy"), ' +
+    'tituloN2, "▶ PERÍODO "&UPPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&" (avance N-2)  —  Fiat mide el "&TEXT(EOMONTH(f,0),"dd/mm/yyyy"), ' +
+    'IFNA(VSTACK(tituloN1, h, planesN1, "", tituloN2, h, planesN2), ""))');
   // Encabezados y títulos de cada bloque (las filas cambian según la cantidad de planes)
   const rango = sh.getRange('A3:R3000');
   const reglas = sh.getConditionalFormatRules();
