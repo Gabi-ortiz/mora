@@ -264,6 +264,19 @@ que tiene en mora (el excedente pasa a los demás). Los tramos se leen de la "Ta
 mora (editable)" (hoja `PARAMETROS`, se busca por el encabezado CUOTA |
 TRAMO A…); si no está, se usan `CRM_TRAMOS_DEFECTO`.
 
+### Velocidad
+- BASE se lee solo en las columnas A..AG y se guarda procesada y comprimida
+  en la memoria del script (`CacheService`) por `CRM_CACHE_BASE_SEG` (10
+  min). "↻ Actualizar" en la cartera relee BASE en el momento; al lado se
+  ve la hora de la última lectura. Las notas viejas (AH+) se leen solo de
+  la fila del plan al abrir la ficha (si BASE cambió de orden, se busca la
+  solicitud en la columna B).
+- El archivo CRM MORA y la lista de usuarios se abren/leen una sola vez
+  por pedido; de CRM_Gestiones se leen solo las columnas necesarias.
+- Al entrar, un solo pedido (`crmArranque`). Guardar una gestión o una
+  corrección de contacto devuelve la ficha y la fila de la lista ya
+  actualizadas: no se recarga toda la cartera.
+
 ### Llamadas por Zoiper
 El botón "Llamar" de la ficha abre `tel:` con el formato de Zoiper:
 `CRM_PREFIJO_MARCADO` (0) + característica + número, sin 15

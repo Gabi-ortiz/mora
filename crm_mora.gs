@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-25.3';
+const CRM_VERSION = '2026-09-28.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -84,6 +84,9 @@ const CRM_SESION_SEG = 6 * 60 * 60;       // sesión de 6 h (máximo de CacheSer
 const CRM_MAX_INTENTOS = 5;               // intentos fallidos antes de bloquear 15 min
 const CRM_BLOQUEO_SEG = 15 * 60;
 const CRM_HASH_ITERACIONES = 500;
+// Velocidad: los datos de BASE (columnas A..AG, ya procesados) se guardan en
+// la memoria del script este tiempo. "↻ Actualizar" fuerza a releer BASE.
+const CRM_CACHE_BASE_SEG = 10 * 60;
 
 // Usuarios que se cargan la primera vez que se corre crmInicializar(),
 // todos con CRM_CLAVE_INICIAL y cambio de clave obligatorio.
@@ -188,6 +191,7 @@ function crmInicializar() {
     hoja.appendRow([u.email, u.nombre, u.rol, u.alias, true].concat(crmClaveInicial_()));
     existentes.push(u.email);
   });
+  crmUsuariosMemo_ = null;
   // Usuarios cargados sin clave (versión anterior o a mano en la hoja).
   usuarios.forEach(function (u, i) {
     if (!u.tieneClave) hoja.getRange(i + 2, 6, 1, 3).setValues([crmClaveInicial_()]);
@@ -233,31 +237,38 @@ function crmMoverHojasViejas_(ssDatos) {
  * la ficha muestra lo importado.
  */
 function crmImportarNotasBase() {
-  const ctx = crmContexto_();
+  const ss = crmDatos_();
   const yaImportados = {};
-  crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+  crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES, 5).forEach(function (g) {
     if (g.Canal === CRM_CANAL_IMPORTADO) yaImportados[String(g.Solicitud)] = true;
   });
 
+  // Acá sí se lee BASE completa (todas las columnas de notas).
+  const valores = crmHojaBase_().getDataRange().getValues();
+  const encabezados = valores[0];
   const filas = [];
   let planes = 0;
-  ctx.planes.forEach(function (p) {
+  for (let i = 1; i < valores.length; i++) {
+    const f = valores[i];
+    const solicitud = String(f[CRM_COL_SOLICITUD - 1] || '').trim();
+    const situacion = solicitud ? crmSituacion(f) : null;
+    if (!situacion || yaImportados[solicitud]) continue;
     // También las de licitación (AO/AP): así no se pierden si se borran esas
     // columnas de BASE; la ficha las muestra aparte, no como seguimiento.
-    const notas = p.notasBase.concat(p.licitacion);
-    if (yaImportados[p.solicitud] || !notas.length) return;
+    const notas = crmNotasBase_(encabezados, f).concat(crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION));
+    if (!notas.length) continue;
     planes++;
     notas.forEach(function (n) {
-      filas.push(['', '', 'Planilla BASE', p.solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
-        '[' + n.columna + '] ' + n.valor, p.avance, p.situacion.codigo]);
+      filas.push(['', '', 'Planilla BASE', solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
+        '[' + n.columna + '] ' + n.valor, f[COL_AVANCE - 1], situacion.codigo]);
     });
-  });
+  }
 
   if (filas.length) {
-    const hoja = crmHoja_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
+    const hoja = crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
     hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, CRM_ENC_GESTIONES.length).setValues(filas);
   }
-  crmAuditar_(ctx.ss, Session.getEffectiveUser().getEmail(), 'Importar notas de BASE',
+  crmAuditar_(ss, Session.getEffectiveUser().getEmail(), 'Importar notas de BASE',
     filas.length + ' notas de ' + planes + ' planes');
   SpreadsheetApp.getUi().alert('Importación lista: ' + filas.length + ' notas de ' + planes + ' planes.' +
     (Object.keys(yaImportados).length ? '\n(' + Object.keys(yaImportados).length + ' planes ya estaban importados y se saltearon.)' : '') +
@@ -305,9 +316,11 @@ function crmBuscarTablaTramos_(valores) {
   return null;
 }
 
-/** Archivo de datos del CRM (hojas CRM_*). */
+/** Archivo de datos del CRM (hojas CRM_*), abierto una sola vez por ejecución. */
+var crmDatosMemo_ = null;
 function crmDatos_() {
-  return SpreadsheetApp.openById(CRM_ID_ARCHIVO_DATOS);
+  if (!crmDatosMemo_) crmDatosMemo_ = SpreadsheetApp.openById(CRM_ID_ARCHIVO_DATOS);
+  return crmDatosMemo_;
 }
 
 // ---------------------------------------------------------------------------
@@ -393,32 +406,45 @@ function crmInicio(token) {
 }
 
 /**
+ * Todo lo que necesita la pantalla al entrar, en un solo pedido al servidor
+ * (datos del usuario, objetivos y cartera).
+ */
+function crmArranque(token) {
+  return { ini: crmInicio(token), objetivos: crmListarObjetivos(token), cartera: crmListarCartera(token) };
+}
+
+/**
  * Cartera visible para el usuario: el responsable ve solo la suya, el
  * supervisor ve todo. Incluye rescindidos/bajas (la vista los separa).
+ * forzar = releer BASE en lugar de usar la copia en memoria.
  */
-function crmListarCartera(token) {
+function crmListarCartera(token, forzar) {
   const u = crmUsuarioActual_(token);
-  const ctx = crmContexto_();
+  const ctx = crmContexto_(forzar);
+  return {
+    planes: ctx.planes.filter(function (p) { return crmPuedeVer_(u, p); }).map(function (p) { return crmItemLista_(ctx, p); }),
+    baseLeida: ctx.baseLeida,
+  };
+}
+
+/** Fila de la lista de cartera para un plan. */
+function crmItemLista_(ctx, p) {
   const hoy = crmHoyStr();
-  return ctx.planes
-    .filter(function (p) { return crmPuedeVer_(u, p); })
-    .map(function (p) {
-      const c = ctx.casos[p.solicitud] || {};
-      const g = ctx.gestionesMes[p.solicitud] || { intentos: 0, efectivos: 0 };
-      return {
-        solicitud: p.solicitud, cliente: p.cliente, telefono: p.telefono, grupo: p.grupo,
-        orden: p.orden, avance: p.avance, estadoBase: p.estado, cuotas: p.cuotas,
-        situacion: p.situacion, responsableEmail: p.responsableEmail,
-        responsableNombre: p.responsableNombre,
-        estadoCaso: c.estadoCaso || 'Sin gestionar',
-        ultimaGestion: c.ultimaGestion || '', ultimoCanal: c.ultimoCanal || '',
-        ultimoResultado: c.ultimoResultado || '', proximoContacto: c.proximoContacto || '',
-        promesaFecha: c.promesaFecha || '', promesaMonto: c.promesaMonto || '',
-        intentosMes: g.intentos, efectivosMes: g.efectivos,
-        agendaHoy: (!!c.proximoContacto && c.proximoContacto <= hoy) ||
-          (!!c.promesaFecha && c.promesaFecha <= hoy && !p.situacion.cuotaMesPaga),
-      };
-    });
+  const c = ctx.casos[p.solicitud] || {};
+  const g = ctx.gestionesMes[p.solicitud] || { intentos: 0, efectivos: 0 };
+  return {
+    solicitud: p.solicitud, cliente: p.cliente, telefono: p.telefono, grupo: p.grupo,
+    orden: p.orden, avance: p.avance, estadoBase: p.estado, cuotas: p.cuotas,
+    situacion: p.situacion, responsableEmail: p.responsableEmail,
+    responsableNombre: p.responsableNombre,
+    estadoCaso: c.estadoCaso || 'Sin gestionar',
+    ultimaGestion: c.ultimaGestion || '', ultimoCanal: c.ultimoCanal || '',
+    ultimoResultado: c.ultimoResultado || '', proximoContacto: c.proximoContacto || '',
+    promesaFecha: c.promesaFecha || '', promesaMonto: c.promesaMonto || '',
+    intentosMes: g.intentos, efectivosMes: g.efectivos,
+    agendaHoy: (!!c.proximoContacto && c.proximoContacto <= hoy) ||
+      (!!c.promesaFecha && c.promesaFecha <= hoy && !p.situacion.cuotaMesPaga),
+  };
 }
 
 /** Ficha completa de un plan: datos de BASE, notas viejas y gestiones. */
@@ -427,6 +453,30 @@ function crmFichaPlan(token, solicitud) {
   const ctx = crmContexto_();
   const p = crmBuscarPlan_(ctx, solicitud);
   if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
+  return crmArmarFicha_(ctx, p);
+}
+
+/**
+ * Lee la fila completa del plan en BASE (notas de AH en adelante y
+ * licitación). La copia en memoria guarda el número de fila; si BASE cambió
+ * de orden desde entonces, se busca la solicitud en la columna B.
+ */
+function crmFilaCompletaBase_(p) {
+  const hoja = crmHojaBase_();
+  const ultimaCol = hoja.getLastColumn();
+  let fila = p.fila ? hoja.getRange(p.fila, 1, 1, ultimaCol).getValues()[0] : null;
+  if (!fila || String(fila[CRM_COL_SOLICITUD - 1]).trim() !== p.solicitud) {
+    const hallada = hoja.getRange(2, CRM_COL_SOLICITUD, Math.max(1, hoja.getLastRow() - 1), 1)
+      .createTextFinder(p.solicitud).matchEntireCell(true).findNext();
+    fila = hallada ? hoja.getRange(hallada.getRow(), 1, 1, ultimaCol).getValues()[0] : null;
+  }
+  return { encabezados: hoja.getRange(1, 1, 1, ultimaCol).getValues()[0], fila: fila };
+}
+
+function crmArmarFicha_(ctx, p) {
+  const completa = crmFilaCompletaBase_(p);
+  p.notasBase = completa.fila ? crmNotasBase_(completa.encabezados, completa.fila) : [];
+  p.licitacion = completa.fila ? crmColumnasBase_(completa.encabezados, completa.fila, CRM_COLS_LICITACION) : [];
 
   const delPlan = crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES)
     .filter(function (g) { return String(g.Solicitud) === p.solicitud; });
@@ -503,7 +553,18 @@ function crmRegistrarGestion(token, solicitud, datos) {
   } finally {
     lock.releaseLock();
   }
-  return crmFichaPlan(token, solicitud);
+  // Se actualiza en memoria lo que se acaba de escribir (no se relee todo).
+  const g = ctx.gestionesMes[p.solicitud] = ctx.gestionesMes[p.solicitud] || { intentos: 0, efectivos: 0 };
+  g.intentos++;
+  if (CRM_RESULTADOS_EFECTIVOS.indexOf(datos.resultado) >= 0) g.efectivos++;
+  const previo = ctx.casos[p.solicitud] || {};
+  ctx.casos[p.solicitud] = {
+    responsableEmail: previo.responsableEmail || '', estadoCaso: datos.estadoCaso,
+    ultimaGestion: crmFmt(new Date(), 'yyyy-MM-dd HH:mm'), ultimoCanal: datos.canal, ultimoResultado: datos.resultado || '',
+    proximoContacto: datos.proximoContacto || '', promesaFecha: datos.promesaFecha || '',
+    promesaMonto: datos.promesaMonto || '', motivo: datos.motivo || '',
+  };
+  return { ficha: crmArmarFicha_(ctx, p), item: crmItemLista_(ctx, p) };
 }
 
 /**
@@ -544,10 +605,13 @@ function crmActualizarContacto(token, solicitud, datos) {
     else hoja.appendRow(fila);
     crmAuditar_(ctx.ss, u.email, 'Corregir contacto', p.solicitud + ': tel ' + (p.telefono || '—') + ' → ' + (telefono || p.contactoBase.telefono || '—') +
       ' / alt ' + (p.telefonoAlt || '—') + ' → ' + (telefonoAlt || p.contactoBase.telefonoAlt || '—') + (email ? ' / mail ' + email : ''));
+    crmAplicarContacto_(p, { Solicitud: p.solicitud, Telefono: telefono === p.contactoBase.telefono ? '' : telefono,
+      TelefonoAlt: telefonoAlt === p.contactoBase.telefonoAlt ? '' : telefonoAlt, Email: email, Nota: nota,
+      ActualizadoPor: u.email, Actualizado: new Date() });
   } finally {
     lock.releaseLock();
   }
-  return crmFichaPlan(token, solicitud);
+  return { ficha: crmArmarFicha_(ctx, p), item: crmItemLista_(ctx, p) };
 }
 
 /** Supervisor: reasigna uno o varios planes a un responsable. */
@@ -601,6 +665,7 @@ function crmGuardarUsuario(token, datos) {
   else hoja.appendRow(fila.concat(crmClaveInicial_()));
   if (idx >= 0 && !fila[4]) crmCerrarSesiones_(email);
   crmAuditar_(ss, u.email, idx >= 0 ? 'Modificar usuario' : 'Alta usuario', JSON.stringify(fila));
+  crmUsuariosMemo_ = null;
   return crmLeerUsuarios_(ss);
 }
 
@@ -671,7 +736,7 @@ function crmTableroSupervisor(token) {
   desde.setDate(desde.getDate() - 13);
   const desdeStr = crmFmt(desde);
   const actividad = {};
-  crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+  crmLeerObjetos_(ctx.ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES, 3).forEach(function (g) {
     const dia = crmFmt(g.FechaHora);
     if (dia < desdeStr) return;
     const quien = g.UsuarioNombre || g.UsuarioEmail;
@@ -795,6 +860,7 @@ function crmCambiarClave(token, actual, nueva) {
   crmHoja_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).getRange(fila.fila, 6, 1, 3)
     .setValues([[crmHashClave_(nueva, sal), sal, false]]);
   crmAuditar_(ss, u.email, 'Cambio de clave', '');
+  crmUsuariosMemo_ = null;
   return true;
 }
 
@@ -808,6 +874,7 @@ function crmBlanquearClave(token, email) {
   CacheService.getScriptCache().remove('int_' + fila.email);
   crmCerrarSesiones_(fila.email);
   crmAuditar_(ss, u.email, 'Blanqueo de clave', fila.email);
+  crmUsuariosMemo_ = null;
   return crmLeerUsuarios_(ss);
 }
 
@@ -862,13 +929,88 @@ function crmBool_(v) {
 // Acceso a datos
 // ---------------------------------------------------------------------------
 
-/** Lee BASE + CRM_Casos + gestiones del mes y arma los planes resueltos. */
-function crmContexto_() {
+function crmHojaBase_() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_BASE);
+  if (!hoja) throw new Error('No encuentro la hoja "' + HOJA_BASE + '"');
+  return hoja;
+}
+
+/**
+ * Planes de BASE ya procesados (solo columnas A..AG: lo que usa la cartera).
+ * Se guardan comprimidos en la memoria del script CRM_CACHE_BASE_SEG; con
+ * forzar = true se relee BASE. Las notas (AH+) se leen aparte al abrir la ficha.
+ */
+function crmPlanesBase_(forzar) {
+  const cache = CacheService.getScriptCache();
+  if (!forzar) {
+    const guardado = crmCacheLeer_(cache, 'base');
+    if (guardado) return guardado;
+  }
+  const hoja = crmHojaBase_();
+  const ultima = hoja.getLastRow();
+  const cols = Math.max(COL_C2 + CRM_CANT_CUOTAS - 1, Math.min(CRM_COL_SCORING, hoja.getLastColumn()));
+  const valores = ultima > 1 ? hoja.getRange(2, 1, ultima - 1, cols).getValues() : [];
+  const planes = [];
+  for (let i = 0; i < valores.length; i++) {
+    const f = valores[i];
+    const solicitud = String(f[CRM_COL_SOLICITUD - 1] || '').trim();
+    if (!solicitud) continue;
+    const situacion = crmSituacion(f);
+    if (!situacion) continue;
+    planes.push({
+      fila: i + 2, solicitud: solicitud,
+      grupo: crmFmt(f[CRM_COL_GRUPO - 1]), orden: crmFmt(f[CRM_COL_ORDEN - 1]),
+      modelo: crmFmt(f[CRM_COL_MODELO - 1]), sobrepauta: crmFmt(f[CRM_COL_SOBREPAUTA - 1]),
+      enCondiciones: crmFmt(f[CRM_COL_EN_CONDICIONES - 1]),
+      cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
+      avance: f[COL_AVANCE - 1], estado: crmFmt(f[COL_ESTADO - 1]),
+      vendedor: crmFmt(f[CRM_COL_VENDEDOR - 1]), supervisorVenta: crmFmt(f[CRM_COL_SUPERVISOR_VTA - 1]),
+      formaPago: crmFmt(f[CRM_COL_FORMA_PAGO - 1]), tipoPlan: crmFmt(f[CRM_COL_TIPO_PLAN - 1]),
+      scoring: crmFmt(f[CRM_COL_SCORING - 1]),
+      cuotas: f.slice(COL_C2 - 1, COL_C2 - 1 + CRM_CANT_CUOTAS).map(function (v) { return String(v || ''); }),
+      situacion: situacion,
+      aliasBase: String(f[CRM_COL_RESPONSABLE - 1] || '').trim().toUpperCase(),
+      telBase: crmFmt(f[CRM_COL_TELEFONO - 1]), telAltBase: crmFmt(f[CRM_COL_TELEFONO_ALT - 1]),
+    });
+  }
+  const datos = { planes: planes, leida: crmFmt(new Date(), 'yyyy-MM-dd HH:mm') };
+  try {
+    crmCacheGuardar_(cache, 'base', datos, CRM_CACHE_BASE_SEG);
+  } catch (e) {
+    // Si no entra en la memoria, se sigue sin copia (solo es más lento).
+  }
+  return datos;
+}
+
+/** Guarda un objeto grande en CacheService: JSON comprimido, en partes de 90 KB. */
+function crmCacheGuardar_(cache, clave, obj, seg) {
+  const txt = Utilities.base64Encode(Utilities.gzip(Utilities.newBlob(JSON.stringify(obj), 'application/json')).getBytes());
+  const partes = {};
+  let n = 0;
+  for (let i = 0; i < txt.length; i += 90000) partes[clave + '_' + (n++)] = txt.slice(i, i + 90000);
+  partes[clave + '_n'] = String(n);
+  cache.putAll(partes, seg);
+}
+
+function crmCacheLeer_(cache, clave) {
+  const n = Number(cache.get(clave + '_n') || 0);
+  if (!n) return null;
+  const claves = [];
+  for (let i = 0; i < n; i++) claves.push(clave + '_' + i);
+  const partes = cache.getAll(claves);
+  let txt = '';
+  for (let i = 0; i < n; i++) {
+    if (!partes[claves[i]]) return null;
+    txt += partes[claves[i]];
+  }
+  const blob = Utilities.newBlob(Utilities.base64Decode(txt), 'application/x-gzip');
+  return JSON.parse(Utilities.ungzip(blob).getDataAsString());
+}
+
+/** BASE (copia en memoria) + CRM_Casos + correcciones + gestiones del mes → planes resueltos. */
+function crmContexto_(forzar) {
   const ss = crmDatos_();
-  const hojaBase = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(HOJA_BASE);
-  if (!hojaBase) throw new Error('No encuentro la hoja "' + HOJA_BASE + '"');
-  const valores = hojaBase.getDataRange().getValues();
-  const encabezados = valores[0];
+  const base = crmPlanesBase_(forzar);
 
   const usuarios = crmLeerUsuarios_(ss);
   const porAlias = {};
@@ -895,9 +1037,10 @@ function crmContexto_() {
     corregidos[String(d.Solicitud)] = d;
   });
 
+  // Solo las columnas que hacen falta (FechaHora..Resultado).
   const mes = crmFmt(new Date(), 'yyyy-MM');
   const gestionesMes = {};
-  crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES).forEach(function (g) {
+  crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES, 6).forEach(function (g) {
     if (crmFmt(g.FechaHora, 'yyyy-MM') !== mes) return;
     const k = String(g.Solicitud);
     gestionesMes[k] = gestionesMes[k] || { intentos: 0, efectivos: 0 };
@@ -905,47 +1048,24 @@ function crmContexto_() {
     if (CRM_RESULTADOS_EFECTIVOS.indexOf(g.Resultado) >= 0) gestionesMes[k].efectivos++;
   });
 
-  const planes = [];
-  for (let i = 1; i < valores.length; i++) {
-    const f = valores[i];
-    const solicitud = String(f[CRM_COL_SOLICITUD - 1] || '').trim();
-    if (!solicitud) continue;
-    const situacion = crmSituacion(f);
-    if (!situacion) continue;
-
-    const caso = casos[solicitud];
-    const alias = String(f[CRM_COL_RESPONSABLE - 1] || '').trim().toUpperCase();
-    const resp = (caso && caso.responsableEmail && porEmail[caso.responsableEmail]) || porAlias[alias];
-
-    planes.push({
-      solicitud: solicitud,
-      grupo: crmFmt(f[CRM_COL_GRUPO - 1]), orden: crmFmt(f[CRM_COL_ORDEN - 1]),
-      modelo: crmFmt(f[CRM_COL_MODELO - 1]), sobrepauta: crmFmt(f[CRM_COL_SOBREPAUTA - 1]),
-      enCondiciones: crmFmt(f[CRM_COL_EN_CONDICIONES - 1]),
-      licitacion: crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION),
-      cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
-      avance: f[COL_AVANCE - 1], estado: crmFmt(f[COL_ESTADO - 1]),
-      vendedor: crmFmt(f[CRM_COL_VENDEDOR - 1]), supervisorVenta: crmFmt(f[CRM_COL_SUPERVISOR_VTA - 1]),
-      formaPago: crmFmt(f[CRM_COL_FORMA_PAGO - 1]), tipoPlan: crmFmt(f[CRM_COL_TIPO_PLAN - 1]),
-      scoring: crmFmt(f[CRM_COL_SCORING - 1]),
-      cuotas: f.slice(COL_C2 - 1, COL_C2 - 1 + CRM_CANT_CUOTAS).map(function (v) { return String(v || ''); }),
-      notasBase: crmNotasBase_(encabezados, f),
-      situacion: situacion,
-      aliasBase: alias,
-      responsableEmail: resp ? resp.email : '',
-      responsableNombre: resp ? resp.nombre : (alias || '(sin asignar)'),
-    });
-    crmAplicarContacto_(planes[planes.length - 1], f, corregidos[solicitud]);
-  }
-  return { ss: ss, planes: planes, casos: casos, gestionesMes: gestionesMes };
+  const planes = base.planes.map(function (b) {
+    const p = Object.assign({}, b);
+    const caso = casos[p.solicitud];
+    const resp = (caso && caso.responsableEmail && porEmail[caso.responsableEmail]) || porAlias[p.aliasBase];
+    p.responsableEmail = resp ? resp.email : '';
+    p.responsableNombre = resp ? resp.nombre : (p.aliasBase || '(sin asignar)');
+    crmAplicarContacto_(p, corregidos[p.solicitud]);
+    return p;
+  });
+  return { ss: ss, planes: planes, casos: casos, gestionesMes: gestionesMes, baseLeida: base.leida };
 }
 
 /**
  * Datos de contacto del plan: el corregido en el CRM si hay, si no el de
  * BASE. Guarda también el de BASE (para mostrar qué se corrigió).
  */
-function crmAplicarContacto_(p, fila, corr) {
-  const base = { telefono: crmFmt(fila[CRM_COL_TELEFONO - 1]), telefonoAlt: crmFmt(fila[CRM_COL_TELEFONO_ALT - 1]) };
+function crmAplicarContacto_(p, corr) {
+  const base = { telefono: p.telBase, telefonoAlt: p.telAltBase };
   corr = corr || {};
   p.telefono = crmFmt(corr.Telefono) || base.telefono;
   p.telefonoAlt = crmFmt(corr.TelefonoAlt) || base.telefonoAlt;
@@ -1060,8 +1180,11 @@ function crmExigirSupervisor_(token) {
   return u;
 }
 
+// Usuarios leídos una sola vez por ejecución (se limpia después de modificarlos).
+var crmUsuariosMemo_ = null;
 function crmLeerUsuarios_(ss) {
-  return crmLeerObjetos_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).map(function (x) {
+  if (crmUsuariosMemo_) return crmUsuariosMemo_;
+  crmUsuariosMemo_ = crmLeerObjetos_(ss, CRM_HOJA_USUARIOS, CRM_ENC_USUARIOS).map(function (x) {
     return {
       email: String(x.Email || '').trim().toLowerCase(), nombre: String(x.Nombre || ''),
       rol: String(x.Rol || '').trim().toUpperCase(), alias: String(x.AliasBase || '').trim().toUpperCase(),
@@ -1070,6 +1193,7 @@ function crmLeerUsuarios_(ss) {
       tieneClave: !!x.ClaveHash,
     };
   }).filter(function (x) { return x.email; });
+  return crmUsuariosMemo_;
 }
 
 /** Actualiza (o crea) la fila de CRM_Casos de una solicitud con los campos dados. */
@@ -1109,14 +1233,18 @@ function crmHoja_(ss, nombre, encabezados) {
   return hoja;
 }
 
-/** Filas de una hoja CRM como objetos {Encabezado: valor}. */
-function crmLeerObjetos_(ss, nombre, encabezados) {
+/**
+ * Filas de una hoja CRM como objetos {Encabezado: valor}. "columnas" limita la
+ * lectura a las primeras N columnas (más rápido en hojas grandes).
+ */
+function crmLeerObjetos_(ss, nombre, encabezados, columnas) {
   const hoja = crmHoja_(ss, nombre, encabezados);
   const ultima = hoja.getLastRow();
   if (ultima < 2) return [];
-  return hoja.getRange(2, 1, ultima - 1, encabezados.length).getValues().map(function (f) {
+  const usar = encabezados.slice(0, columnas || encabezados.length);
+  return hoja.getRange(2, 1, ultima - 1, usar.length).getValues().map(function (f) {
     const o = {};
-    encabezados.forEach(function (h, i) { o[h] = f[i]; });
+    usar.forEach(function (h, i) { o[h] = f[i]; });
     return o;
   });
 }

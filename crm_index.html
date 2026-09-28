@@ -249,7 +249,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-25.3';
+var VERSION = '2026-09-28.1';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -397,15 +397,16 @@ function iniciar() {
   $('auth').hidden = true; $('app').hidden = false;
   S.vista = 'cartera';
   $('main').innerHTML = '<div class="vacio"><span class="cargando"></span>Cargando tu cartera…</div>';
-  api('crmInicio').then(function (ini) {
-    S.ini = ini;
+  // Un solo pedido al servidor trae usuario, objetivos y cartera.
+  api('crmArranque').then(function (r) {
+    var ini = r.ini;
+    S.ini = ini; S.objetivos = r.objetivos; S.planes = r.cartera.planes; S.baseLeida = r.cartera.baseLeida;
     if (ini.version !== VERSION) toast('⚠️ Versiones distintas: pantalla ' + VERSION + ' / servidor ' + (ini.version || 'anterior') + '. Pegá los últimos archivos y publicá una Nueva versión.');
     $('ver').textContent = 'Versión ' + VERSION;
     $('yoAv').textContent = iniciales(ini.usuario.nombre);
     $('yoNom').textContent = ini.usuario.nombre;
     $('yoRol').textContent = ini.esSupervisor ? 'Supervisor' : 'Responsable';
-    armarNav(); encabezado();
-    return Promise.all([cargarObjetivos(), cargarCartera()]);
+    armarNav(); encabezado(); render();
   }).catch(function (e) {
     if (e.sesion) return;
     $('main').innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>';
@@ -437,8 +438,18 @@ function avanceObjetivo(o, email) {
   return { total: casos.length, hechos: hechos, fr: casos.length ? hechos / casos.length : 1 };
 }
 
-function cargarCartera() {
-  return api('crmListarCartera').then(function (planes) { S.planes = planes; armarNav(); render(); }).catch(error);
+// forzar = releer BASE ahora (si no, el servidor usa su copia de hasta 10 minutos).
+function cargarCartera(forzar) {
+  return api('crmListarCartera', !!forzar).then(function (r) {
+    S.planes = r.planes; S.baseLeida = r.baseLeida; armarNav(); if ($('ficha').hidden) render();
+  }).catch(error);
+}
+// Reemplaza un plan de la lista con lo que devolvió el servidor, sin recargar toda la cartera.
+function actualizarPlan(item) {
+  if (!item) return;
+  for (var k = 0; k < S.planes.length; k++) if (S.planes[k].solicitud === item.solicitud) { S.planes[k] = item; break; }
+  armarNav();
+  if ($('ficha').hidden) render();
 }
 
 function armarNav() {
@@ -571,7 +582,8 @@ function renderLista(m) {
   }).join('') + '<button class="btn sm ghost" id="leyenda" title="¿Cómo se ordena?">ⓘ ¿Qué es P1, P2…?</button><div class="der"><select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Estado del caso: todos') + '</select>' +
     (sup ? '<select id="fResp"><option value="">Todos los responsables</option>' + S.ini.responsables.map(function (r) {
       return '<option value="' + esc(r.email) + '"' + (S.filtro.resp === r.email ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
-    }).join('') + '</select>' : '') + '<button class="btn sm" id="refrescar" title="Volver a leer BASE">↻ Actualizar</button></div></div>';
+    }).join('') + '</select>' : '') + '<span class="muted" style="font-size:12px" title="Los datos de BASE se releen cada 10 minutos o al tocar Actualizar">BASE leída ' + esc((S.baseLeida || '').slice(11)) + '</span>' +
+    '<button class="btn sm" id="refrescar" title="Volver a leer BASE ahora">↻ Actualizar</button></div></div>';
 
   h += '<div class="leyenda" id="leyendaTxt" hidden>' + ['P1', 'P2', 'P3', 'P4'].map(function (c) {
     return '<div>' + pillSit({ codigo: c, etiqueta: S.ini.listas.situaciones[c].etiqueta }) + ' ' + esc(S.ini.listas.situaciones[c].detalle) +
@@ -608,7 +620,7 @@ function renderLista(m) {
     b.onclick = function () { S.filtro.objetivo = b.getAttribute('data-trabajar'); S.filtro.situacion = ''; render(); if (S.cola.length) abrirFicha(S.cola[0]); };
   });
   if ($('fResp')) $('fResp').onchange = function (e) { S.filtro.resp = e.target.value; render(); };
-  $('refrescar').onclick = function () { toast('Actualizando…'); cargarCartera(); };
+  $('refrescar').onclick = function () { toast('Leyendo BASE…'); cargarCartera(true).then(function () { toast('✔ Datos actualizados'); }); };
   if ($('mas')) $('mas').onclick = function () { S.limite += 300; render(); };
   if ($('empezar')) $('empezar').onclick = function () { abrirFicha(S.cola[0]); };
   cada('tbody tr', m, function (tr) {
@@ -641,7 +653,12 @@ function abrirFicha(sol) {
   $('dr').innerHTML = '<div class="vacio"><span class="cargando"></span>Abriendo plan ' + esc(sol) + '…</div>';
   api('crmFichaPlan', sol).then(renderFicha).catch(function (e) { cerrarFicha(); error(e); });
 }
-function cerrarFicha() { $('ficha').hidden = true; S.ficha = null; }
+function cerrarFicha() {
+  var estabaAbierta = !$('ficha').hidden;
+  $('ficha').hidden = true; S.ficha = null;
+  // Mientras la ficha está abierta la lista no se redibuja: se pone al día al cerrarla.
+  if (estabaAbierta && S.ini && ['cartera', 'agenda', 'bajas'].indexOf(S.vista) >= 0) render();
+}
 $('ficha').onclick = function (e) { if (e.target.id === 'ficha') cerrarFicha(); };
 document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !$('ficha').hidden) cerrarFicha(); });
 
@@ -732,10 +749,10 @@ function tabGestionar(d, el, i) {
       proximoContacto: f.proximoContacto.value, nota: f.nota.value,
     };
     cada('button[type=submit]', f, function (b) { b.disabled = true; });
-    api('crmRegistrarGestion', p.solicitud, envio).then(function (d2) {
+    api('crmRegistrarGestion', p.solicitud, envio).then(function (r) {
       toast('✔ Gestión guardada');
-      cargarCartera();
-      if (siguiente) abrirFicha(S.cola[i + 1]); else { S.fichaTab = 'gestionar'; renderFicha(d2); }
+      actualizarPlan(r.item);
+      if (siguiente) abrirFicha(S.cola[i + 1]); else { S.fichaTab = 'gestionar'; renderFicha(r.ficha); }
     }).catch(function (x) { cada('button[type=submit]', f, function (b) { b.disabled = false; }); error(x); });
   };
   enlazarReasignar(p);
@@ -793,7 +810,7 @@ function enlazarContacto(p) {
     e.preventDefault();
     var b = f.querySelector('button[type=submit]'); b.disabled = true;
     api('crmActualizarContacto', p.solicitud, { telefono: f.telefono.value, telefonoAlt: f.telefonoAlt.value, email: f.email.value, nota: f.nota.value })
-      .then(function (d2) { S.editarContacto = false; toast('✔ Datos de contacto guardados'); renderFicha(d2); cargarCartera(); })
+      .then(function (r) { S.editarContacto = false; toast('✔ Datos de contacto guardados'); renderFicha(r.ficha); actualizarPlan(r.item); })
       .catch(function (x) { b.disabled = false; error(x); });
   };
 }
