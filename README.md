@@ -15,9 +15,9 @@ Todas las hojas usan fórmulas: cuando se actualiza `BASE`, los tableros se reca
 |---|---|
 | PARAMETROS | Tabla de umbrales y % de incentivo por cuota (editable) + fechas de cambio de avance (columna H, se detectan solas cuando la mayoría de los planes suma +1; se pueden corregir a mano) |
 | CALC | Una fila por plan: estado actual, cuotas impagas, cuota que mide FIAT y estado FIAT |
-| Tablero Medición FIAT | Cuotas 3/5/7/9/12 del mes vencido (avance hoy 4/6/8/10/13, evaluando C2..C(N-1)), % mora, tramo e incentivo |
+| Tablero Medición FIAT | Dos tablas: período N-1 (avance N-1, Fiat lo mide a fin del mes siguiente) y período N-2 (avance N-2, Fiat lo mide a fin de este mes). % mora, tramo, incentivo y planes a regularizar |
 | Tablero Estado Actual | Por avance: al día, mora, rescindidos, mora vencida vs. solo la cuota del mes, y proyección de la próxima medición |
-| Detalle Mora FIAT | Planes que quedaron en mora en la medición del mes vencido |
+| Detalle Mora FIAT | Planes en mora de las dos mediciones abiertas (N-1 y N-2) |
 | Gestión Mes | Planes en mora hoy en avance 3/5/7/9/12 (los que FIAT mide el mes próximo) |
 | Historial diario | Foto diaria del Tablero Estado Actual (automática a las 20 hs, lunes a viernes sin feriados + menú "Guardar foto de hoy"). Nunca se borra; una foto por día |
 

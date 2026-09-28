@@ -162,10 +162,15 @@ function asegurarCalendarioAvance_(ss) {
  * Mientras no haya una fecha cargada del mes en curso, antepone un aviso.
  */
 function formulaAvance_(texto) {
-  return 'LET(u, MAXIFS(PARAMETROS!H3:H200, PARAMETROS!H3:H200, "<="&TODAY()), ' +
-    'f, IF(u=0, DATE(YEAR(TODAY()),MONTH(TODAY()),1), u), ' +
+  return 'LET(' + letF_() + ', ' +
     'aviso, IF(u < DATE(YEAR(TODAY()),MONTH(TODAY()),1), "⚠ Sin cambio de avance cargado este mes (si la BASE ya cambió, cargá la fecha en PARAMETROS)  —  ", ""), ' +
     'aviso&' + texto + ')';
+}
+
+/** Variables de LET: u = última fecha de cambio de avance <= hoy, f = esa fecha (o el 1° del mes si no hay). */
+function letF_() {
+  return 'u, MAXIFS(PARAMETROS!H3:H200, PARAMETROS!H3:H200, "<="&TODAY()), ' +
+    'f, IF(u=0, DATE(YEAR(TODAY()),MONTH(TODAY()),1), u)';
 }
 
 /** Última fecha de cambio de avance <= hoy (o null si no hay ninguna cargada). */
@@ -266,6 +271,7 @@ function crearCalc_(ss) {
   const sh = hojaNueva_(ss, HOJAS.CALC);
   // Nro de cuota de cada columna R..AD = 2..14. "Vencidas" = cuotas anteriores al avance actual
   // (= lo que FIAT mide el mes siguiente con avance-1). La cuota del avance actual vence a fin de mes.
+  // N-1 / N-2: como el avance cambia a mitad de mes, hay dos mediciones abiertas a la vez (ver Tablero Medición FIAT).
   const f = `=ARRAYFORMULA(LET(
   d, FILTER(BASE!A2:AD, BASE!B2:B<>""),
   n, ROWS(d),
@@ -279,17 +285,21 @@ function crearCalc_(ss) {
   iTot, MMULT(imp, uno),
   iVen, MMULT(imp*(nro<avM), uno),
   iMes, MMULT(imp*(nro=avM), uno),
+  iVen2, MMULT(imp*(nro<avM-1), uno),
   cF, av-1,
   mide, ISNUMBER(MATCH(cF, {3;5;7;9;12}, 0)),
+  cF2, av-2,
+  mide2, ISNUMBER(MATCH(cF2, {3;5;7;9;12}, 0)),
   estAct, IF(resc, "RESCINDIDO", IF(iTot>0, "MORA", "AL DIA")),
   estF, IF(mide, IF(resc, "RESCINDIDO", IF(iVen>0, "MORA", "AL DIA")), ""),
+  estF2, IF(mide2, IF(resc, "RESCINDIDO", IF(iVen2>0, "MORA", "AL DIA")), ""),
   VSTACK(
-    {"SOLICITUD","GRUPO","ORDEN","CLIENTE","TELEFONO","RESPONSABLE","VENDEDOR","SUPERVISOR","AVANCE","ESTADO BASE","ESTADO ACTUAL","CUOTAS IMPAGAS","IMPAGAS VENCIDAS","DEBE CUOTA DEL MES","CUOTA MEDIDA FIAT","ESTADO FIAT"},
-    HSTACK(CHOOSECOLS(d,2,3,4,8,9,1,16,17), av, es, estAct, iTot, iVen, IF(iMes>0,"SI","NO"), IF(mide,cF,""), estF)
+    {"SOLICITUD","GRUPO","ORDEN","CLIENTE","TELEFONO","RESPONSABLE","VENDEDOR","SUPERVISOR","AVANCE","ESTADO BASE","ESTADO ACTUAL","CUOTAS IMPAGAS","IMPAGAS VENCIDAS","DEBE CUOTA DEL MES","CUOTA FIAT N-1","ESTADO FIAT N-1","CUOTA FIAT N-2","ESTADO FIAT N-2"},
+    HSTACK(CHOOSECOLS(d,2,3,4,8,9,1,16,17), av, es, estAct, iTot, iVen, IF(iMes>0,"SI","NO"), IF(mide,cF,""), estF, IF(mide2,cF2,""), estF2)
   )
 ))`;
   sh.getRange('A1').setFormula(f);
-  estiloHeader_(sh.getRange('A1:P1'));
+  estiloHeader_(sh.getRange('A1:R1'));
   sh.setFrozenRows(1);
   sh.getRange('A1').setNote('Hoja de cálculo auxiliar. No escribir acá: se genera sola desde BASE.');
 }
@@ -298,24 +308,56 @@ function crearCalc_(ss) {
 function crearTableroFiat_(ss) {
   const sh = hojaNueva_(ss, HOJAS.FIAT);
   titulo_(sh, 'TABLERO MEDICIÓN FIAT (mes vencido)',
-    '=' + formulaAvance_('"Período medido: "&PROPER(TEXT(f,"mmmm yyyy"))&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&"  —  planes que hoy están en avance N, evaluados en cuotas C2 a C(N-1)"'));
+    '=' + formulaAvance_('"Avance vigente desde "&TEXT(f,"dd/mm/yyyy")&"  —  el avance cambia a mitad de mes, por eso hay dos mediciones abiertas: N-1 (período actual) y N-2 (período anterior)"'));
+
+  // Tabla 1: avance N-1 = período del último cambio de avance, Fiat lo mide a fin del mes siguiente
+  bloqueFiat_(sh, 4, 1, 'O', 'P',
+    '"▶ PERÍODO "&UPPER(TEXT(f,"mmmm yyyy"))&"  (avance N-1)  —  Fiat mide el "&TEXT(EOMONTH(f,1),"dd/mm/yyyy")&' +
+    'IF(TODAY()>EOMONTH(f,1),"  —  CERRADA","  —  ABIERTA: faltan "&(EOMONTH(f,1)-TODAY())&" días")');
+  // Tabla 2: avance N-2 = período anterior, Fiat lo mide a fin de este mes
+  bloqueFiat_(sh, 13, 2, 'Q', 'R',
+    '"▶ PERÍODO "&UPPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&"  (avance N-2)  —  Fiat mide el "&TEXT(EOMONTH(f,0),"dd/mm/yyyy")&' +
+    'IF(TODAY()>EOMONTH(f,0),"  —  CERRADA","  —  ABIERTA: faltan "&(EOMONTH(f,0)-TODAY())&" días")');
+
+  sh.getRange('A22').setValue('Máximo posible tramo A:');
+  sh.getRange('C22').setFormula('=PARAMETROS!E8').setNumberFormat('0.00%');
+  sh.getRange('A23').setValue('Máximo posible tramo B:');
+  sh.getRange('C23').setFormula('=PARAMETROS!F8').setNumberFormat('0.00%');
+
+  sh.setColumnWidths(1, 13, 110);
+  sh.setFrozenRows(2);
+}
+
+/**
+ * Una tabla de medición FIAT a partir de la fila "fila" (título, encabezado, 5 cuotas y total).
+ * desfase = 1 (avance N-1) o 2 (avance N-2); colCuota/colEstado = columnas de CALC con la cuota
+ * medida y el estado para ese desfase.
+ */
+function bloqueFiat_(sh, fila, desfase, colCuota, colEstado, textoTitulo) {
+  sh.getRange(fila, 1).setFormula('=LET(' + letF_() + ', ' + textoTitulo + ')')
+    .setFontWeight('bold').setFontSize(11).setFontColor(COLOR_TITULO);
 
   const enc = ['CUOTA MEDIDA', 'AVANCE EN BASE HOY', 'CARTERA TOTAL', 'AL DÍA', 'EN MORA', 'RESCINDIDOS',
-    '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO LOGRADO', '% INCENTIVO', 'FALTÓ P/ TRAMO A (planes)', 'FALTÓ P/ TRAMO B (planes)'];
-  estiloHeader_(sh.getRange(4, 1, 1, enc.length).setValues([enc]));
-  sh.setRowHeight(4, 45);
+    '% MORA (MORA + RESC.)', 'TRAMO A: MENOR A', 'TRAMO B: HASTA', 'TRAMO', '% INCENTIVO',
+    'PLANES A REGULARIZAR P/ TRAMO A', 'PLANES A REGULARIZAR P/ TRAMO B'];
+  const filaEnc = fila + 1;
+  estiloHeader_(sh.getRange(filaEnc, 1, 1, enc.length).setValues([enc]));
+  sh.setRowHeight(filaEnc, 45);
 
   const P = 'PARAMETROS!$A$3:$F$7';
+  const cu = 'CALC!$' + colCuota + '$2:$' + colCuota;
+  const es = 'CALC!$' + colEstado + '$2:$' + colEstado;
+  const primera = filaEnc + 1;
   const filas = [];
   for (let i = 0; i < TABLA_INCENTIVO.length; i++) {
-    const r = 5 + i;
+    const r = primera + i;
     filas.push([
       TABLA_INCENTIVO[i][0],
-      `=A${r}+1`,
-      `=COUNTIF(CALC!$O$2:$O,A${r})`,
-      `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"AL DIA")`,
-      `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"MORA")`,
-      `=COUNTIFS(CALC!$O$2:$O,A${r},CALC!$P$2:$P,"RESCINDIDO")`,
+      `=A${r}+${desfase}`,
+      `=COUNTIF(${cu},A${r})`,
+      `=COUNTIFS(${cu},A${r},${es},"AL DIA")`,
+      `=COUNTIFS(${cu},A${r},${es},"MORA")`,
+      `=COUNTIFS(${cu},A${r},${es},"RESCINDIDO")`,
       `=IFERROR((E${r}+F${r})/C${r},0)`,
       `=VLOOKUP(A${r},${P},2,0)`,
       `=VLOOKUP(A${r},${P},4,0)`,
@@ -325,31 +367,24 @@ function crearTableroFiat_(ss) {
       `=IF(C${r}=0,0,MAX(0,E${r}+F${r}-FLOOR(ROUND(I${r}*C${r},6),1)))`,
     ]);
   }
-  sh.getRange(5, 1, filas.length, enc.length).setValues(filas);
+  sh.getRange(primera, 1, filas.length, enc.length).setValues(filas);
 
-  sh.getRange('A10').setValue('TOTAL');
-  sh.getRange('C10').setFormula('=SUM(C5:C9)');
-  sh.getRange('D10').setFormula('=SUM(D5:D9)');
-  sh.getRange('E10').setFormula('=SUM(E5:E9)');
-  sh.getRange('F10').setFormula('=SUM(F5:F9)');
-  sh.getRange('G10').setFormula('=IFERROR((E10+F10)/C10,0)');
-  sh.getRange('J10').setValue('INCENTIVO TOTAL');
-  sh.getRange('K10').setFormula('=SUM(K5:K9)');
-  sh.getRange('A10:M10').setFontWeight('bold').setBackground('#d9e1f2');
+  const ultima = primera + filas.length - 1;
+  const t = ultima + 1;
+  sh.getRange(t, 1).setValue('TOTAL');
+  ['C', 'D', 'E', 'F'].forEach(function (c) {
+    sh.getRange(c + t).setFormula(`=SUM(${c}${primera}:${c}${ultima})`);
+  });
+  sh.getRange('G' + t).setFormula(`=IFERROR((E${t}+F${t})/C${t},0)`);
+  sh.getRange('J' + t).setValue('INCENTIVO TOTAL');
+  sh.getRange('K' + t).setFormula(`=SUM(K${primera}:K${ultima})`);
+  sh.getRange(t, 1, 1, enc.length).setFontWeight('bold').setBackground('#d9e1f2');
 
-  sh.getRange('A12').setValue('Máximo posible tramo A:');
-  sh.getRange('C12').setFormula('=PARAMETROS!E8').setNumberFormat('0.00%');
-  sh.getRange('A13').setValue('Máximo posible tramo B:');
-  sh.getRange('C13').setFormula('=PARAMETROS!F8').setNumberFormat('0.00%');
-
-  sh.getRange('G5:I10').setNumberFormat('0.0%');
-  sh.getRange('K5:K10').setNumberFormat('0.00%');
-  sh.getRange('A5:M10').setHorizontalAlignment('center');
-  sh.getRange('A4:M10').setBorder(true, true, true, true, true, true);
-
-  colorTramos_(sh, sh.getRange('J5:J9'));
-  sh.setColumnWidths(1, 13, 110);
-  sh.setFrozenRows(4);
+  sh.getRange(`G${primera}:I${t}`).setNumberFormat('0.0%');
+  sh.getRange(`K${primera}:K${t}`).setNumberFormat('0.00%');
+  sh.getRange(primera, 1, t - primera + 1, enc.length).setHorizontalAlignment('center');
+  sh.getRange(filaEnc, 1, t - filaEnc + 1, enc.length).setBorder(true, true, true, true, true, true);
+  colorTramos_(sh, sh.getRange(`J${primera}:J${ultima}`));
 }
 
 function colorTramos_(sh, rango) {
@@ -369,7 +404,7 @@ function crearTableroActual_(ss) {
     '=' + formulaAvance_('"Foto al "&TEXT(TODAY(),"dd/mm/yyyy")&"  —  avance vigente desde "&TEXT(f,"dd/mm/yyyy")&" (mes de avance: "&PROPER(TEXT(f,"mmmm yyyy"))&")  —  los avances 3, 5, 7, 9 y 12 son los que FIAT mide el mes próximo."'));
 
   const f = `=LET(
-  av, CALC!I2:I, e, CALC!K2:K, p, PARAMETROS!A3:F7,
+  av, CALC!I2:I, e, CALC!K2:K, p, PARAMETROS!A3:F7, ${letF_()},
   lst, SORT(UNIQUE(FILTER(av, ISNUMBER(av), av>0))),
   REDUCE(
     {"AVANCE","CARTERA TOTAL","AL DÍA","EN MORA","RESCINDIDOS","% MORA (MORA + RESC.)","PRÓX. MEDICIÓN FIAT","TRAMO A: MENOR A","PLANES A REGULARIZAR P/ TRAMO A","PLANES A REGULARIZAR P/ TRAMO B"},
@@ -384,7 +419,7 @@ function crearTableroActual_(ss) {
       ub, IF(mide, VLOOKUP(a, p, 4, 0), ""),
       VSTACK(acc, HSTACK(
         a, tot, ald, mo, rs, IFERROR((mo+rs)/tot, 0),
-        IF(mide, "Cuota "&a, ""), ua,
+        IF(mide, "Cuota "&a&" · "&PROPER(TEXT(EDATE(f,1),"mmmm")), ""), ua,
         IF(mide, MAX(0, mo+rs-(CEILING(ROUND(ua*tot,6),1)-1)), ""),
         IF(mide, MAX(0, mo+rs-FLOOR(ROUND(ub*tot,6),1)), "")
       ))
@@ -411,11 +446,25 @@ function crearTableroActual_(ss) {
 // ---------------------------------------------------------------- DETALLES
 function crearDetalleFiat_(ss) {
   const sh = hojaNueva_(ss, HOJAS.DET_FIAT);
-  titulo_(sh, 'Planes en MORA en la medición FIAT del mes vencido');
-  sh.getRange('A3').setFormula(
-    '=VSTACK(CALC!A1:P1, IFERROR(SORT(FILTER(CALC!A2:P, CALC!P2:P="MORA"), 15, TRUE, 6, TRUE), "Sin planes en mora"))');
-  estiloHeader_(sh.getRange('A3:P3'));
-  sh.setFrozenRows(3);
+  titulo_(sh, 'Planes en MORA en las mediciones FIAT abiertas (N-1 y N-2)');
+  sh.getRange('A3').setFormula('=LET(' + letF_() + ', ' +
+    'h, CALC!A1:R1, ' +
+    'm1, IFERROR(SORT(FILTER(CALC!A2:R, CALC!P2:P="MORA"), 15, TRUE, 6, TRUE), "Sin planes en mora"), ' +
+    'm2, IFERROR(SORT(FILTER(CALC!A2:R, CALC!R2:R="MORA"), 17, TRUE, 6, TRUE), "Sin planes en mora"), ' +
+    't1, "▶ PERÍODO "&UPPER(TEXT(f,"mmmm yyyy"))&" (avance N-1)  —  Fiat mide el "&TEXT(EOMONTH(f,1),"dd/mm/yyyy"), ' +
+    't2, "▶ PERÍODO "&UPPER(TEXT(EOMONTH(f,-1),"mmmm yyyy"))&" (avance N-2)  —  Fiat mide el "&TEXT(EOMONTH(f,0),"dd/mm/yyyy"), ' +
+    'IFNA(VSTACK(t1, h, m1, "", t2, h, m2), ""))');
+  // Encabezados y títulos de cada bloque (las filas cambian según la cantidad de planes)
+  const rango = sh.getRange('A3:R3000');
+  const reglas = sh.getConditionalFormatRules();
+  reglas.push(
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A3="SOLICITUD"')
+      .setBackground(COLOR_HEADER).setFontColor('white').setBold(true).setRanges([rango]).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=LEFT($A3,1)="▶"')
+      .setFontColor(COLOR_TITULO).setBold(true).setRanges([rango]).build()
+  );
+  sh.setConditionalFormatRules(reglas);
+  sh.setFrozenRows(2);
 }
 
 function crearGestionMes_(ss) {
