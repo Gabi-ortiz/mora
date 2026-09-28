@@ -15,9 +15,10 @@
  *   N Avance | O Estado | P Vendedor | Q Supervisor | R..AD = C2..C14
  *
  * Reglas:
- *   - RESCINDIDO: columna Estado = Rescindido o Renunciado (sin importar las cuotas).
- *   - MORA: al menos una "I" en las cuotas evaluadas.
- *   - AL DIA: sin "I" en las cuotas evaluadas (incluye Cancelado, cuotas con "C").
+ *   - Mediciones FIAT: se mira solo el rango de cuotas evaluado (C2 hasta la cuota medida):
+ *       RESCINDIDO = hay una "R" en ese rango (si la R aparece en una cuota posterior, no cuenta);
+ *       MORA = sin R pero con al menos una "I"; AL DIA = el resto (incluye Cancelado, cuotas con "C").
+ *   - Estado actual: RESCINDIDO si Estado = Rescindido/Renunciado o hay alguna "R"; MORA si hay alguna "I".
  *   - % mora = (planes en mora + rescindidos) / cartera total (al día + mora + rescindidos).
  *   - Medición FIAT (mes vencido): cuotas medidas 3, 5, 7, 9 y 12. Como el avance cambia a mitad de mes,
  *     hay dos mediciones abiertas: N-1 (período actual, Fiat lo mide a fin del mes siguiente)
@@ -279,6 +280,7 @@ function crearCalc_(ss) {
   av, IFERROR(CHOOSECOLS(d,14)*1, 0),
   es, CHOOSECOLS(d,15),
   imp, --(CHOOSECOLS(d,SEQUENCE(1,13,18))="I"),
+  esR, --(CHOOSECOLS(d,SEQUENCE(1,13,18))="R"),
   uno, SEQUENCE(13,1,1,0),
   nro, MMULT(SEQUENCE(n,1,1,0), SEQUENCE(1,13,2)),
   avM, MMULT(av, SEQUENCE(1,13,1,0)),
@@ -287,13 +289,16 @@ function crearCalc_(ss) {
   iVen, MMULT(imp*(nro<avM), uno),
   iMes, MMULT(imp*(nro=avM), uno),
   iVenAnt, MMULT(imp*(nro<avM-1), uno),
+  rTot, MMULT(esR, uno),
+  rVen, MMULT(esR*(nro<avM), uno),
+  rAnt, MMULT(esR*(nro<avM-1), uno),
   cF, av-1,
   mide, ISNUMBER(MATCH(cF, {3;5;7;9;12}, 0)),
   cuotaAnt, av-2,
   mideAnt, ISNUMBER(MATCH(cuotaAnt, {3;5;7;9;12}, 0)),
-  estAct, IF(resc, "RESCINDIDO", IF(iTot>0, "MORA", "AL DIA")),
-  estF, IF(mide, IF(resc, "RESCINDIDO", IF(iVen>0, "MORA", "AL DIA")), ""),
-  estAnt, IF(mideAnt, IF(resc, "RESCINDIDO", IF(iVenAnt>0, "MORA", "AL DIA")), ""),
+  estAct, IF(resc+(rTot>0), "RESCINDIDO", IF(iTot>0, "MORA", "AL DIA")),
+  estF, IF(mide, IF(rVen>0, "RESCINDIDO", IF(iVen>0, "MORA", "AL DIA")), ""),
+  estAnt, IF(mideAnt, IF(rAnt>0, "RESCINDIDO", IF(iVenAnt>0, "MORA", "AL DIA")), ""),
   VSTACK(
     {"SOLICITUD","GRUPO","ORDEN","CLIENTE","TELEFONO","RESPONSABLE","VENDEDOR","SUPERVISOR","AVANCE","ESTADO BASE","ESTADO ACTUAL","CUOTAS IMPAGAS","IMPAGAS VENCIDAS","DEBE CUOTA DEL MES","CUOTA FIAT N-1","ESTADO FIAT N-1","CUOTA FIAT N-2","ESTADO FIAT N-2"},
     HSTACK(CHOOSECOLS(d,2,3,4,8,9,1,16,17), av, es, estAct, iTot, iVen, IF(iMes>0,"SI","NO"), IF(mide,cF,""), estF, IF(mideAnt,cuotaAnt,""), estAnt)
