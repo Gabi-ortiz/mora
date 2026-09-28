@@ -19,8 +19,9 @@
  *   - MORA: al menos una "I" en las cuotas evaluadas.
  *   - AL DIA: sin "I" en las cuotas evaluadas (incluye Cancelado, cuotas con "C").
  *   - % mora = (planes en mora + rescindidos) / cartera total (al día + mora + rescindidos).
- *   - Medición FIAT (mes vencido): plan en avance N hoy se mide como cuota N-1,
- *     evaluando C2..C(N-1). Cuotas medidas: 3, 5, 7, 9 y 12.
+ *   - Medición FIAT (mes vencido): cuotas medidas 3, 5, 7, 9 y 12. Como el avance cambia a mitad de mes,
+ *     hay dos mediciones abiertas: N-1 (período actual, Fiat lo mide a fin del mes siguiente)
+ *     y N-2 (período anterior, Fiat lo mide a fin de este mes). Cuota k evalúa C2..Ck.
  */
 
 // --- CONSTANTES COMPARTIDAS CON EL CRM (crm_mora.gs las usa: no renombrar) ---
