@@ -251,7 +251,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-29.1';
+var VERSION = '2026-09-29.2';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -677,9 +677,10 @@ function renderFicha(d) {
     '<div class="muted" style="margin-top:8px">Sol. ' + esc(p.solicitud) + ' · Grupo ' + esc(p.grupo) + ' / Orden ' + esc(p.orden) + ' · Avance ' + esc(p.avance) +
     (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
+    (p.tituloPropio ? (p.telefono || p.telefonoAlt ? '<button class="btn" disabled title="Título propio: no se llama">📞 ' + esc([p.telefono, p.telefonoAlt].filter(String).join(' · ')) + '</button><button class="btn" disabled title="Título propio: no se contacta">WhatsApp</button>' : '') :
     (tel ? '<a class="btn pri" href="tel:' + pre + tel + '" target="_blank" title="Marca ' + pre + tel + '">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>'
       : p.telefono ? revisar(p.telefono) : '<span class="muted">Sin teléfono cargado</span>') +
-    (tel2 ? '<a class="btn" href="tel:' + pre + tel2 + '" target="_blank" title="Marca ' + pre + tel2 + '">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : p.telefonoAlt ? revisar(p.telefonoAlt) : '') +
+    (tel2 ? '<a class="btn" href="tel:' + pre + tel2 + '" target="_blank" title="Marca ' + pre + tel2 + '">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : p.telefonoAlt ? revisar(p.telefonoAlt) : '')) +
     '<button class="btn ghost sm" id="corregir" title="Corregir teléfono o mail">✎ Corregir datos</button>' +
     (p.contactoCorregido ? '<span class="pill caso" title="Corregido en el CRM">✔ corregido</span>' : '') + '</div></div>' +
     '<div class="dr-tabs">' + [['gestionar', 'Gestionar'], ['datos', 'Datos del plan'], ['historial', 'Historial (' + (d.gestiones.length + p.notasBase.length) + ')']].map(function (t) {
