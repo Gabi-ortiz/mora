@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-29.2';
+const CRM_VERSION = '2026-09-30.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -103,8 +103,9 @@ const CRM_USUARIOS_INICIALES = [
 const CRM_ESTADOS_BAJA = ['Rescindido', 'Renunciado', 'Cancelado'];
 
 // Listas del formulario de gestión (a ajustar juntos).
-const CRM_ESTADOS_CASO = ['Sin gestionar', 'Contactando', 'Contactado', 'Promesa de pago',
-  'Pagó (a verificar)', 'Negativa de pago', 'Inubicable', 'Derivado'];
+// "Sin gestionar" no se elige: es el estado de un plan sin gestiones.
+const CRM_ESTADOS_CASO = ['Contactado', 'Contactado - no paga', 'Licita', 'Promesa de pago',
+  'Pagó (A Verificar)', 'Incontactable'];
 const CRM_CANALES = ['Llamada', 'WhatsApp', 'SMS', 'Mail', 'Presencial', 'Sin contacto (solo actualización)'];
 const CRM_RESULTADOS = ['Atendió', 'No atendió', 'Buzón / apagado', 'Mensaje enviado',
   'Respondió mensaje', 'Número erróneo', 'N/A'];
@@ -524,7 +525,7 @@ function crmRegistrarGestion(token, solicitud, datos) {
   const p = crmBuscarPlan_(ctx, solicitud);
   if (!crmPuedeVer_(u, p)) throw new Error('No tenés acceso a este plan.');
   if (CRM_CANALES.indexOf(datos.canal) < 0) throw new Error('Canal inválido.');
-  if (CRM_ESTADOS_CASO.indexOf(datos.estadoCaso) < 0) throw new Error('Estado inválido.');
+  if (CRM_ESTADOS_CASO.indexOf(datos.estadoCaso) < 0) throw new Error('Elegí el estado del caso.');
   if (datos.estadoCaso === 'Promesa de pago' && !datos.promesaFecha) {
     throw new Error('Para "Promesa de pago" cargá la fecha prometida.');
   }

@@ -251,7 +251,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-29.2';
+var VERSION = '2026-09-30.1';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -301,6 +301,12 @@ function colorDe(email) {
 }
 function pillSit(s, corto) { return '<span class="pill s-' + s.codigo + '"><i class="dot"></i>' + esc(corto ? s.codigo.replace('AL_DIA', 'Al día').replace('RESCINDIDO', 'Rescindido').replace('BAJA', 'Baja') : s.etiqueta) + '</span>'; }
 function pillCaso(e) { return '<span class="pill caso' + (e === 'Sin gestionar' ? ' sin' : '') + '">' + esc(e) + '</span>'; }
+// Filtro de estados: los vigentes, "Sin gestionar" y cualquier estado viejo que siga cargado.
+function estadosFiltro() {
+  var l = ['Sin gestionar'].concat(S.ini.listas.estadosCaso);
+  S.planes.forEach(function (p) { if (p.estadoCaso && l.indexOf(p.estadoCaso) < 0) l.push(p.estadoCaso); });
+  return l;
+}
 function opciones(lista, sel, vacio) {
   return (vacio !== undefined ? '<option value="">' + esc(vacio) + '</option>' : '') +
     lista.map(function (v) { return '<option' + (v === sel ? ' selected' : '') + '>' + esc(v || '—') + '</option>'; }).join('');
@@ -581,7 +587,7 @@ function renderLista(m) {
   if (activos.length) h += '<div class="activos">Filtrando: ' + activos.map(function (a) { return '<button class="chip on" data-quitar="' + a[0] + '">' + esc(a[1]) + ' ✕</button>'; }).join('') + '</div>';
   h += '<div class="bar">' + tabs.map(function (t) {
     return '<button class="tab' + (S.filtro.situacion === t[0] ? ' on' : '') + '" data-sit="' + t[0] + '">' + t[1] + ' <small>' + (t[0] ? cuenta(t[0]) : lista.length) + '</small></button>';
-  }).join('') + '<button class="btn sm ghost" id="leyenda" title="¿Cómo se ordena?">ⓘ ¿Qué es P1, P2…?</button><div class="der"><select id="fEst">' + opciones(S.ini.listas.estadosCaso, S.filtro.estado, 'Estado del caso: todos') + '</select>' +
+  }).join('') + '<button class="btn sm ghost" id="leyenda" title="¿Cómo se ordena?">ⓘ ¿Qué es P1, P2…?</button><div class="der"><select id="fEst">' + opciones(estadosFiltro(), S.filtro.estado, 'Estado del caso: todos') + '</select>' +
     (sup ? '<select id="fResp"><option value="">Todos los responsables</option>' + S.ini.responsables.map(function (r) {
       return '<option value="' + esc(r.email) + '"' + (S.filtro.resp === r.email ? ' selected' : '') + '>' + esc(r.nombre) + '</option>';
     }).join('') + '</select>' : '') + '<span class="muted" style="font-size:12px" title="Los datos de BASE se releen cada 10 minutos o al tocar Actualizar">BASE leída ' + esc((S.baseLeida || '').slice(11)) + '</span>' +
@@ -712,7 +718,7 @@ function tabGestionar(d, el, i) {
     '<h4>¿Qué pasó?</h4><div class="chips" data-campo="resultado">' + L.resultados.filter(function (x) { return x !== 'N/A'; }).map(function (x) {
       return '<button type="button" class="chip" data-v="' + esc(x) + '">' + (ICONO_RES[x] || '') + ' ' + esc(x) + '</button>';
     }).join('') + '</div>' +
-    '<div class="f2"><label class="fl">Estado del caso<select class="in" name="estadoCaso">' + opciones(L.estadosCaso, c.estadoCaso && c.estadoCaso !== 'Sin gestionar' ? c.estadoCaso : 'Contactando') + '</select></label>' +
+    '<div class="f2"><label class="fl">Estado del caso<select class="in" name="estadoCaso" required>' + opciones(L.estadosCaso, L.estadosCaso.indexOf(c.estadoCaso) >= 0 ? c.estadoCaso : '', '— Elegí el estado —') + '</select></label>' +
     '<label class="fl">Motivo de no pago<select class="in" name="motivo">' + opciones(L.motivos, c.motivo || '') + '</select></label>' +
     '<div class="full promesa" id="bPromesa"><div class="f2"><label class="fl">🤝 Promete pagar el<input class="in" type="date" name="promesaFecha" value="' + esc(c.promesaFecha || '') + '"></label>' +
     '<label class="fl">Monto prometido<input class="in" type="number" min="0" step="any" name="promesaMonto" placeholder="$" value="' + esc(c.promesaMonto || '') + '"></label></div></div>' +
@@ -762,8 +768,8 @@ function tabGestionar(d, el, i) {
 }
 // Sugiere un estado del caso según el resultado del contacto (se puede cambiar).
 function sugerirEstado(f, res) {
-  var mapa = { 'Atendió': 'Contactado', 'Respondió mensaje': 'Contactado', 'No atendió': 'Contactando', 'Buzón / apagado': 'Contactando', 'Mensaje enviado': 'Contactando', 'Número erróneo': 'Inubicable' };
-  if (mapa[res] && f.estadoCaso.value !== 'Promesa de pago') { f.estadoCaso.value = mapa[res]; f.estadoCaso.onchange(); }
+  var mapa = { 'Atendió': 'Contactado', 'Respondió mensaje': 'Contactado', 'Número erróneo': 'Incontactable' };
+  if (mapa[res] && (!f.estadoCaso.value || f.estadoCaso.value === 'Contactado' || f.estadoCaso.value === 'Incontactable')) { f.estadoCaso.value = mapa[res]; f.estadoCaso.onchange(); }
 }
 
 function tabDatos(d, el) {

@@ -117,8 +117,10 @@ para que el estado no dependa solo de lo que carga el responsable.
   última actualización apenas se hace.
 
 ## Pendiente de definir
-- Lista final de estados del caso y resultados de contacto (hoy son una
-  propuesta, se cambian en `crm_mora.gs`). Los motivos de no pago ya son
+- Lista final de resultados de contacto (hoy es una propuesta, se cambia
+  en `crm_mora.gs`). Los estados del caso ya están definidos (30/09/2026):
+  Contactado · Contactado - no paga · Licita · Promesa de pago ·
+  Pagó (A Verificar) · Incontactable ("Sin gestionar" es automático). Los motivos de no pago ya son
   los códigos del equipo (P/E, S/C, M/V, T/U, P/P, A/C, TR, T/P, A/A, S/G,
   C/C).
 - Qué más mostrar en el Tablero supervisor (hoy: proyección de lo que
@@ -137,7 +139,7 @@ para que el estado no dependa solo de lo que carga el responsable.
   contactan; arriba de todo, lo pendiente de un objetivo del supervisor.
 - **AO / AP** (ESTADO AGOSTO / AGOSTO, planilla de licitaciones): ¿hacen
   falta en el CRM? Hoy se muestran en la ficha como datos de licitación.
-- Estados del caso y resultados de contacto definitivos.
+- Resultados de contacto definitivos (los estados del caso ya se definieron).
 
 
 ## Integración con Zoiper (pendiente, a definir con sistemas)
