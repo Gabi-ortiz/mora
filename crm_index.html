@@ -132,6 +132,7 @@
   .grupo { cursor: pointer; }
   .grupo.total td { background: #eef4ff; }
   .tmed th { white-space: normal; line-height: 1.25; vertical-align: bottom; }
+  .tmed tr.ro { cursor: default; }
   .tmed td { text-align: center; } .tmed td:first-child { text-align: left; }
   .asig { display: inline-block; min-width: 30px; padding: 2px 8px; border-radius: 6px; background: #eef4ff; color: var(--accent); }
   .tagobj { display: inline-block; background: #f4f0ff; color: #5925dc; border-radius: 6px; padding: 1px 7px; font-size: 12px; font-weight: 600; }
@@ -251,7 +252,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-30.1';
+var VERSION = '2026-09-30.2';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -295,7 +296,7 @@ function iniciales(n) {
   return ((p[0] || '?')[0] + (p[1] ? p[1][0] : '')).toUpperCase();
 }
 function colorDe(email) {
-  var lista = (S.ini && S.ini.responsables) || [];
+  var lista = (S.ini && S.ini.responsables && S.ini.responsables.length ? S.ini.responsables : S.avResp) || [];
   var i = lista.map(function (r) { return r.email; }).indexOf(email);
   return COLORES[(i < 0 ? 6 : i) % COLORES.length];
 }
@@ -465,6 +466,7 @@ function armarNav() {
   var agenda = S.planes.filter(function (p) { return esActiva(p) && p.agendaHoy; }).length;
   var items = [['cartera', '▦', sup ? 'Carteras' : 'Mi cartera'], ['agenda', '◷', 'Agenda de hoy', agenda], ['bajas', '⊘', 'Rescindidos / bajas']];
   var h = items.map(itemNav).join('');
+  if (!sup) h += itemNav(['avances', '▤', 'Situación por avance']);
   if (sup) h += '<div class="sec">Supervisión</div>' + [['tablero', '▤', 'Tablero'], ['objetivos', '◎', 'Objetivos', S.objetivos.length], ['usuarios', '☺', 'Usuarios']].map(itemNav).join('');
   h += '<div class="sec">Cuenta</div>' + itemNav(['clave', '⚿', 'Cambiar clave']);
   $('nav').innerHTML = h;
@@ -488,15 +490,17 @@ function encabezado() {
     agenda: ['Agenda de hoy', 'Re-contactos agendados y promesas de pago vencidas sin pago'],
     bajas: ['Rescindidos y bajas', 'Solo consulta: no entran en la cola de trabajo'],
     tablero: ['Tablero supervisor', 'Avance del equipo y proyección de lo que mide Fiat'],
+    avances: ['Situación por avance', 'Toda la cartera de la empresa, por avance'],
     usuarios: ['Usuarios', 'Altas, roles, carteras y claves'],
   }[S.vista];
   $('titulo').textContent = t[0]; $('subtitulo').textContent = t[1];
-  $('buscar').hidden = S.vista === 'tablero' || S.vista === 'usuarios' || S.vista === 'objetivos';
+  $('buscar').hidden = S.vista === 'tablero' || S.vista === 'avances' || S.vista === 'usuarios' || S.vista === 'objetivos';
 }
 
 function render() {
   var m = $('main');
   if (S.vista === 'tablero') return renderTablero(m);
+  if (S.vista === 'avances') return renderAvances(m);
   if (S.vista === 'usuarios') return renderUsuarios(m);
   if (S.vista === 'objetivos') return renderObjetivos(m);
   renderLista(m);
@@ -937,6 +941,7 @@ function datosObj(f) {
 // mora si tiene alguna 'I' en C2..C(N-1) (y no está rescindido); al día es el resto.
 // Trabajo = casos atrasados o con la cuota del mes que tuvieron al menos una gestión este mes.
 function enMora(p) {
+  if (p._mora !== undefined) return !!p._mora; // viene resuelto del servidor (Situación por avance de un responsable)
   if (p.situacion.codigo === 'RESCINDIDO') return false;
   return (p.cuotas || []).slice(0, Math.max(0, p.avance - 2)).indexOf('I') >= 0;
 }
@@ -985,7 +990,9 @@ function dibujarAvances() {
   if (!el) return;
   S.tabAv = S.tabAv || 'medidos'; S.abiertos = S.abiertos || {};
   var medidos = S.ini.cuotasFiat, tramos = S.tramos || {};
-  var todos = S.planes.map(function (p) { return p.avance; }).filter(function (v, k, a) { return a.indexOf(v) === k; }).sort(function (a, b) { return a - b; });
+  // El supervisor usa su cartera completa; un responsable, las filas de todas las carteras que manda el servidor.
+  var sup = S.ini.esSupervisor, planes = sup ? S.planes : (S.avPlanes || []), resps = sup ? S.ini.responsables : (S.avResp || []);
+  var todos = planes.map(function (p) { return p.avance; }).filter(function (v, k, a) { return a.indexOf(v) === k; }).sort(function (a, b) { return a - b; });
   var avances = S.tabAv === 'medidos' ? medidos : todos;
   var abierto = function (a) { return S.abiertos[a] !== undefined ? S.abiertos[a] : false; };
 
@@ -1017,7 +1024,7 @@ function dibujarAvances() {
     }).join(' ');
   };
   var sub = function (lista, avance, t) {
-    var filas = S.ini.responsables.map(function (r) {
+    var filas = resps.map(function (r) {
       return { r: r, lista: lista.filter(function (p) { return p.responsableEmail === r.email; }) };
     }).filter(function (f) { return f.lista.length; });
     var sinResp = lista.filter(function (p) { return !p.responsableEmail; });
@@ -1031,30 +1038,31 @@ function dibujarAvances() {
       filas.forEach(function (f, k) { f.asig = { asignado: true, a: aA[k], b: aB[k] }; });
     }
     return filas.map(function (f) {
-      return '<tr class="sub" data-av="' + avance + '" data-resp="' + (f.r ? esc(f.r.email) : '') + '"><td class="nowrap">' +
+      var propia = sup || (f.r && f.r.email === S.ini.usuario.email);
+      return '<tr class="sub' + (propia ? '' : ' ro') + '" data-av="' + avance + '" data-resp="' + (f.r ? esc(f.r.email) : '') + '"><td class="nowrap">' +
         (f.r ? '<span class="avatar sm" style="background:' + colorDe(f.r.email) + '">' + iniciales(f.r.nombre) + '</span> ' + esc(f.r.nombre) : '(sin asignar)') + '</td>' +
-        celdas(f.x, t, f.asig || false) + '<td class="nowrap">' + (f.r ? objetivosDe(f.lista, f.r.email) : '') + '</td></tr>';
+        celdas(f.x, t, f.asig || false) + (sup ? '<td class="nowrap">' + (f.r ? objetivosDe(f.lista, f.r.email) : '') + '</td>' : '') + '</tr>';
     }).join('');
   };
 
   var h = '<div class="card-h" style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><h3>Situación por avance</h3>' +
     '<div class="d">Planes que hoy están en cada avance. En mora = alguna cuota vencida impaga (C2 a C(N-1)). % mora = (en mora + rescindidos) / cartera. ' +
     'Tramos, tramo logrado y planes que faltan regularizar solo para los avances que se miden; en cada responsable, los planes que le toca levantar según el peso de su cartera en ese avance. Trabajo = casos atrasados o con la cuota del mes que tuvieron al menos una gestión este mes. ' +
-    'Tocá un avance para abrirlo por responsable y un responsable para ver sus casos.</div></div>' +
+    (sup ? 'Tocá un avance para abrirlo por responsable y un responsable para ver sus casos.' : 'Tocá un avance para abrirlo por responsable y tu fila para ver tus casos de ese avance.') + '</div></div>' +
     '<div class="row"><button class="tab' + (S.tabAv === 'medidos' ? ' on' : '') + '" data-tabav="medidos">Avances medidos (' + medidos.join(', ') + ')</button>' +
     '<button class="tab' + (S.tabAv === 'todos' ? ' on' : '') + '" data-tabav="todos">Todos los avances</button>' +
     '<button class="btn sm" id="abrirTodo">' + (avances.every(abierto) ? 'Cerrar todo' : 'Abrir todo') + '</button></div></div>' +
     '<div class="tw" style="padding:6px 4px 8px"><table class="tmed"><thead><tr><th>Avance / responsable</th><th>Cartera total</th><th>Al día</th><th>En mora</th><th>Rescindidos</th><th>% mora<br><span class="muted" style="font-weight:500">(mora + resc.)</span></th>' +
-    '<th>Tramo A:<br>menor a</th><th>Tramo B:<br>hasta</th><th>Tramo logrado</th><th>Faltan p/<br>tramo A (planes)</th><th>Faltan p/<br>tramo B (planes)</th><th>Trabajo del mes</th><th>Objetivos</th></tr></thead><tbody>';
+    '<th>Tramo A:<br>menor a</th><th>Tramo B:<br>hasta</th><th>Tramo logrado</th><th>Faltan p/<br>tramo A (planes)</th><th>Faltan p/<br>tramo B (planes)</th><th>Trabajo del mes</th>' + (sup ? '<th>Objetivos</th>' : '') + '</tr></thead><tbody>';
 
   avances.forEach(function (a) {
-    var delAv = S.planes.filter(function (p) { return p.avance === a; }), t = medidos.indexOf(a) >= 0 ? tramos[a] : null;
+    var delAv = planes.filter(function (p) { return p.avance === a; }), t = medidos.indexOf(a) >= 0 ? tramos[a] : null;
     h += '<tr class="grupo" data-av="' + a + '"><td class="nowrap">' + (abierto(a) ? '▾' : '▸') + ' Avance ' + a +
-      (medidos.indexOf(a) >= 0 ? ' <span class="fiat">FIAT</span>' : '') + '</td>' + celdas(numerosAvance(delAv), t, true) + '<td></td></tr>';
+      (medidos.indexOf(a) >= 0 ? ' <span class="fiat">FIAT</span>' : '') + '</td>' + celdas(numerosAvance(delAv), t, true) + (sup ? '<td></td>' : '') + '</tr>';
     if (abierto(a)) h += sub(delAv, a, t);
   });
-  var enVista = S.planes.filter(function (p) { return avances.indexOf(p.avance) >= 0; });
-  h += '<tr class="grupo total" data-av="total"><td class="nowrap">' + (abierto('total') ? '▾' : '▸') + ' TOTAL</td>' + celdas(numerosAvance(enVista), null, false) + '<td></td></tr>';
+  var enVista = planes.filter(function (p) { return avances.indexOf(p.avance) >= 0; });
+  h += '<tr class="grupo total" data-av="total"><td class="nowrap">' + (abierto('total') ? '▾' : '▸') + ' TOTAL</td>' + celdas(numerosAvance(enVista), null, false) + (sup ? '<td></td>' : '') + '</tr>';
   if (abierto('total')) h += sub(enVista, '', null);
   el.innerHTML = h + '</tbody></table></div>';
 
@@ -1067,11 +1075,25 @@ function dibujarAvances() {
     tr.onclick = function () { var a = tr.getAttribute('data-av'); a = a === 'total' ? a : Number(a); S.abiertos[a] = !abierto(a); dibujarAvances(); };
   });
   cada('tr.sub', el, function (tr) {
+    if (tr.classList.contains('ro')) return; // cartera de otro responsable: solo números
     tr.onclick = function () {
-      S.vista = 'cartera'; S.filtro = { texto: '', situacion: '', estado: '', resp: tr.getAttribute('data-resp'), avance: tr.getAttribute('data-av'), objetivo: '' };
+      S.vista = 'cartera'; S.filtro = { texto: '', situacion: '', estado: '', resp: sup ? tr.getAttribute('data-resp') : '', avance: tr.getAttribute('data-av'), objetivo: '' };
       $('buscar').value = ''; armarNav(); encabezado(); render();
     };
   });
+}
+
+// ---------- Situación por avance (responsables) ----------
+// Mismo cuadro que el tablero del supervisor, con los números de todas las carteras.
+function renderAvances(m) {
+  m.innerHTML = '<div class="vacio"><span class="cargando"></span>Calculando situación por avance…</div>';
+  api('crmSituacionAvances').then(function (r) {
+    S.avPlanes = r.filas.map(function (f) { return { avance: f[0], situacion: { codigo: f[1] }, responsableEmail: f[2], _mora: f[3], intentosMes: f[4] }; });
+    S.avResp = r.responsables; S.tramos = r.tramos;
+    if (S.vista !== 'avances') return;
+    m.innerHTML = '<div class="card" id="avSec"></div>';
+    dibujarAvances();
+  }).catch(function (e) { if (!e.sesion) m.innerHTML = '<div class="card vacio alerta">' + esc(e.message || e) + '</div>'; });
 }
 
 // ---------- Tablero supervisor ----------

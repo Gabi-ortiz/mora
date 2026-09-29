@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-30.1';
+const CRM_VERSION = '2026-09-30.2';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -746,6 +746,27 @@ function crmTableroSupervisor(token) {
   });
 
   return { porResponsable: filas, proyeccion: proyeccion, actividad: actividad, hoy: hoy, tramos: crmTramos_() };
+}
+
+/**
+ * "Situación por avance" para cualquier usuario: los planes de TODAS las
+ * carteras, reducidos a lo que necesita ese cuadro (sin clientes ni teléfonos).
+ * Cada fila: [avance, situación, email del responsable, en mora 0/1, gestionado en el mes 0/1].
+ */
+function crmSituacionAvances(token) {
+  crmUsuarioActual_(token);
+  const ctx = crmContexto_();
+  const filas = ctx.planes.map(function (p) {
+    const cod = p.situacion.codigo;
+    const vencidas = p.cuotas.slice(0, Math.max(0, Number(p.avance) - 2));
+    const g = ctx.gestionesMes[p.solicitud];
+    return [p.avance, cod, p.responsableEmail || '',
+      cod !== 'RESCINDIDO' && vencidas.indexOf('I') >= 0 ? 1 : 0, g && g.intentos > 0 ? 1 : 0];
+  });
+  const responsables = crmLeerUsuarios_(ctx.ss)
+    .filter(function (x) { return x.activo && x.rol === CRM_ROL_RESPONSABLE; })
+    .map(function (x) { return { email: x.email, nombre: x.nombre }; });
+  return { filas: filas, responsables: responsables, tramos: crmTramos_(), baseLeida: ctx.baseLeida };
 }
 
 // ---------------------------------------------------------------------------
