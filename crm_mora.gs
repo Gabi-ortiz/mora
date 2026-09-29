@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-28.1';
+const CRM_VERSION = '2026-09-29.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -435,7 +435,7 @@ function crmItemLista_(ctx, p) {
   return {
     solicitud: p.solicitud, cliente: p.cliente, telefono: p.telefono, grupo: p.grupo,
     orden: p.orden, avance: p.avance, estadoBase: p.estado, cuotas: p.cuotas,
-    situacion: p.situacion, responsableEmail: p.responsableEmail,
+    situacion: p.situacion, tituloPropio: !!p.tituloPropio, responsableEmail: p.responsableEmail,
     responsableNombre: p.responsableNombre,
     estadoCaso: c.estadoCaso || 'Sin gestionar',
     ultimaGestion: c.ultimaGestion || '', ultimoCanal: c.ultimoCanal || '',
@@ -965,6 +965,7 @@ function crmPlanesBase_(forzar) {
       cliente: crmFmt(f[CRM_COL_CLIENTE - 1]), documento: crmFmt(f[CRM_COL_DOCUMENTO - 1]),
       avance: f[COL_AVANCE - 1], estado: crmFmt(f[COL_ESTADO - 1]),
       vendedor: crmFmt(f[CRM_COL_VENDEDOR - 1]), supervisorVenta: crmFmt(f[CRM_COL_SUPERVISOR_VTA - 1]),
+      tituloPropio: crmEsTituloPropio_(f[CRM_COL_VENDEDOR - 1]) || crmEsTituloPropio_(f[CRM_COL_SUPERVISOR_VTA - 1]),
       formaPago: crmFmt(f[CRM_COL_FORMA_PAGO - 1]), tipoPlan: crmFmt(f[CRM_COL_TIPO_PLAN - 1]),
       scoring: crmFmt(f[CRM_COL_SCORING - 1]),
       cuotas: f.slice(COL_C2 - 1, COL_C2 - 1 + CRM_CANT_CUOTAS).map(function (v) { return String(v || ''); }),
@@ -1255,6 +1256,16 @@ function crmFilaResp_(nombre) {
     prioSinGestion: 0, intentosMes: 0, efectivosMes: 0, regularizadosConGestion: 0,
     promesasVigentes: 0, promesasVencidas: 0,
   };
+}
+
+/**
+ * Título propio (no se llama al cliente): Vendedor (P) o Supervisor (Q) dicen
+ * "TITULO PROPIO" o "TP" (también T.P. / T/P), sin importar mayúsculas ni tildes.
+ */
+function crmEsTituloPropio_(v) {
+  const t = String(v || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase();
+  if (/TITULO\s*PROPIO/.test(t)) return true;
+  return t.replace(/[.\/]/g, '').split(/[^A-Z0-9]+/).indexOf('TP') >= 0;
 }
 
 // --- Fechas: google.script.run no transporta Date, todo viaja como texto ---

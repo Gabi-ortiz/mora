@@ -58,6 +58,8 @@
   .s-RESCINDIDO, .s-BAJA { background: #f2f4f7; color: #475467; } .s-RESCINDIDO .dot, .s-BAJA .dot { background: #667085; }
   .caso { background: var(--accent-soft); color: #3538cd; }
   .caso.sin { background: #f2f4f7; color: var(--muted); }
+  span.tp, .cli span.tp { display: inline-block; font-size: 13px; font-weight: 800; letter-spacing: .02em; color: #fff; background: #c62828; border: 2px solid #8e0000; border-radius: 6px; padding: 3px 10px; margin-left: 10px; vertical-align: 4px; white-space: nowrap; }
+  .cli span.tp.sm, span.tp.sm { font-size: 10px; border-width: 1px; padding: 1px 5px; margin-left: 6px; vertical-align: 1px; }
   .fiat { font-size: 10px; font-weight: 800; letter-spacing: .03em; color: var(--accent); background: var(--accent-soft); border-radius: 4px; padding: 1px 5px; margin-left: 5px; vertical-align: 1px; }
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line-2); background: #fff; border-radius: 8px; padding: 7px 12px; font-weight: 600; color: var(--ink-2); cursor: pointer; text-decoration: none; white-space: nowrap; }
   .btn:hover { background: #f9fafb; }
@@ -249,7 +251,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-09-28.1';
+var VERSION = '2026-09-29.1';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -599,7 +601,7 @@ function renderLista(m) {
         return '<tr data-sol="' + esc(p.solicitud) + '">' +
           (sup ? '<td><input type="checkbox" class="sel" data-sol="' + esc(p.solicitud) + '"' + (S.seleccion[p.solicitud] ? ' checked' : '') + '></td>' : '') +
           '<td class="nowrap">' + pillSit(p.situacion, true) + (p._obj ? ' <span class="obj" title="Parte de un objetivo del supervisor">◎</span>' : '') + '</td>' +
-          '<td class="cli"><b>' + esc(p.cliente) + '</b><span>Sol. ' + esc(p.solicitud) + ' · ' + esc(p.grupo) + '/' + esc(p.orden) + '</span></td>' +
+          '<td class="cli"><b>' + esc(p.cliente) + (p.tituloPropio ? '<span class="tp sm" title="Título propio: no llamar">TÍTULO PROPIO</span>' : '') + '</b><span>Sol. ' + esc(p.solicitud) + ' · ' + esc(p.grupo) + '/' + esc(p.orden) + '</span></td>' +
           '<td class="nowrap">' + esc(p.avance) + (sup && p.situacion.medidoPorFiat ? '<span class="fiat">FIAT</span>' : '') + '</td>' +
           '<td>' + miniCuotas(p) + '</td><td>' + pillCaso(p.estadoCaso) + '</td>' +
           '<td class="nowrap">' + (p.ultimaGestion ? haceCuanto(p.ultimaGestion) + ' <span class="muted">· ' + esc(p.ultimoCanal) + '</span>' : '<span class="muted">—</span>') + '</td>' +
@@ -671,7 +673,7 @@ function renderFicha(d) {
   var h = '<div class="dr-h"><div class="row" style="justify-content:space-between"><div class="dr-nav">' +
     (i >= 0 ? '<button class="btn sm" id="ant"' + (i === 0 ? ' disabled' : '') + '>‹</button> ' + (i + 1) + ' de ' + S.cola.length + ' <button class="btn sm" id="sig"' + (i === S.cola.length - 1 ? ' disabled' : '') + '>›</button>' : '') +
     '</div><button class="btn ghost sm" id="cerrar" title="Cerrar (Esc)">✕</button></div>' +
-    '<h2>' + esc(p.cliente) + '</h2><div class="row">' + pillSit(p.situacion) + pillCaso(c.estadoCaso || 'Sin gestionar') + '<span class="pill caso sin">' + esc(p.estado) + '</span></div>' +
+    '<h2>' + esc(p.cliente) + (p.tituloPropio ? '<span class="tp" title="Vendedor o supervisor de venta: TÍTULO PROPIO. No llamar.">Título propio · no llamar</span>' : '') + '</h2><div class="row">' + pillSit(p.situacion) + pillCaso(c.estadoCaso || 'Sin gestionar') + '<span class="pill caso sin">' + esc(p.estado) + '</span></div>' +
     '<div class="muted" style="margin-top:8px">Sol. ' + esc(p.solicitud) + ' · Grupo ' + esc(p.grupo) + ' / Orden ' + esc(p.orden) + ' · Avance ' + esc(p.avance) +
     (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
