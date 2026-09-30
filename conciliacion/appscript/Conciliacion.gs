@@ -1517,8 +1517,9 @@ function conciliarTodo_(entrada, redondoUnico) {
     banco: saldoInicialBanco };
   apertura.diferencia = redondear_(apertura.fbs + apertura.pendientes - apertura.banco);
   if (Math.abs(apertura.diferencia) >= 1000) {
-    avisos.unshift('La apertura no cierra por ' + formato_(apertura.diferencia) + ': faltan o sobran partidas en "' +
-      HOJA.anteriores + '" (pendientes del cierre anterior). Esa misma diferencia se arrastra al control del mes.');
+    avisos.unshift('La apertura no cierra por ' + formato_(apertura.diferencia) + ': revisá los saldos iniciales de E y O' +
+      (entrada.base ? ' en "' + HOJA.parametros + '"' : '') + ' (tienen que ser los saldos al cierre del mes anterior) y los pendientes ' +
+      'anteriores. Esa misma diferencia se arrastra al control del mes.');
   }
   const difGastos = conciliar_(banco, fbs);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
