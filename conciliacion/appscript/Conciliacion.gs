@@ -894,7 +894,8 @@ function leerBase_(filas, cuentaE, cuentaO) {
     out[cta].push({ asiento: String(r[c.asiento] || '').replace(/\.0+$/, ''), fecha, referencia: String(r[c.ref] || '').trim(),
       comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
       aux: aux instanceof Date ? aux : (typeof aux === 'number' ? String(Math.round(aux)) : String(aux || '').trim()),
-      id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: String(cuentaO) });
+      id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: String(cuentaO),
+      cc: c.cc !== undefined ? String(r[c.cc] || '').trim() : '' });
   });
   return out;
 }
@@ -907,7 +908,24 @@ function leerBase_(filas, cuentaE, cuentaO) {
  *   "I-14-7" / "E-0172026" / "13072026" / "64274939" -> ingreso / egreso con fecha, fecha, nro. de cheque
  * La fecha del final es la fecha de carga del recibo (se usa como segunda opción).
  */
-function datosAux_(aux, base) {
+/** Centros de costo que cargan en el Nº del valor la fecha del banco sin separador: "2206" = 22/06, "607" = 6/07, "10626" = 1/06/26. */
+const CC_NUMERO_ES_FECHA = /DOME TALLER/i;
+
+function fechaCorta_(nro, base) {
+  const opciones = nro.length === 5 ? [[1, 2, 2], [2, 1, 2]] : nro.length === 4 ? [[2, 2, 0], [1, 2, 1]] : nro.length === 3 ? [[1, 2, 0], [2, 1, 0]] : [];
+  for (const [ld, lm, la] of opciones) {
+    if (ld + lm + la !== nro.length) continue;
+    const d = Number(nro.slice(0, ld)), mes = Number(nro.slice(ld, ld + lm));
+    if (d < 1 || d > 31 || mes < 1 || mes > 12) continue;
+    let a = la === 2 ? 2000 + Number(nro.slice(ld + lm)) : base.getFullYear();
+    let f = new Date(a, mes - 1, d);
+    if (!la && f > base) f = new Date(a - 1, mes - 1, d);
+    if (f <= base && dias_(f, base) <= 180) return f;
+  }
+  return null;
+}
+
+function datosAux_(aux, base, cc) {
   const vacio = { numero: '', fecha: null, fecha2: null, banco: '', cuentaBanco: '' };
   if (!aux) return vacio;
   if (aux instanceof Date) return Object.assign(vacio, { fecha: parseFecha_(aux) });
@@ -932,6 +950,10 @@ function datosAux_(aux, base) {
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
     out.fecha = dm(nro);
     if (/^\d{5,}$/.test(nro)) out.numero = nro;
+    if (!out.fecha && cc && CC_NUMERO_ES_FECHA.test(cc) && /^\d{3,5}$/.test(nro)) {
+      out.fecha = fechaCorta_(nro, out.fecha2 || base);
+      if (out.fecha) out.numero = '';
+    }
     if (!out.fecha) out.fecha = out.fecha2;
     return out;
   }
@@ -1006,13 +1028,13 @@ function partidaFbs_(a, origen) {
     if (d) dni = ('0' + d[1]).slice(-8);
   }
   const partes = com.split('/').map(p => p.trim());
-  const ax = datosAux_(a.aux, a.fecha || new Date());
+  const ax = datosAux_(a.aux, a.fecha || new Date(), a.cc);
   const fr = ax.fecha || (a.fecha ? fechaEnTexto_(com, a.fecha) : null);
   const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
     fechaRef: fr || null, fechaRef2: ax.fecha2 && (!fr || dias_(ax.fecha2, fr) > 0) ? ax.fecha2 : null, cruces: '', valor: ax.numero,
     otroBanco, aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
-    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '',
+    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', cc: a.cc || '',
     alerta: otroBanco ? 'El valor figura en otro banco (' + otroBanco + ' ' + ax.cuentaBanco + '): no corresponde a esta cuenta' : '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
@@ -1332,7 +1354,15 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
     [k - 1, k, k + 1].forEach(kk => (libres.get(kk) || []).forEach(f => {
       if (f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= ventana && criterio(b, f)) cands.push(f);
     }));
-    if (!cands.length || (unico && cands.length > 1)) return;
+    if (!cands.length) return;
+    if (unico && cands.length > 1) {
+      // valores de Dome Taller: varios candidatos iguales (mismo importe y misma fecha del valor) y la misma cantidad de
+      // movimientos iguales en el banco (ej. dos valores de $145.000 del 22/06 y dos transferencias de $145.000 el 22/06)
+      const dia = f => (f.fechaRef || f.fecha).getTime();
+      const iguales = cands.every(f => f.cc && CC_NUMERO_ES_FECHA.test(f.cc) && Math.abs(f.importe - cands[0].importe) < 0.005 && dia(f) === dia(cands[0]));
+      const gemelos = banco.filter(x => x.match === null && Math.abs(x.importe - b.importe) < 0.005 && x.fecha.getTime() === b.fecha.getTime());
+      if (!iguales || gemelos.length !== cands.length) return;
+    }
     let mejor = cands[0];
     cands.forEach(f => {
       const d1 = distancia_(b, f), d0 = distancia_(b, mejor);
