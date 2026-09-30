@@ -33,6 +33,8 @@
 
 const HOJA = {
   extracto: 'Extracto',
+  extractoAlt: ['E. bancario', 'Extracto bancario'],
+  base: 'Base',
   mayorE: 'Mayor E',
   mayorO: 'Mayor O',
   anteriores: 'Pendientes anteriores',
@@ -167,15 +169,27 @@ function onOpen() {
 }
 
 function crearParametros_(ss) {
-  if (ss.getSheetByName(HOJA.parametros)) return;
-  const sh = ss.insertSheet(HOJA.parametros);
-  sh.getRange(1, 1, 4, 2).setValues([
+  const filas = [
     ['Parámetro', 'Valor'],
     ['Modo de cruce', 'ESTRICTO'],
+    ['Cuenta E', 1103013],
+    ['Cuenta O', 1103012],
+    ['Saldo inicial cuenta E', ''],
+    ['Saldo inicial cuenta O', ''],
     ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
     ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
-  ]);
+    ['Saldos iniciales', 'Con la hoja "Base": saldo final de E y de O de la conciliación anterior. Al cerrar el mes se completan solos.'],
+  ];
+  let sh = ss.getSheetByName(HOJA.parametros);
+  if (sh) {   // agrega los parámetros que falten sin tocar los existentes
+    const hay = sh.getDataRange().getValues().map(r => String(r[0]));
+    filas.filter(f => hay.indexOf(f[0]) < 0).forEach(f => sh.appendRow(f));
+    return;
+  }
+  sh = ss.insertSheet(HOJA.parametros);
+  sh.getRange(1, 1, filas.length, 2).setValues(filas);
   sh.getRange(1, 1, 1, 2).setFontWeight('bold');
+  sh.getRange(5, 2, 2, 1).setNumberFormat(NUM_FMT);
   sh.getRange(2, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['ESTRICTO', 'INTERMEDIO']).build());
   sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 700);
 }
@@ -222,11 +236,15 @@ function procesar_(ss) {
     if (!sh) throw new Error('Falta la hoja "' + nombre + '". Corré "1. Crear hojas de entrada".');
     return sh.getDataRange().getValues();
   };
+  const hojaExtracto = [HOJA.extracto].concat(HOJA.extractoAlt).find(n => ss.getSheetByName(n) &&
+    ss.getSheetByName(n).getLastRow() > 1) || HOJA.extracto;
+  const conBase = !!ss.getSheetByName(HOJA.base);
   const res = conciliarTodo_({
-    extracto: leer(HOJA.extracto),
-    mayorE: leer(HOJA.mayorE),
-    mayorO: leer(HOJA.mayorO),
-    anteriores: leer(HOJA.anteriores),
+    extracto: leer(hojaExtracto),
+    base: conBase ? leer(HOJA.base) : null,
+    mayorE: conBase ? null : leer(HOJA.mayorE),
+    mayorO: conBase ? null : leer(HOJA.mayorO),
+    anteriores: leer([HOJA.anteriores, 'Pend mes anterior'].find(n => ss.getSheetByName(n)) || HOJA.anteriores),
     reglas: leer(HOJA.reglas),
     empresas: leer(HOJA.empresas),
     parametros: ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null,
@@ -289,12 +307,21 @@ function cerrarMes() {
   hist.getRange(fila, 16).setRichTextValue(SpreadsheetApp.newRichTextValue().setText('Abrir foto')
     .setLinkUrl(archivo.getUrl()).build());
 
-  // 4. pendientes al mes siguiente
+  // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
   const n = pasarPendientes_(ss);
+  const par = ss.getSheetByName(HOJA.parametros);
+  if (par) {
+    const v = par.getDataRange().getValues();
+    v.forEach((r, i) => {
+      if (/^saldo inicial cuenta e$/i.test(String(r[0]))) par.getRange(i + 1, 2).setValue(res.saldoE);
+      if (/^saldo inicial cuenta o$/i.test(String(r[0]))) par.getRange(i + 1, 2).setValue(res.saldoO);
+    });
+  }
   if (ui.alert('Mes cerrado', 'Foto guardada en la carpeta "' + carpeta.getName() + '" y registrada en "Historial".\n' + n +
       ' partidas pasadas a "' + HOJA.anteriores + '".\n\n¿Vaciar las hojas Extracto, Mayor E y Mayor O para cargar el mes siguiente?',
       ui.ButtonSet.YES_NO) === ui.Button.YES) {
-    [HOJA.extracto, HOJA.mayorE, HOJA.mayorO].forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
+    [HOJA.extracto, HOJA.mayorE, HOJA.mayorO, HOJA.base].concat(HOJA.extractoAlt)
+      .forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
   }
   hist.activate();
 }
@@ -655,6 +682,72 @@ function leerExtracto_(filas, reglas, empresas) {
   return { info, movs };
 }
 
+/**
+ * Reporte de la base (hoja "Base"): una fila por renglón de asiento, con DETPLAN = cuenta del mayor
+ * (1103012 = O, 1103013 = E) y DETComentaAux con el número y la fecha del valor ("Nº 994833-BANCO MACRO(1103012)-14/07/2026").
+ */
+function leerBase_(filas, cuentaE, cuentaO) {
+  const h = encabezados_(filas, {
+    plan: /^detplan$/, asiento: /^detmovnro$/, fecha: /^detfecha$/, ref: /^detref$/, debe: /^detdebe$/, haber: /^dethaber$/,
+    com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/,
+  }, ['plan', 'fecha', 'debe', 'haber', 'com']);
+  if (!h) throw new Error('Base: no encuentro las columnas DETPLAN, DETFECHA, DETDEBE, DETHABER, DETComenta.');
+  const c = h.col, out = { E: [], O: [] };
+  filas.slice(h.fila + 1).forEach(r => {
+    const plan = String(r[c.plan]).replace(/\.0+$/, '').trim();
+    const cta = plan === String(cuentaE) ? 'E' : plan === String(cuentaO) ? 'O' : null;
+    const fecha = parseFecha_(r[c.fecha]);
+    if (!cta || !fecha) return;
+    const aux = c.aux !== undefined ? r[c.aux] : '';
+    out[cta].push({ asiento: String(r[c.asiento] || '').replace(/\.0+$/, ''), fecha, referencia: String(r[c.ref] || '').trim(),
+      comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
+      aux: aux instanceof Date ? aux : (typeof aux === 'number' ? String(Math.round(aux)) : String(aux || '').trim()),
+      id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: String(cuentaO) });
+  });
+  return out;
+}
+
+/**
+ * Datos del valor en DETComentaAux. Formatos vistos:
+ *   "Nº 20/7/1153-BANCO MACRO(1103012)-21/07/2026"  -> fecha del valor 20/07 (la transferencia; 11:53 es la hora)
+ *   "Nº 994833-BANCO MACRO(1103012)-14/07/2026"     -> número = Nro. de referencia del banco
+ *   "Nº 1200058-BANCO COMAFI(1103074)-17/07/2026"   -> valor de OTRO banco
+ *   "I-14-7" / "E-0172026" / "13072026" / "64274939" -> ingreso / egreso con fecha, fecha, nro. de cheque
+ * La fecha del final es la fecha de carga del recibo (se usa como segunda opción).
+ */
+function datosAux_(aux, base) {
+  const vacio = { numero: '', fecha: null, fecha2: null, banco: '', cuentaBanco: '' };
+  if (!aux) return vacio;
+  if (aux instanceof Date) return Object.assign(vacio, { fecha: parseFecha_(aux) });
+  const t = String(aux).trim();
+  const out = Object.assign({}, vacio);
+  const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);
+  const dm = (txt) => {
+    let x = txt.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})(?!\d)/);
+    if (x) {
+      const d = Number(x[1]), mes = Number(x[2]);
+      if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12) {
+        let a = base.getFullYear(); if (mes > base.getMonth() + 1) a -= 1;
+        return new Date(a, mes - 1, d);
+      }
+    }
+    return /^\d{6,8}$/.test(txt) ? fechaEnTexto_(txt, base) : null;
+  };
+  if (m) {
+    const nro = m[1].replace(/\s+/g, '');
+    out.banco = m[2].trim(); out.cuentaBanco = m[3];
+    out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
+    out.fecha = dm(nro);
+    if (/^\d{5,}$/.test(nro)) out.numero = nro;
+    if (!out.fecha) out.fecha = out.fecha2;
+    return out;
+  }
+  const ie = t.match(/^[IE]-\s*(.+)$/i);
+  if (ie) { out.fecha = dm(ie[1].replace(/\s/g, '')); return out; }
+  if (/^\d{5,}$/.test(t)) { out.numero = t; out.fecha = /^\d{7,8}$/.test(t) ? fechaEnTexto_(t, base) : null; }
+  return out;
+}
+
 /** Mayor FBS exportado a Excel: Asiento, Fecha, Referencia, Comentario, Debe, Haber, Saldo. */
 function leerMayor_(filas, nombreHoja) {
   const h = encabezados_(filas, {
@@ -720,10 +813,14 @@ function partidaFbs_(a, origen) {
     if (d) dni = ('0' + d[1]).slice(-8);
   }
   const partes = com.split('/').map(p => p.trim());
-  const fr = a.fecha ? fechaEnTexto_(com, a.fecha) : null;
+  const ax = datosAux_(a.aux, a.fecha || new Date());
+  const fr = ax.fecha || (a.fecha ? fechaEnTexto_(com, a.fecha) : null);
+  const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
-    fechaRef: fr || null, cruces: '',
-    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', alerta: '', cuit, dni,
+    fechaRef: fr || null, fechaRef2: ax.fecha2 && (!fr || dias_(ax.fecha2, fr) > 0) ? ax.fecha2 : null, cruces: '', valor: ax.numero,
+    otroBanco, aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
+    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '',
+    alerta: otroBanco ? 'El valor figura en otro banco (' + otroBanco + ' ' + ax.cuentaBanco + '): no corresponde a esta cuenta' : '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
 
@@ -922,6 +1019,8 @@ function distancia_(a, b) {
   let d = dias_(a.fecha, b.fecha);
   if (a.fechaRef) d = Math.min(d, dias_(a.fechaRef, b.fecha));
   if (b.fechaRef) d = Math.min(d, dias_(a.fecha, b.fechaRef));
+  if (a.fechaRef2) d = Math.min(d, dias_(a.fechaRef2, b.fecha));
+  if (b.fechaRef2) d = Math.min(d, dias_(a.fecha, b.fechaRef2));
   return d;
 }
 
@@ -1112,7 +1211,7 @@ function marcarDuplicados_(fbs) {
     if (f.match !== null || f.origen !== 'Mes' || !detalle(f)) return;
     const otro = fbs.find(x => x !== f && x.origen === 'Mes' && x.asiento !== f.asiento && Math.abs(x.importe - f.importe) <= TOLERANCIA &&
       detalle(x) === detalle(f) && dias_(x.fecha, f.fecha) <= 31);
-    if (otro) f.alerta = 'Posible duplicado de ' + (otro.texto.split('/')[0].trim() || 'asiento ' + otro.asiento) +
+    if (otro && !f.alerta) f.alerta = 'Posible duplicado de ' + (otro.texto.split('/')[0].trim() || 'asiento ' + otro.asiento) +
       ' (asiento ' + otro.asiento + ')';
   });
 }
@@ -1215,7 +1314,8 @@ function ventanaUnica_(banco, fbs, d) {
 }
 
 const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
-const POR_REF_ = (b, f) => b.ref.length >= 5 && (f.texto + ' ' + f.ref).replace(/\./g, '').indexOf(b.ref) >= 0;
+const POR_REF_ = (b, f) => b.ref.length >= 5 && ((f.valor && f.valor === b.ref) ||
+  (f.texto + ' ' + f.ref + ' ' + (f.aux || '')).replace(/\./g, '').indexOf(b.ref) >= 0);
 const POR_NOMBRE_ = (b, f) => comparten_(b.nombre, f.nombre);
 
 /**
@@ -1332,8 +1432,31 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   const reglas = leerReglas_(entrada.reglas), empresas = leerEmpresas_(entrada.empresas);
   const ext = leerExtracto_(entrada.extracto, reglas, empresas);
-  const e = leerMayor_(entrada.mayorE, HOJA.mayorE), o = leerMayor_(entrada.mayorO, HOJA.mayorO);
   const movs = ext.movs;
+  const param = nombre => { const f = (entrada.parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0]))); return f ? f[1] : null; };
+  let e, o;
+  if (entrada.base) {
+    const b = leerBase_(entrada.base, param('^cuenta e') || 1103013, param('^cuenta o') || 1103012);
+    const siE = parseNum_(param('^saldo inicial cuenta e')), siO = parseNum_(param('^saldo inicial cuenta o'));
+    const mk = (lista, si, n) => ({ asientos: lista, avisos: [], info: { cuenta: n, saldoInicial: si || 0,
+      saldoFinal: redondear_((si || 0) + lista.reduce((x, a) => x + a.debe - a.haber, 0)) } });
+    e = mk(b.E, siE, 'E (' + (param('^cuenta e') || 1103013) + ')');
+    o = mk(b.O, siO, 'O (' + (param('^cuenta o') || 1103012) + ')');
+    if (siE === null || siO === null) {
+      // sin saldos iniciales: se deducen de la conciliación anterior (saldo inicial del banco - pendientes anteriores)
+      const antes = leerAnteriores_(entrada.anteriores || [], new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1));
+      const netoAnt = antes.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0);
+      const total = redondear_(movs[0].saldo - movs[0].importe - netoAnt);
+      e.info.saldoInicial = total; o.info.saldoInicial = 0;
+      e.info.saldoFinal = redondear_(total + b.E.reduce((x, a) => x + a.debe - a.haber, 0));
+      o.info.saldoFinal = redondear_(b.O.reduce((x, a) => x + a.debe - a.haber, 0));
+      e.info.cuenta += ' — saldo inicial E+O deducido';
+      e.avisos.push('Faltan los saldos iniciales de E y O en "' + HOJA.parametros + '": se dedujeron de la conciliación anterior ' +
+        '(saldo inicial del banco menos pendientes anteriores), así que el control de apertura no aplica. Cargalos para controlar la apertura.');
+    }
+  } else {
+    e = leerMayor_(entrada.mayorE, HOJA.mayorE); o = leerMayor_(entrada.mayorO, HOJA.mayorO);
+  }
   const desde = new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1);
   const corte = movs[movs.length - 1].fecha;
   const avisos = e.avisos.concat(o.avisos);

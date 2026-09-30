@@ -44,6 +44,12 @@ agosto 2026: mismos 4 totales y diferencia de control $143,21).
    `Conciliaciones - Historial`, agrega una fila en la hoja `Historial` con los saldos y el link, y pasa los
    pendientes a `Pendientes anteriores`.
 
+Entrada alternativa: hoja **`Base`** (reporte de la base de FBS) en lugar de `Mayor E` / `Mayor O`. Se separa por
+`DETPLAN` (1103012 = O, 1103013 = E) y se usa `DETComentaAux` ("Nº 20/7/1153-BANCO MACRO(1103012)-21/07/2026"):
+fecha del valor (20/07), número del valor (= Nro. de referencia del banco cuando es numérico) y banco del valor
+(si no es la cuenta 1103012 se avisa "otro banco"). Los saldos iniciales de E y O van en `Parámetros` y se
+actualizan solos al cerrar el mes.
+
 Flujo (igual al procedimiento de administración):
 1. **Cuenta O** (hoja `Análisis O` y `O sin confirmar`): se netea por comprobante (RC / RM) o número de liquidación,
    junto con los pendientes anteriores. Lo que no netea queda "no confirmado" (puntas 3 y 4) y se marca, en la columna
