@@ -495,6 +495,8 @@ function escribirTablero_(ss, res) {
 
 function observacion_(p) {
   if (p.alerta) return p.alerta;
+  if (p.desfasado) return 'Confirmado con fecha ' + fechaTexto_(p.fecha) + ' pero el recibo se registró el ' + fechaTexto_(p.fechaRef2) +
+    ': queda en S4 y se cancela solo el mes próximo, cuando entra el ingreso en O';
   if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) return 'Cargado después del cierre (' + fechaTexto_(p.fechaRef2) + ') con fecha del mes';
   if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores' + (p.cuenta === 'O' ? ' (sigue sin confirmar en O)' : '');
   if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
@@ -539,7 +541,8 @@ function armarRevisar_(res) {
   const fila = (tipo, ...v) => { while (v.length < 6) v.push(''); out.push([tipo].concat(v)); };
   const suma = l => l.reduce((x, p) => x + Math.abs(p.importe), 0);
   const mes = l => l.filter(p => p.origen === 'Mes').sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe));
-  const B = mes(res.listas.B), O = mes(res.listas.O), E = mes(res.listas.E);
+  const B = mes(res.listas.B), E = mes(res.listas.E);
+  const O = mes(res.listas.O).filter(p => !p.desfasado), D = mes(res.listas.O).filter(p => p.desfasado);
   const revisar = res.conciliados.filter(c => /revisar/i.test(c[0]));
   const ant = [].concat(res.listas.B, res.listas.O, res.listas.E).filter(p => p.origen === 'Arrastre');
   const signo = p => (p.importe < 0 ? 'Débito' : 'Crédito');
@@ -552,6 +555,7 @@ function armarRevisar_(res) {
   fila('resumen', '3. Corregir en FBS: registros de la cuenta E que no aparecen en el banco', E.length, suma(E));
   fila('resumen', '4. Validar: cruces automáticos marcados "(revisar)"', revisar.length, '');
   fila('resumen', '5. Pendientes de meses anteriores que siguen abiertos', ant.length, suma(ant));
+  fila('resumen', '6. Desfasados: confirmados en el mes y registrados después del cierre (no hay que hacer nada)', D.length, suma(D));
 
   const seccion = (titulo, items, motivo, pista) => {
     fila('');
@@ -593,6 +597,9 @@ function armarRevisar_(res) {
     const l = ant.filter(p => { const d = dias_(res.corte, p.fecha); return d >= d0 && d <= d1; });
     fila('item', n, l.length, suma(l));
   });
+
+  seccion('6. DESFASADOS — confirmados con fecha del mes, el recibo se registró después del cierre (quedan en S4 y se cancelan solos el mes próximo)', D,
+    p => observacion_(p), p => p.cruces);
   return out;
 }
 
@@ -1025,13 +1032,24 @@ function analisisO_(asientosO, anterioresFbs) {
 
 /**
  * Pase de O a E (haber O / debe E en el mismo asiento) cuyo ingreso en O no está en el mes ni en los pendientes
- * anteriores: el recibo ya se había dado por acreditado antes (o se cargó directo confirmado). El pase no cambia el
- * saldo E+O, así que las dos líneas se anulan entre sí y no se cruzan con el banco. Devuelve las líneas de E que quedan.
+ * anteriores. Dos casos:
+ *  - el recibo se cargó después del cierre (fecha de carga del DETComentaAux posterior al corte) y se confirmó con
+ *    fecha del mes: el debe de E se cruza con el banco y el haber de O queda en S4 ("desfasado") hasta que el mes
+ *    próximo aparezca el ingreso en O con el mismo comprobante;
+ *  - si no, el recibo ya se había dado por acreditado antes: el pase no cambia el saldo E+O, así que las dos líneas
+ *    se anulan entre sí y no se cruzan con el banco.
+ * Devuelve las líneas de E que quedan para cruzar.
  */
 function pasesSinOrigen_(ao, asientosE) {
   const usadas = new Set();
   ao.pendientes.forEach(p => {
     if (p.origen !== 'Mes' || p.importe >= 0) return;
+    if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) {
+      // confirmado con fecha del mes pero el ingreso en O se registró después del cierre: el pase queda en S4
+      // hasta que el mes próximo entre el ingreso (con el mismo comprobante) y se netee en O
+      p.desfasado = true;
+      return;
+    }
     const i = asientosE.findIndex((a, j) => !usadas.has(j) && String(a.asiento) === String(p.asiento) &&
       a.comentario === p.texto && Math.abs(a.debe - a.haber + p.importe) < 0.005);
     if (i < 0) return;
@@ -1544,7 +1562,7 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
  * y órdenes de pago con varias líneas (mismo RM) contra un solo débito del banco.
  */
 function limpiezaO_(banco, oPend) {
-  const b = banco.filter(x => x.match === null), o = oPend.filter(x => x.match === null);
+  const b = banco.filter(x => x.match === null), o = oPend.filter(x => x.match === null && !x.desfasado);
   pasada_(b, o, MISMO_ID_, 'Limpieza O sin confirmar ↔ banco: CUIT/DNI', VENTANA_ID, false);
   pasada_(b, o, POR_REF_, 'Limpieza O sin confirmar ↔ banco: referencia', 60, false);
   pasada_(b, o, POR_NOMBRE_, 'Limpieza O sin confirmar ↔ banco: nombre', 15, false);
