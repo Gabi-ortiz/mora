@@ -1474,11 +1474,11 @@ function liquidacionesTarjeta_(banco, fbs) {
       if (!mejor || dias_(b.fecha, f.fecha) < dias_(mejor.fecha, f.fecha)) mejor = b;
     });
     if (!mejor) {
-      // la liquidación se acredita en varios pagos del mismo día (ej. liq 9341 = 4 PAYWAY del 27/07): suma exacta
+      // la liquidación se acredita en varios movimientos del mismo día, que pueden incluir débitos de la tarjeta
+      // (ej. liq 9341 = 4 PAYWAY del 27/07; liq 12658 = 3 créditos y 1 débito PAYWAY del 07/07)
       const porDia = new Map();
       banco.forEach(b => {
-        if (b.match !== null || b.origen !== 'Mes' || b.cat !== 'COBRANZA TARJETAS' || (b.importe > 0) !== (f.importe > 0) ||
-          dias_(b.fecha, f.fecha) > 10) return;
+        if (b.match !== null || b.origen !== 'Mes' || !/TARJETA/.test(b.cat) || dias_(b.fecha, f.fecha) > 10) return;
         const k = b.fecha.getTime();
         porDia.set(k, (porDia.get(k) || []).concat([b]));
       });
@@ -1493,7 +1493,7 @@ function liquidacionesTarjeta_(banco, fbs) {
       mejor = { importe: redondear_(combo.reduce((x, b) => x + b.importe, 0)), grupo: combo };
     }
     const dif = redondear_(mejor.importe - f.importe);
-    const nombre = 'Liquidación de tarjeta' + (mejor.grupo ? ' (' + mejor.grupo.length + ' acreditaciones del día)' : '');
+    const nombre = 'Liquidación de tarjeta' + (mejor.grupo ? ' (' + mejor.grupo.length + ' movimientos de tarjeta del día)' : '');
     unir_(mejor.grupo || [mejor], [f], nombre + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
     if (Math.abs(dif) > 0.005) {
       const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo liquidación tarjeta ' + f.liq.slice(4) + ' - ajustar',
