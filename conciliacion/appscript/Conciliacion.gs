@@ -1146,6 +1146,10 @@ function partidasE_(asientosE, asientosO) {
     if (d) {
       const num = Array.from(numeros).filter(n => d[1].startsWith(n)).sort((x, y) => y.length - x.length)[0];
       if (num) return 'LIQ ' + num;
+      // comisiones de la liquidación: se cargan en el asiento inmediato siguiente con solo un número en el comentario,
+      // que a veces no coincide con el de la liquidación (ej. liq 45956 en el asiento 2410279, comisión "75956" en el 2410280)
+      const prev = String(Number(a.asiento) - 1);
+      if (/^\d+(\.0+)?$/.test(String(a.comentario).trim()) && liqPorAsiento.has(prev)) return liqPorAsiento.get(prev);
     }
     return null;
   };
@@ -1288,10 +1292,10 @@ function fechaEnTexto_(texto, base) {
   return ult;
 }
 
-function primeraCombinacion_(cands, n, objetivo) {
+function primeraCombinacion_(cands, n, objetivo, tolerancia) {
   const idx = [];
   const buscar = (inicio, suma) => {
-    if (idx.length === n) return Math.abs(suma - objetivo) <= TOLERANCIA;
+    if (idx.length === n) return Math.abs(suma - objetivo) <= (tolerancia || TOLERANCIA);
     for (let i = inicio; i <= cands.length - (n - idx.length); i++) {
       idx.push(i);
       if (buscar(i + 1, suma + cands[i].importe)) return true;
@@ -1462,9 +1466,28 @@ function liquidacionesTarjeta_(banco, fbs) {
         Math.abs(b.importe - f.importe) > 1 || dias_(b.fecha, f.fecha) > 10) return;
       if (!mejor || dias_(b.fecha, f.fecha) < dias_(mejor.fecha, f.fecha)) mejor = b;
     });
-    if (!mejor) return;
+    if (!mejor) {
+      // la liquidación se acredita en varios pagos del mismo día (ej. liq 9341 = 4 PAYWAY del 27/07): suma exacta
+      const porDia = new Map();
+      banco.forEach(b => {
+        if (b.match !== null || b.origen !== 'Mes' || b.cat !== 'COBRANZA TARJETAS' || (b.importe > 0) !== (f.importe > 0) ||
+          dias_(b.fecha, f.fecha) > 10) return;
+        const k = b.fecha.getTime();
+        porDia.set(k, (porDia.get(k) || []).concat([b]));
+      });
+      const dias = Array.from(porDia.keys()).sort((x, y) => dias_(new Date(x), f.fecha) - dias_(new Date(y), f.fecha));
+      let combo = null;
+      for (const k of dias) {
+        const cands = porDia.get(k).slice(0, 15);
+        for (let n = 2; n <= Math.min(6, cands.length) && !combo; n++) combo = primeraCombinacion_(cands, n, f.importe, 1);
+        if (combo) break;
+      }
+      if (!combo) return;
+      mejor = { importe: redondear_(combo.reduce((x, b) => x + b.importe, 0)), grupo: combo };
+    }
     const dif = redondear_(mejor.importe - f.importe);
-    unir_([mejor], [f], 'Liquidación de tarjeta' + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
+    const nombre = 'Liquidación de tarjeta' + (mejor.grupo ? ' (' + mejor.grupo.length + ' acreditaciones del día)' : '');
+    unir_(mejor.grupo || [mejor], [f], nombre + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
     if (Math.abs(dif) > 0.005) {
       const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.split(' (')[0].toLowerCase() + ' - ajustar',
         referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
