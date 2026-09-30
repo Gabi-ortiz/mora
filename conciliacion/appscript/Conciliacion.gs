@@ -47,6 +47,7 @@ const HOJA = {
   pendBanco: 'Banco sin registrar',
   conciliados: 'E conciliado',
   analisisO: 'Análisis O',
+  revisar: 'Para revisar',
   historial: 'Historial',
   parametros: 'Parámetros',
   viejas: ['Pend. registrar en FBS', 'Pend. FBS sin banco', 'Conciliados'],   // nombres de versiones anteriores
@@ -277,6 +278,7 @@ function procesar_(ss) {
   });
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirTablero_(ss, res);
+  escribirRevisar_(ss, res);
   escribirAnalisisO_(ss, res);
   escribirPendientes_(ss, HOJA.pendO, res, res.listas.O,
     'Paso 1 — Cuenta O: líneas que no netean (no confirmadas). Van a Depósitos no acreditados / Cheques no debitados.');
@@ -285,6 +287,8 @@ function procesar_(ss) {
     'Paso 2 — Cuenta E que no se cruzó ni con pendientes anteriores ni con el extracto (posibles errores de registración).');
   escribirPendientes_(ss, HOJA.pendBanco, res, res.listas.B,
     'Movimientos del extracto (y pendientes anteriores del banco) que no están en la cuenta E.');
+  // orden de las pestañas: primero lo que se lee
+  [HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.tablero).activate();
   SpreadsheetApp.flush();
   return res;
@@ -524,6 +528,94 @@ function escribirPendientes_(ss, nombre, res, items, titulo) {
   sh.setFrozenRows(2);
   sh.getRange(2, 1, Math.max(filas.length, 1) + 1, cab.length).createFilter();
   [60, 230, 90, 50, 90, 360, 130, 200, 110, 150, 80, 280, 420].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+}
+
+/**
+ * Lista de trabajo: qué hacer con cada partida del mes, agrupado por acción y ordenado por importe.
+ * Devuelve filas [tipo, col1..col6] donde tipo = 'titulo' | 'resumen' | 'seccion' | 'sub' | 'cab' | 'item' | ''.
+ */
+function armarRevisar_(res) {
+  const out = [];
+  const fila = (tipo, ...v) => { while (v.length < 6) v.push(''); out.push([tipo].concat(v)); };
+  const suma = l => l.reduce((x, p) => x + Math.abs(p.importe), 0);
+  const mes = l => l.filter(p => p.origen === 'Mes').sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe));
+  const B = mes(res.listas.B), O = mes(res.listas.O), E = mes(res.listas.E);
+  const revisar = res.conciliados.filter(c => /revisar/i.test(c[0]));
+  const ant = [].concat(res.listas.B, res.listas.O, res.listas.E).filter(p => p.origen === 'Arrastre');
+  const signo = p => (p.importe < 0 ? 'Débito' : 'Crédito');
+
+  fila('titulo', 'PARA REVISAR — ' + fechaTexto_(res.corte) + '   (diferencia de control ' + formato_(res.ajustado - res.saldoBanco) + ')');
+  fila('');
+  fila('cab', 'Qué hay que hacer', 'Partidas', 'Importe', '', '', '');
+  fila('resumen', '1. Registrar en FBS: movimientos del banco del mes que no están en FBS', B.length, suma(B));
+  fila('resumen', '2. Confirmar en FBS: registros de la cuenta O sin confirmar', O.length, suma(O));
+  fila('resumen', '3. Corregir en FBS: registros de la cuenta E que no aparecen en el banco', E.length, suma(E));
+  fila('resumen', '4. Validar: cruces automáticos marcados "(revisar)"', revisar.length, '');
+  fila('resumen', '5. Pendientes de meses anteriores que siguen abiertos', ant.length, suma(ant));
+
+  const seccion = (titulo, items, motivo, pista) => {
+    fila('');
+    fila('seccion', titulo);
+    if (!items.length) { fila('', 'Sin partidas.'); return; }
+    fila('cab', 'Fecha', 'Concepto / comprobante', 'Importe', 'Qué pasa', 'Pista para cruzar', '');
+    items.forEach(p => fila('item', p.fecha, p.texto, p.importe, motivo(p), pista(p) || '', ''));
+  };
+
+  // 1. banco sin registrar, agrupado por tipo de movimiento
+  fila('');
+  fila('seccion', '1. REGISTRAR EN FBS — el banco muestra el movimiento y FBS no lo tiene');
+  if (!B.length) fila('', 'Sin partidas.');
+  const porCat = new Map();
+  B.forEach(p => { const k = p.cat || 'OTROS'; porCat.set(k, (porCat.get(k) || []).concat([p])); });
+  Array.from(porCat.entries()).sort((a, b) => suma(b[1]) - suma(a[1])).forEach(([cat, l]) => {
+    fila('sub', cat + ' — ' + l.length + ' partidas', '', suma(l));
+    fila('cab', 'Fecha', 'Concepto del banco', 'Importe', 'Qué pasa', 'Pista para cruzar', '');
+    l.forEach(p => fila('item', p.fecha, p.texto, p.importe, signo(p) + ' sin registrar', p.cruces || (p.cuit ? 'CUIT ' + p.cuit : '')));
+  });
+
+  seccion('2. CONFIRMAR EN FBS — registrado en la cuenta O pero sin confirmar', O,
+    p => observacion_(p), p => p.cruces);
+  seccion('3. CORREGIR EN FBS — registrado en la cuenta E y no aparece en el banco', E,
+    p => observacion_(p).replace('Pendiente en cuenta E: ', ''), p => p.cruces);
+
+  fila('');
+  fila('seccion', '4. VALIDAR — cruces automáticos por importe (sin CUIT, referencia ni nombre)');
+  if (!revisar.length) fila('', 'Sin partidas.');
+  else {
+    fila('cab', 'Fecha banco', 'Concepto del banco', 'Importe', 'Cruzado con (FBS)', 'Criterio', '');
+    revisar.forEach(c => fila('item', c[1], c[2], c[3], (c[6] || '') + (c[8] ? ' (asiento ' + c[8] + ')' : ''), c[0]));
+  }
+
+  fila('');
+  fila('seccion', '5. PENDIENTES DE MESES ANTERIORES — resumen por antigüedad (detalle en las hojas de pendientes)');
+  fila('cab', 'Antigüedad', 'Partidas', 'Importe', '', '', '');
+  [['Hasta 30 días', 0, 30], ['31 a 90 días', 31, 90], ['91 a 365 días', 91, 365], ['Más de un año', 366, 1e9]].forEach(([n, d0, d1]) => {
+    const l = ant.filter(p => { const d = dias_(res.corte, p.fecha); return d >= d0 && d <= d1; });
+    fila('item', n, l.length, suma(l));
+  });
+  return out;
+}
+
+function escribirRevisar_(ss, res) {
+  const sh = hojaLimpia_(ss, HOJA.revisar);
+  const filas = armarRevisar_(res);
+  sh.getRange(1, 1, filas.length, 6).setValues(filas.map(f => f.slice(1)));
+  const fmt = [];
+  filas.forEach((f, i) => {
+    const r = sh.getRange(i + 1, 1, 1, 6);
+    if (f[0] === 'titulo') r.setFontWeight('bold').setFontSize(14);
+    if (f[0] === 'seccion') r.setFontWeight('bold').setFontSize(12).setBackground('#1F4E78').setFontColor('#FFFFFF');
+    if (f[0] === 'sub') r.setFontWeight('bold').setBackground('#DDEBF7');
+    if (f[0] === 'cab') r.setFontWeight('bold').setBackground('#F2F2F2');
+    if (f[0] === 'resumen') sh.getRange(i + 1, 1).setFontWeight('bold');
+    if (f[0] === 'item' || f[0] === 'resumen' || f[0] === 'sub') fmt.push(i + 1);
+  });
+  fmt.forEach(r => sh.getRange(r, 3).setNumberFormat(NUM_FMT));
+  sh.getRange(1, 1, filas.length, 1).setNumberFormat('dd/mm/yyyy');
+  filas.forEach((f, i) => { if (f[0] === 'resumen' || f[0] === 'sub') sh.getRange(i + 1, 1).setNumberFormat('@'); });
+  sh.getRange(1, 1, filas.length, 6).setWrap(true).setVerticalAlignment('top');
+  [95, 380, 130, 300, 380, 20].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.setFrozenRows(1);
 }
 
 function escribirConciliados_(ss, res) {
@@ -1625,4 +1717,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
