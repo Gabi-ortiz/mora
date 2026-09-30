@@ -1024,6 +1024,30 @@ function analisisO_(asientosO, anterioresFbs) {
 }
 
 /**
+ * Pase de O a E (haber O / debe E en el mismo asiento) cuyo ingreso en O no está en el mes ni en los pendientes
+ * anteriores: el recibo ya se había dado por acreditado antes (o se cargó directo confirmado). El pase no cambia el
+ * saldo E+O, así que las dos líneas se anulan entre sí y no se cruzan con el banco. Devuelve las líneas de E que quedan.
+ */
+function pasesSinOrigen_(ao, asientosE) {
+  const usadas = new Set();
+  ao.pendientes.forEach(p => {
+    if (p.origen !== 'Mes' || p.importe >= 0) return;
+    const i = asientosE.findIndex((a, j) => !usadas.has(j) && String(a.asiento) === String(p.asiento) &&
+      a.comentario === p.texto && Math.abs(a.debe - a.haber + p.importe) < 0.005);
+    if (i < 0) return;
+    usadas.add(i);
+    const eLinea = partidaFbs_(asientosE[i], 'Mes');
+    eLinea.cuenta = 'E';
+    compensar_([p, eLinea], 'Pase O→E sin ingreso en O en el mes (se anulan)');
+    const r = ao.resumen.find(x => x.clave === claveO_(p.texto));
+    if (r) { r.pendientes--; r.detallePend = (r.pendientes ? r.detallePend + ' — ' : '') + 'pase a E sin ingreso en O en el mes: se anula con E'; }
+  });
+  ao.pendientes = ao.pendientes.filter(p => p.match === null);
+  ao.pasesSinOrigen = usadas.size;
+  return asientosE.filter((a, j) => !usadas.has(j));
+}
+
+/**
  * Paso 2: la cuenta E se cruza con el banco. Las líneas de una misma liquidación de tarjeta (la "Confirmación de
  * Valores Agrupados" del asiento que confirma la liquidación en O, y el asiento con el número de liquidación) se
  * juntan en un solo neto, que es lo que acredita el banco.
@@ -1653,8 +1677,9 @@ function conciliarTodo_(entrada, redondoUnico) {
   const anterioresFbs = anteriores.filter(p => p.lado === 'FBS');
   // PASO 1: cuenta O sola, neteando por comprobante / liquidación junto con los pendientes anteriores
   const ao = analisisO_(o.asientos, anterioresFbs);
+  const asientosE = pasesSinOrigen_(ao, e.asientos);
   // PASO 2: cuenta E -> primero contra los pendientes anteriores, después contra el extracto
-  const eItems = partidasE_(e.asientos, o.asientos);
+  const eItems = partidasE_(asientosE, o.asientos);
   const antFbsRestantes = anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0);
   cruzarAnteriores_(eItems, anterioresBanco, antFbsRestantes);
   const banco = bancoMes.concat(anterioresBanco);
