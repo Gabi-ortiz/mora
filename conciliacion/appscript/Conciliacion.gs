@@ -491,6 +491,7 @@ function escribirTablero_(ss, res) {
 
 function observacion_(p) {
   if (p.alerta) return p.alerta;
+  if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) return 'Cargado después del cierre (' + fechaTexto_(p.fechaRef2) + ') con fecha del mes';
   if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores' + (p.cuenta === 'O' ? ' (sigue sin confirmar en O)' : '');
   if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
   if (/Diferencia asiento gastos/.test(p.texto)) return 'Revisar asiento de gastos bancarios';
@@ -631,7 +632,7 @@ function extraerNombre_(concepto) {
 
 function tokens_(texto) {
   const out = new Set();
-  (String(texto || '').toUpperCase().match(/[A-ZÑ]{3,}/g) || []).forEach(t => { if (!PALABRAS_VACIAS.has(t)) out.add(t); });
+  (String(texto || '').toUpperCase().replace(/&/g, 'Ñ').match(/[A-ZÑ]{3,}/g) || []).forEach(t => { if (!PALABRAS_VACIAS.has(t)) out.add(t); });
   return out;
 }
 
@@ -747,6 +748,7 @@ function datosAux_(aux, base) {
   if (aux instanceof Date) return Object.assign(vacio, { fecha: parseFecha_(aux) });
   const t = String(aux).trim();
   const out = Object.assign({}, vacio);
+  if (parseFecha_(t)) return Object.assign(out, { fecha: parseFecha_(t) });   // la celda trae directamente una fecha
   const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);
   const dm = (txt) => {
     let x = txt.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})(?!\d)/);
@@ -1026,7 +1028,8 @@ function leerAnteriores_(filas, desde) {
 
 // ------------------------------------------------------------------ cruce
 
-let CRUCES_ = [];   // registro de todos los cruces de la corrida (para la hoja "E conciliado")
+let CRUCES_ = [];
+let CORTE_ = null;   // fecha de corte del extracto de la corrida   // registro de todos los cruces de la corrida (para la hoja "E conciliado")
 
 function unir_(banco, fbs, metodo) {
   banco.forEach(b => { b.match = fbs; b.metodo = metodo; });
@@ -1063,16 +1066,26 @@ function fechaEnTexto_(texto, base) {
     ult = new Date(a, mes - 1, d);
   }
   if (!ult) {
+    // "Nº 17-7" / "Nº 13-07-26": día y mes separados por guión después de Nº
+    const g = String(texto).match(/Nº\s*(\d{1,2})-(\d{1,2})(?:-(\d{2,4}))?(?!\d)/);
+    if (g && Number(g[1]) <= 31 && Number(g[2]) >= 1 && Number(g[2]) <= 12) {
+      let a = g[3] ? Number(g[3]) : base.getFullYear(); if (a < 100) a += 2000;
+      if (!g[3] && Number(g[2]) > base.getMonth() + 1) a -= 1;
+      ult = new Date(a, Number(g[2]) - 1, Number(g[1]));
+    }
+  }
+  if (!ult) {
     // "Nº 4080226", "Nº 21082026", "Nº 210820261", "25082026-Vta Cheques": día + mes + año pegados
     const c = String(texto).match(/(?:Nº\s*|^)(\d{6,9})(?!\d)/);
     if (c) {
       const t = c[1];
-      for (const ld of [2, 1]) {
-        const d = Number(t.slice(0, ld)), mes = Number(t.slice(ld, ld + 2)), resto = t.slice(ld + 2);
+      busca: for (const [ld, lm] of [[2, 2], [1, 2], [2, 1], [1, 1]]) {
+        const d = Number(t.slice(0, ld)), mes = Number(t.slice(ld, ld + lm)), resto = t.slice(ld + lm);
+        if (!resto) continue;
         let a = resto.startsWith('20') && resto.length >= 4 ? Number(resto.slice(0, 4)) : Number(resto.slice(-2));
         if (a < 100) a += 2000;
         const f = new Date(a, mes - 1, d);
-        if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12 && a === base.getFullYear() && dias_(f, base) <= 62) { ult = f; break; }
+        if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12 && a === base.getFullYear() && dias_(f, base) <= 62) { ult = f; break busca; }
       }
     }
   }
@@ -1310,10 +1323,10 @@ function conciliar_(banco, fbs) {
   return gastos ? gastos.dif : null;
 }
 
-/** Importe "específico": tiene centavos o no termina en 00 (123.852,68 sí; 500.000 o 71.100 no). */
+/** Importe "específico": tiene centavos o no es múltiplo de $1.000 (123.852,68 o 7.234.300 sí; 500.000 o 5.800.000 no). */
 function especifico_(x) {
   const c = Math.round(Math.abs(x) * 100);
-  return c % 100 !== 0 || (c / 100) % 100 !== 0;
+  return c % 100 !== 0 || (c / 100) % 1000 !== 0;
 }
 
 /** Importe redondo: se cruza solo si ese día hay UN movimiento del banco y UN registro de E con ese importe. */
@@ -1408,6 +1421,49 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
   });
 }
 
+/**
+ * Limpieza entre cuadros (paso 5 del instructivo anterior, lo que hace administración a mano): una línea de O sin
+ * confirmar y un movimiento del banco sin registrar que son la misma operación se sacan de los dos cuadros.
+ * Mismos criterios que el cruce con E (CUIT, referencia, nombre, fecha del valor, importe específico en la fecha),
+ * y órdenes de pago con varias líneas (mismo RM) contra un solo débito del banco.
+ */
+function limpiezaO_(banco, oPend) {
+  const b = banco.filter(x => x.match === null), o = oPend.filter(x => x.match === null);
+  pasada_(b, o, MISMO_ID_, 'Limpieza O sin confirmar ↔ banco: CUIT/DNI', VENTANA_ID, false);
+  pasada_(b, o, POR_REF_, 'Limpieza O sin confirmar ↔ banco: referencia', 60, false);
+  pasada_(b, o, POR_NOMBRE_, 'Limpieza O sin confirmar ↔ banco: nombre', 15, false);
+  pasada_(b, o, (x, f) => !!f.fechaRef && dias_(f.fechaRef, x.fecha) === 0, 'Limpieza O sin confirmar ↔ banco: fecha del valor + importe', 60, true);
+  pasada_(b, o, x => especifico_(x.importe), 'Limpieza O sin confirmar ↔ banco: fecha + importe específico', 0, true);
+  // varias líneas de O (mismo comprobante o mismo asiento) contra uno o varios débitos del banco del mismo día y causal
+  const grupos = new Map();
+  o.forEach(f => {
+    if (f.match !== null) return;
+    [claveO_(f.texto) + '|' + f.fecha.getTime(), 'as:' + f.asiento].forEach(k => grupos.set(k + '|' + (f.importe > 0), (grupos.get(k + '|' + (f.importe > 0)) || []).concat([f])));
+  });
+  const gb = new Map();
+  b.forEach(y => { if (y.origen === 'Mes') { const k = y.fecha.getTime() + '|' + y.causal + '|' + (y.importe > 0); gb.set(k, (gb.get(k) || []).concat([y])); } });
+  grupos.forEach(g => {
+    if (g.length < 2 || g.some(f => f.match !== null)) return;
+    const total = g.reduce((x, f) => x + f.importe, 0);
+    const x = b.find(y => y.match === null && Math.abs(y.importe - total) <= TOLERANCIA && dias_(y.fecha, g[0].fecha) <= 3);
+    if (x) { unir_([x], g, 'Limpieza O sin confirmar ↔ banco: comprobante en varias líneas'); return; }
+    for (const bs of gb.values()) {
+      if (bs.length > 1 && bs.every(y => y.match === null) && dias_(bs[0].fecha, g[0].fecha) <= 3 &&
+        Math.abs(bs.reduce((a, y) => a + y.importe, 0) - total) <= TOLERANCIA) { unir_(bs, g, 'Limpieza O sin confirmar ↔ banco: lote del día'); return; }
+    }
+    // ej. sueldos: un asiento de O con todas las transferencias contra los débitos del mismo concepto en los días siguientes
+    const causales = new Set(b.filter(y => y.match === null && y.origen === 'Mes' && (y.importe > 0) === (total > 0)).map(y => y.causal));
+    for (const cz of causales) {
+      const bs = b.filter(y => y.match === null && y.origen === 'Mes' && y.causal === cz && (y.importe > 0) === (total > 0) &&
+        y.fecha >= g[0].fecha && dias_(y.fecha, g[0].fecha) <= 10);
+      if (bs.length > 1 && Math.abs(bs.reduce((a, y) => a + y.importe, 0) - total) <= TOLERANCIA) {
+        unir_(bs, g, 'Limpieza O sin confirmar ↔ banco: lote (mismo concepto en varios días)'); return;
+      }
+    }
+  });
+  if (CRUZAR_REDONDO_UNICO_DIA) unicoDelDia_(b, o);
+}
+
 function sector_(p) {
   if (p.lado === 'BANCO') return p.importe > 0 ? 'S1' : 'S2';
   return p.importe > 0 ? 'S3' : 'S4';
@@ -1498,6 +1554,7 @@ function conciliarTodo_(entrada, redondoUnico) {
     Array.from(new Set(nuevos.map(m => m.causal))).join(', ') + '). Agregalos en "' + HOJA.reglas + '".');
 
   CRUCES_ = [];
+  CORTE_ = corte;
   const bancoMes = movs.map(m => partidaBanco_(m, 'Mes'));
   const anteriores = leerAnteriores_(entrada.anteriores || [], desde);
   const anterioresBanco = anteriores.filter(p => p.lado === 'BANCO');
@@ -1522,6 +1579,8 @@ function conciliarTodo_(entrada, redondoUnico) {
       'anteriores. Esa misma diferencia se arrastra al control del mes.');
   }
   const difGastos = conciliar_(banco, fbs);
+  limpiezaO_(banco, ao.pendientes);
+  ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
   const pend = { S1: [], S2: [], S3: [], S4: [] };
