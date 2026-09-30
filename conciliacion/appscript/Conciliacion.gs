@@ -456,15 +456,19 @@ function armarCuatroPuntas_(res) {
   add([]);
   [['S1', 'Depósitos No Registrados en Contabilidad', 'S2', 'Cheques No Registrados en Contabilidad'],
     ['S3', 'Depósitos No Acreditados en BANCO', 'S4', 'Cheques No Debitados en BANCO']].forEach(([si, ni, sd, nd]) => {
-    const iz = orden(res.pend[si]), de = orden(res.pend[sd]);
+    // una partida agrupada (liquidación + comisiones, operación) se muestra con sus líneas originales
+    const expandir = l => [].concat.apply([], orden(l).map(p => (p.lineas && p.lineas.length > 1
+      ? p.lineas.slice().sort((x, y) => (p.importe < 0 ? x.importe - y.importe : y.importe - x.importe)).map((x, i) => ({ fecha: x.fecha, texto: x.texto, valor: p.importe < 0 ? -x.importe : x.importe, p: i ? null : p }))
+      : [{ fecha: p.fecha, texto: p.texto, valor: Math.abs(p.importe), p }])));
+    const iz = expandir(res.pend[si]), de = expandir(res.pend[sd]);
     add([ni, '', '', '', nd, '', ''], 'cuadro');
     add(['Fecha', 'Concepto', 'Importe', '', 'Fecha', 'Concepto', 'Importe'], 'cab');
     for (let i = 0; i < Math.max(iz.length, de.length); i++) {
       const a = iz[i], b = de[i];
-      add([a ? a.fecha : '', a ? a.texto : '', a ? Math.abs(a.importe) : '', '', b ? b.fecha : '', b ? b.texto : '', b ? Math.abs(b.importe) : ''],
-        'item', [nota(a), nota(b)]);
+      add([a ? a.fecha : '', a ? a.texto : '', a ? a.valor : '', '', b ? b.fecha : '', b ? b.texto : '', b ? b.valor : ''],
+        'item', [nota(a && a.p), nota(b && b.p)]);
     }
-    add(['', iz.length + ' partidas', res.tot[si], '', '', de.length + ' partidas', res.tot[sd]], 'total');
+    add(['', res.pend[si].length + ' partidas', res.tot[si], '', '', res.pend[sd].length + ' partidas', res.tot[sd]], 'total');
     add([]);
   });
   add(['Saldo Contabilidad AJUSTADO al', res.corte, res.ajustado], 'saldo');
@@ -478,7 +482,7 @@ function escribirCuatroPuntas_(ss, res) {
   const { filas, estilos, notas } = armarCuatroPuntas_(res);
   sh.getRange(1, 1, filas.length, 7).setValues(filas);
   sh.getRange(1, 1, filas.length, 7).setFontFamily('Arial').setFontSize(10);
-  [3, 7].forEach(c => sh.getRange(1, c, filas.length, 1).setNumberFormat(NUM_FMT));
+  [3, 7].forEach(c => sh.getRange(1, c, filas.length, 1).setNumberFormat('#,##0.00;(#,##0.00)'));
   [1, 5].forEach(c => sh.getRange(4, c, filas.length - 3, 1).setNumberFormat('dd/mm/yyyy'));
   sh.getRange(1, 3).setNumberFormat('dd/mm/yyyy');
   estilos.forEach((e, i) => {
@@ -1174,11 +1178,14 @@ function partidasE_(asientosE, asientosO) {
     const neto = g.reduce((x, a) => x + a.debe - a.haber, 0);
     if (Math.abs(neto) <= TOLERANCIA) return;   // la liquidación se anula dentro de E
     const ult = g.reduce((m, a) => (a.fecha > m.fecha ? a : m), g[0]);
-    const nombre = k.startsWith('OP ') ? 'Operación ' + k.slice(3) : 'Liquidación tarjeta ' + k.slice(4);
-    const p = partidaFbs_({ fecha: ult.fecha, comentario: nombre + ' (neto cuenta E, ' + g.length + ' líneas)',
+    // el concepto es el de las líneas originales (no se inventa un texto); el detalle queda en p.lineas
+    const textos = Array.from(new Set(g.map(a => String(a.comentario).trim())));
+    const p = partidaFbs_({ fecha: ult.fecha, comentario: textos.join(' + '),
       referencia: '', asiento: Array.from(new Set(g.map(a => a.asiento))).join(' / '),
       debe: Math.max(neto, 0), haber: Math.max(-neto, 0) }, 'Mes');
     p.cuenta = 'E';
+    p.liq = k;
+    if (g.length > 1) p.lineas = g.map(a => ({ fecha: a.fecha, texto: String(a.comentario).trim(), importe: redondear_(a.debe - a.haber), asiento: a.asiento }));
     if (k.startsWith('OP ')) p.fechaRef = fechaEnTexto_(k.slice(3), ult.fecha);   // el número suele ser la fecha
     sueltas.push(p);
   });
@@ -1459,7 +1466,7 @@ function marcarDuplicados_(fbs) {
  *  $1 de diferencia por redondeos; la diferencia queda como partida a ajustar para no esconderla en el control. */
 function liquidacionesTarjeta_(banco, fbs) {
   const ajustes = [];
-  fbs.filter(f => f.match === null && /^Liquidación tarjeta/.test(f.texto)).forEach(f => {
+  fbs.filter(f => f.match === null && f.liq && f.liq.startsWith('LIQ ')).forEach(f => {
     let mejor = null;
     banco.forEach(b => {
       if (b.match !== null || b.origen !== 'Mes' || b.cat !== 'COBRANZA TARJETAS' || (b.importe > 0) !== (f.importe > 0) ||
@@ -1489,7 +1496,7 @@ function liquidacionesTarjeta_(banco, fbs) {
     const nombre = 'Liquidación de tarjeta' + (mejor.grupo ? ' (' + mejor.grupo.length + ' acreditaciones del día)' : '');
     unir_(mejor.grupo || [mejor], [f], nombre + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
     if (Math.abs(dif) > 0.005) {
-      const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.split(' (')[0].toLowerCase() + ' - ajustar',
+      const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo liquidación tarjeta ' + f.liq.slice(4) + ' - ajustar',
         referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
       a.cuenta = 'E';
       ajustes.push(a);
@@ -1646,6 +1653,34 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
  * Mismos criterios que el cruce con E (CUIT, referencia, nombre, fecha del valor, importe específico en la fecha),
  * y órdenes de pago con varias líneas (mismo RM) contra un solo débito del banco.
  */
+/**
+ * Pendientes de FBS de signo contrario (S3 contra S4), mismo importe y comentario que coincide (misma palabra o número
+ * de comprobante): se anulan entre sí y no quedan pendientes. Ej. "Rv Degra pase a Chexa" en el debe de O y en el haber
+ * de E; "Canje de Valor - BANCO MACRO-liq. naranja fix" contra "13072026-liq. naranja fix 13/7".
+ */
+function netearPendientesFbs_(items) {
+  const genericas = new Set(['CANJE', 'VALOR', 'VALORES', 'LIQ', 'CONFIRMACI', 'AGRUPADOS', 'PASE', 'DIFERENCIA', 'AJUSTAR']);
+  const claves = p => {
+    const t = [p.texto].concat((p.lineas || []).map(l => l.texto)).join(' ');
+    const out = new Set();
+    tokens_(t).forEach(x => { if (!genericas.has(x)) out.add(x); });
+    (t.match(/\d{5,}/g) || []).forEach(n => out.add(n));
+    return out;
+  };
+  const libres = items.filter(p => !/^Diferencia (de redondeo|asiento gastos)/.test(p.texto))
+    .map(p => ({ p, k: claves(p) }))
+    .sort((a, b) => Math.abs(b.p.importe) - Math.abs(a.p.importe));
+  libres.forEach(a => {
+    if (a.p.match !== null || a.p.importe <= 0) return;
+    const cands = libres.filter(b => b.p.match === null && b.p.importe < 0 && Math.abs(a.p.importe + b.p.importe) <= TOLERANCIA &&
+      (a.p.texto === b.p.texto || comparten_(a.k, b.k)));
+    if (!cands.length) return;
+    const cerca = b => (String(a.p.asiento) === String(b.p.asiento) ? -1 : dias_(a.p.fecha, b.p.fecha));
+    const b = cands.sort((x, y) => cerca(x) - cerca(y))[0];
+    compensar_([a.p, b.p], 'Neteo S3 ↔ S4: mismo importe y comentario');
+  });
+}
+
 function limpiezaO_(banco, oPend) {
   const b = banco.filter(x => x.match === null), o = oPend.filter(x => x.match === null && !x.desfasado);
   pasada_(b, o, MISMO_ID_, 'Limpieza O sin confirmar ↔ banco: CUIT/DNI', VENTANA_ID, false);
@@ -1800,6 +1835,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   const difGastos = conciliar_(banco, fbs);
   limpiezaO_(banco, ao.pendientes);
+  netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
@@ -1833,8 +1869,11 @@ function conciliarTodo_(entrada, redondoUnico) {
 
   const conciliados = [];
   CRUCES_.forEach(c => {
-    for (let i = 0; i < Math.max(c.banco.length, c.fbs.length, 1); i++) {
-      const x = c.banco[i], y = c.fbs[i];
+    // las partidas agrupadas se muestran con sus líneas originales
+    const lineasFbs = [].concat.apply([], c.fbs.map(f => (f.lineas && f.lineas.length > 1
+      ? f.lineas.slice().sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).map(l => Object.assign({}, f, l)) : [f])));
+    for (let i = 0; i < Math.max(c.banco.length, lineasFbs.length, 1); i++) {
+      const x = c.banco[i], y = lineasFbs[i];
       conciliados.push([c.metodo, x ? x.fecha : '', x ? x.texto : '', x ? x.importe : '', x ? x.origen : '',
         y ? y.fecha : '', y ? y.texto : '', y ? y.importe : '', y ? y.asiento : '', y ? (y.origen === 'Arrastre' ? 'Pendiente anterior' : 'Cuenta ' + (y.cuenta || 'E')) : '']);
     }
