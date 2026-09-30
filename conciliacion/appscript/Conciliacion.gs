@@ -1137,10 +1137,14 @@ function pasesSinOrigen_(ao, asientosE) {
  * juntan en un solo neto, que es lo que acredita el banco.
  */
 function partidasE_(asientosE, asientosO) {
-  const liqPorAsiento = new Map(), numeros = new Set();
+  const liqPorAsiento = new Map(), numeros = new Set(), fechaLiq = new Map();
   asientosO.forEach(a => {
     const k = claveO_(a.comentario);
-    if (k.startsWith('LIQ ')) { liqPorAsiento.set(String(a.asiento), k); numeros.add(k.slice(4)); }
+    if (k.startsWith('LIQ ')) {
+      liqPorAsiento.set(String(a.asiento), k); numeros.add(k.slice(4));
+      // fecha de la liquidación escrita en el comentario ("12658-liq.- MC. 07/7"): es el día en que acredita el banco
+      if (!fechaLiq.has(k)) { const f = fechaEnTexto_(String(a.comentario).replace(/^\d+/, ''), a.fecha); if (f) fechaLiq.set(k, f); }
+    }
   });
   const liqDe = a => {
     if (liqPorAsiento.has(String(a.asiento))) return liqPorAsiento.get(String(a.asiento));
@@ -1185,6 +1189,7 @@ function partidasE_(asientosE, asientosO) {
       debe: Math.max(neto, 0), haber: Math.max(-neto, 0) }, 'Mes');
     p.cuenta = 'E';
     p.liq = k;
+    if (fechaLiq.has(k)) p.fechaLiq = fechaLiq.get(k);
     if (g.length > 1) p.lineas = g.map(a => ({ fecha: a.fecha, texto: String(a.comentario).trim(), importe: redondear_(a.debe - a.haber), asiento: a.asiento }));
     if (k.startsWith('OP ')) p.fechaRef = fechaEnTexto_(k.slice(3), ult.fecha);   // el número suele ser la fecha
     sueltas.push(p);
@@ -1467,22 +1472,26 @@ function marcarDuplicados_(fbs) {
 function liquidacionesTarjeta_(banco, fbs) {
   const ajustes = [];
   fbs.filter(f => f.match === null && f.liq && f.liq.startsWith('LIQ ')).forEach(f => {
+    // el banco acredita la liquidación el día escrito en su comentario: si está, tiene que ser ese día sí o sí
+    // movimiento de tarjeta: por categoría o por concepto (ej. Naranja cobrada por Datanet)
+    const esTarjeta = b => /TARJETA/.test(b.cat) || /TARJETA|PAYWAY|PRISMA|CABAL|NARANJA/i.test(b.texto);
+    const diaOk = b => (f.fechaLiq ? dias_(b.fecha, f.fechaLiq) === 0 : dias_(b.fecha, f.fecha) <= 10);
     let mejor = null;
     banco.forEach(b => {
-      if (b.match !== null || b.origen !== 'Mes' || b.cat !== 'COBRANZA TARJETAS' || (b.importe > 0) !== (f.importe > 0) ||
-        Math.abs(b.importe - f.importe) > 1 || dias_(b.fecha, f.fecha) > 10) return;
+      if (b.match !== null || b.origen !== 'Mes' || !esTarjeta(b) || (b.importe > 0) !== (f.importe > 0) ||
+        Math.abs(b.importe - f.importe) > 1 || !diaOk(b)) return;
       if (!mejor || dias_(b.fecha, f.fecha) < dias_(mejor.fecha, f.fecha)) mejor = b;
     });
     if (!mejor) {
-      // la liquidación se acredita en varios movimientos del mismo día, que pueden incluir débitos de la tarjeta
-      // (ej. liq 9341 = 4 PAYWAY del 27/07; liq 12658 = 3 créditos y 1 débito PAYWAY del 07/07)
+      // la liquidación se acredita en varios movimientos del mismo día y con el mismo concepto, que pueden incluir
+      // débitos de la tarjeta (ej. liq 9341 = 4 PAYWAY del 27/07; liq 12658 = 3 créditos y 1 débito PAYWAY del 07/07)
       const porDia = new Map();
       banco.forEach(b => {
-        if (b.match !== null || b.origen !== 'Mes' || !/TARJETA/.test(b.cat) || dias_(b.fecha, f.fecha) > 10) return;
-        const k = b.fecha.getTime();
+        if (b.match !== null || b.origen !== 'Mes' || !esTarjeta(b) || !diaOk(b)) return;
+        const k = b.fecha.getTime() + '|' + normalizar_(b.texto);
         porDia.set(k, (porDia.get(k) || []).concat([b]));
       });
-      const dias = Array.from(porDia.keys()).sort((x, y) => dias_(new Date(x), f.fecha) - dias_(new Date(y), f.fecha));
+      const dias = Array.from(porDia.keys()).sort((x, y) => dias_(porDia.get(x)[0].fecha, f.fecha) - dias_(porDia.get(y)[0].fecha, f.fecha));
       let combo = null;
       for (const k of dias) {
         const cands = porDia.get(k).slice(0, 15);
@@ -1523,6 +1532,8 @@ function gastosAsiento_(banco, fbs) {
 }
 
 function conciliar_(banco, fbs) {
+  // las liquidaciones de tarjeta van primero y solo contra movimientos de tarjeta del día de la liquidación
+  const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
@@ -1541,7 +1552,6 @@ function conciliar_(banco, fbs) {
   if (CRUZAR_REDONDO_UNICO_DIA >= 3) ventanaUnica_(banco, fbs, 3);
   lotes_(banco, fbs);
   asientosNetos_(banco, fbs);
-  const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
   reversionesFbs_(fbs);
   if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
   ajustesTarjeta.forEach(a => fbs.push(a));
