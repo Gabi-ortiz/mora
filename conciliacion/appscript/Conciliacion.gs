@@ -38,6 +38,7 @@ const HOJA = {
   mayorE: 'Mayor E',
   mayorO: 'Mayor O',
   anteriores: 'Pendientes anteriores',
+  anterioresAlt: ['Pend mes anterior'],
   reglas: 'Reglas',
   empresas: 'Empresas grupo',
   tablero: 'Tablero',
@@ -194,6 +195,25 @@ function crearParametros_(ss) {
   sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 700);
 }
 
+/** Primera hoja existente con datos entre varios nombres posibles (o la primera que exista). */
+function hojaDe_(ss, nombres) {
+  const existentes = nombres.map(n => ss.getSheetByName(n)).filter(Boolean);
+  return existentes.find(sh => sh.getLastRow() > 1) || existentes[0] || null;
+}
+const nombresExtracto_ = () => [HOJA.extracto].concat(HOJA.extractoAlt);
+const nombresAnteriores_ = () => HOJA.anterioresAlt.concat([HOJA.anteriores]);
+
+/** Borra hojas de entrada vacías que quedaron de la versión con mayores (si se trabaja con la hoja Base). */
+function limpiarHojasSobrantes_(ss) {
+  const vacia = n => { const sh = ss.getSheetByName(n); return sh && sh.getLastRow() <= 1 ? sh : null; };
+  const conDatos = n => { const sh = ss.getSheetByName(n); return sh && sh.getLastRow() > 1; };
+  const borrar = [];
+  if (conDatos(HOJA.base)) borrar.push(vacia(HOJA.mayorE), vacia(HOJA.mayorO));
+  if (HOJA.extractoAlt.some(conDatos)) borrar.push(vacia(HOJA.extracto));
+  if (HOJA.anterioresAlt.some(n => ss.getSheetByName(n))) borrar.push(vacia(HOJA.anteriores));
+  borrar.filter(Boolean).forEach(sh => ss.deleteSheet(sh));
+}
+
 function crearHojasEntrada() {
   const ss = SpreadsheetApp.getActive();
   const crear = (nombre, filas) => {
@@ -207,14 +227,19 @@ function crearHojasEntrada() {
     }
     return sh;
   };
-  crear(HOJA.extracto, [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
-  crear(HOJA.mayorE, [['Pegar acá la exportación del mayor de FBS de la cuenta E desde A1']]);
-  crear(HOJA.mayorO, [['Pegar acá la exportación del mayor de FBS de la cuenta O desde A1']]);
-  crear(HOJA.anteriores, [['Sector', 'Fecha', 'Concepto', 'Importe']]);
+  // solo crea lo que falta: si ya hay hoja "Base" no hacen falta los mayores; se respetan "E. bancario" y "Pend mes anterior"
+  if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extracto, [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
+  if (!ss.getSheetByName(HOJA.base)) {
+    crear(HOJA.mayorE, [['Pegar acá la exportación del mayor de FBS de la cuenta E desde A1 (o usar la hoja "Base")']]);
+    crear(HOJA.mayorO, [['Pegar acá la exportación del mayor de FBS de la cuenta O desde A1 (o usar la hoja "Base")']]);
+  }
+  if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anteriores, [['Sector', 'Fecha', 'Concepto', 'Importe']]);
+  limpiarHojasSobrantes_(ss);
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
   crearParametros_(ss);
-  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Pegá el extracto y los mayores E y O, y corré "2. Procesar conciliación".');
+  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Completá el extracto, la base (o los mayores E y O), los pendientes anteriores ' +
+    'y los saldos iniciales en "' + HOJA.parametros + '", y corré "2. Procesar conciliación".');
 }
 
 // ------------------------------------------------------------------ proceso principal (capa de hojas)
@@ -236,15 +261,16 @@ function procesar_(ss) {
     if (!sh) throw new Error('Falta la hoja "' + nombre + '". Corré "1. Crear hojas de entrada".');
     return sh.getDataRange().getValues();
   };
-  const hojaExtracto = [HOJA.extracto].concat(HOJA.extractoAlt).find(n => ss.getSheetByName(n) &&
-    ss.getSheetByName(n).getLastRow() > 1) || HOJA.extracto;
+  limpiarHojasSobrantes_(ss);
+  const hojaExtracto = (hojaDe_(ss, nombresExtracto_()) || { getName: () => HOJA.extracto }).getName();
+  const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
   const conBase = !!ss.getSheetByName(HOJA.base);
   const res = conciliarTodo_({
     extracto: leer(hojaExtracto),
     base: conBase ? leer(HOJA.base) : null,
     mayorE: conBase ? null : leer(HOJA.mayorE),
     mayorO: conBase ? null : leer(HOJA.mayorO),
-    anteriores: leer([HOJA.anteriores, 'Pend mes anterior'].find(n => ss.getSheetByName(n)) || HOJA.anteriores),
+    anteriores: leer(hojaAnteriores),
     reglas: leer(HOJA.reglas),
     empresas: leer(HOJA.empresas),
     parametros: ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null,
@@ -318,7 +344,7 @@ function cerrarMes() {
     });
   }
   if (ui.alert('Mes cerrado', 'Foto guardada en la carpeta "' + carpeta.getName() + '" y registrada en "Historial".\n' + n +
-      ' partidas pasadas a "' + HOJA.anteriores + '".\n\n¿Vaciar las hojas Extracto, Mayor E y Mayor O para cargar el mes siguiente?',
+      ' partidas pasadas a los pendientes anteriores.\n\n¿Vaciar las hojas del extracto y de la base (o Mayor E / Mayor O) para cargar el mes siguiente?',
       ui.ButtonSet.YES_NO) === ui.Button.YES) {
     [HOJA.extracto, HOJA.mayorE, HOJA.mayorO, HOJA.base].concat(HOJA.extractoAlt)
       .forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
@@ -390,7 +416,7 @@ function pasarPendientes_(ss) {
     const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe') };
     v.slice(2).forEach(r => { if (r[c.s]) filas.push([r[c.s], r[c.f], r[c.t], r[c.i]]); });
   });
-  const sh = ss.getSheetByName(HOJA.anteriores) || ss.insertSheet(HOJA.anteriores);
+  const sh = hojaDe_(ss, nombresAnteriores_()) || ss.insertSheet(HOJA.anteriores);
   sh.clear();
   sh.getRange(1, 1, filas.length, 4).setValues(filas);
   sh.getRange(1, 1, 1, 4).setFontWeight('bold');
