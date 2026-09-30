@@ -42,6 +42,7 @@ const HOJA = {
   reglas: 'Reglas',
   empresas: 'Empresas grupo',
   tablero: 'Tablero',
+  cuatro: 'Conciliación',
   pendO: 'O sin confirmar',
   pendFbs: 'E sin cruzar',
   pendBanco: 'Banco sin registrar',
@@ -178,6 +179,7 @@ function crearParametros_(ss) {
     ['Cuenta O', 1103012],
     ['Saldo inicial cuenta E', ''],
     ['Saldo inicial cuenta O', ''],
+    ['Cuenta bancaria', 'Banco Macro'],
     ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
     ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
     ['Saldos iniciales', 'Con la hoja "Base": saldo final de E y de O de la conciliación anterior. Al cerrar el mes se completan solos.'],
@@ -277,6 +279,7 @@ function procesar_(ss) {
     parametros: ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null,
   });
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
+  escribirCuatroPuntas_(ss, res);
   escribirTablero_(ss, res);
   escribirRevisar_(ss, res);
   escribirAnalisisO_(ss, res);
@@ -288,8 +291,8 @@ function procesar_(ss) {
   escribirPendientes_(ss, HOJA.pendBanco, res, res.listas.B,
     'Movimientos del extracto (y pendientes anteriores del banco) que no están en la cuenta E.');
   // orden de las pestañas: primero lo que se lee
-  [HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
-  ss.getSheetByName(HOJA.tablero).activate();
+  [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
+  ss.getSheetByName(HOJA.cuatro).activate();
   SpreadsheetApp.flush();
   return res;
 }
@@ -432,9 +435,68 @@ function pasarPendientes_(ss) {
 
 function hojaLimpia_(ss, nombre) {
   let sh = ss.getSheetByName(nombre);
-  if (sh) { sh.clear(); sh.clearConditionalFormatRules(); if (sh.getFilter()) sh.getFilter().remove(); }
+  if (sh) { sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart().clearNote(); sh.clear(); sh.clearConditionalFormatRules(); if (sh.getFilter()) sh.getFilter().remove(); }
   else sh = ss.insertSheet(nombre);
   return sh;
+}
+
+/**
+ * Conciliación con el formato de "4 puntas" que usa administración: saldo contable arriba, los cuatro cuadros
+ * (izquierda depósitos, derecha cheques / débitos; arriba no registrados en contabilidad, abajo no pasados por el
+ * banco) y abajo el saldo ajustado contra el extracto. Columnas: Fecha | Concepto | Importe | (separador) | Fecha | Concepto | Importe.
+ * Devuelve { filas, estilos, notas } con estilos 'titulo' | 'cuadro' | 'cab' | 'item' | 'total' | 'saldo' | 'dif' | ''.
+ */
+function armarCuatroPuntas_(res) {
+  const filas = [], estilos = [], notas = [];
+  const add = (f, e, n) => { while (f.length < 7) f.push(''); filas.push(f); estilos.push(e || ''); notas.push(n || ['', '']); };
+  const orden = l => l.slice().sort((a, b) => a.fecha - b.fecha || Math.abs(b.importe) - Math.abs(a.importe));
+  const nota = p => (p ? observacion_(p) + (p.cruces ? '\n' + p.cruces : '') : '');
+  add(['Saldo Contabilidad al', '', res.corte, '', '', 'E', res.saldoE], 'titulo');
+  add(['', res.cuentaBanco || 'Banco Macro', res.saldoE + res.saldoO, '', '', 'O', res.saldoO], 'titulo');
+  add([]);
+  [['S1', 'Depósitos No Registrados en Contabilidad', 'S2', 'Cheques No Registrados en Contabilidad'],
+    ['S3', 'Depósitos No Acreditados en BANCO', 'S4', 'Cheques No Debitados en BANCO']].forEach(([si, ni, sd, nd]) => {
+    const iz = orden(res.pend[si]), de = orden(res.pend[sd]);
+    add([ni, '', '', '', nd, '', ''], 'cuadro');
+    add(['Fecha', 'Concepto', 'Importe', '', 'Fecha', 'Concepto', 'Importe'], 'cab');
+    for (let i = 0; i < Math.max(iz.length, de.length); i++) {
+      const a = iz[i], b = de[i];
+      add([a ? a.fecha : '', a ? a.texto : '', a ? Math.abs(a.importe) : '', '', b ? b.fecha : '', b ? b.texto : '', b ? Math.abs(b.importe) : ''],
+        'item', [nota(a), nota(b)]);
+    }
+    add(['', iz.length + ' partidas', res.tot[si], '', '', de.length + ' partidas', res.tot[sd]], 'total');
+    add([]);
+  });
+  add(['Saldo Contabilidad AJUSTADO al', res.corte, res.ajustado], 'saldo');
+  add(['Saldo Extracto al', res.corte, res.saldoBanco], 'saldo');
+  add(['Diferencia', '', redondear_(res.ajustado - res.saldoBanco)], 'dif');
+  return { filas, estilos, notas };
+}
+
+function escribirCuatroPuntas_(ss, res) {
+  const sh = hojaLimpia_(ss, HOJA.cuatro);
+  const { filas, estilos, notas } = armarCuatroPuntas_(res);
+  sh.getRange(1, 1, filas.length, 7).setValues(filas);
+  sh.getRange(1, 1, filas.length, 7).setFontFamily('Arial').setFontSize(10);
+  [3, 7].forEach(c => sh.getRange(1, c, filas.length, 1).setNumberFormat(NUM_FMT));
+  [1, 5].forEach(c => sh.getRange(4, c, filas.length - 3, 1).setNumberFormat('dd/mm/yyyy'));
+  sh.getRange(1, 3).setNumberFormat('dd/mm/yyyy');
+  estilos.forEach((e, i) => {
+    const f = i + 1;
+    if (e === 'titulo') sh.getRange(f, 1, 1, 7).setFontWeight('bold');
+    if (e === 'cuadro') [1, 5].forEach(c => sh.getRange(f, c, 1, 3).merge().setFontWeight('bold').setHorizontalAlignment('center')
+      .setBorder(true, true, true, true, null, null, '#000000', SpreadsheetApp.BorderStyle.SOLID_MEDIUM));
+    if (e === 'cab') [1, 5].forEach(c => sh.getRange(f, c, 1, 3).setFontWeight('bold').setBackground('#D9E1F2'));
+    if (e === 'total') [3, 7].forEach(c => sh.getRange(f, c).setFontWeight('bold').setBorder(true, true, true, true, null, null));
+    if (e === 'saldo') { sh.getRange(f, 1, 1, 3).setFontWeight('bold'); sh.getRange(f, 2).setNumberFormat('dd/mm/yyyy').setBorder(true, true, true, true, null, null); }
+    if (e === 'dif') sh.getRange(f, 1, 1, 3).setFontWeight('bold').setBackground(Math.abs(filas[i][2]) < 1000 ? '#C6EFCE' : '#FFC7CE');
+  });
+  // el motivo y la pista de cada partida quedan como nota del concepto (pasar el mouse)
+  const n = notas.map(x => [x[0]]), m = notas.map(x => [x[1]]);
+  sh.getRange(1, 2, filas.length, 1).setNotes(n);
+  sh.getRange(1, 6, filas.length, 1).setNotes(m);
+  [85, 380, 130, 30, 85, 380, 130].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.setFrozenRows(2);
 }
 
 function escribirTablero_(ss, res) {
@@ -1756,8 +1818,8 @@ function conciliarTodo_(entrada, redondoUnico) {
   });
   const listas = { O: ao.pendientes, E: fbs.filter(p => p.match === null), B: banco.filter(p => p.match === null) };
 
-  return { info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
+  return { cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
