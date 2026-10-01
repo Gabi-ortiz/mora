@@ -2,6 +2,7 @@
 
 > Otros trabajos de la misma administración de planes en este repo:
 > - `PEDIDOS_PDA.md` / `pedidos_pda.gs`: base acumulada de adjudicados de SGA.
+> - `SENALES.md` / `senales.gs`: lector y alerta de la carpeta de señales comerciales + resumen de la política comercial.
 
 ## Archivo de trabajo
 https://docs.google.com/spreadsheets/d/12pLWcN7GLbmD7rBbeEdg_3dXHMWrQL88AtsGj4fH5wM
