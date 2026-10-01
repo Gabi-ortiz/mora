@@ -147,6 +147,14 @@ incentivos.
   dejaba afuera los 2 FP3 aprobados porque el modelo no estaba en su tabla
   (correcto: 50).
 
+## VM netos del INFORME (corregido)
+La fórmula usaba SUMPRODUCT con un SUMIFS de criterio matriz (el modelo de
+cada fila de BASE). Google Sheets lo resolvía con un solo precio (el del
+modelo de la primera fila, NC1) para todos los netos: agosto daba
+$ 1.987.393.000 en vez de $ 1.965.767.000. Ahora recorre los precios del mes
+(FILTER de PRECIOS) y multiplica cada V.M por los netos de ese modelo
+(COUNTIFS), igual que la tabla por modelo del RESUMEN.
+
 ## Meses como texto (corregido)
 Sheets convierte "SEPTIEMBRE 26" en la fecha 26/09 si la celda no es texto,
 y entonces las fórmulas no encuentran el mes. Las columnas de mes (Acto, Mes

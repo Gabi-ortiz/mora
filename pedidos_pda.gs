@@ -659,8 +659,10 @@ function actualizarInforme() {
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$B,2,FALSE),"")`,
       `=IF(N(H${f})=0,"",G${f}/H${f})`,
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
-      `=ARRAYFORMULA(SUMPRODUCT((${r['Mes cierre']}=${A})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")*` +
-        `SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${A},PRECIOS!$B:$B,${r['Modelo ahorro']})))` +
+      // VM netos: por cada modelo con precio en el mes, V.M × netos de ese modelo (+ AJUSTES).
+      // (Un SUMIFS con criterio de matriz dentro de SUMPRODUCT usaba un solo precio para todo.)
+      `=IFERROR(LET(p,FILTER(PRECIOS!$B$2:$C,PRECIOS!$A$2:$A=${A}),SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
+        `LAMBDA(m,pr,pr*COUNTIFS(${r['Mes cierre']},${A},${r['Modelo ahorro']},m,${aprob}))))),0)` +
         `+SUMIFS(${HOJA_AJUSTES}!$D:$D,${HOJA_AJUSTES}!$A:$A,${A})`,
     ];
   });
