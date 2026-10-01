@@ -1,0 +1,100 @@
+# Pedidos PDA — base acumulada de adjudicados (SGA)
+
+## Archivo de trabajo
+https://docs.google.com/spreadsheets/d/1dsvnNpKUmoKDSaZcEv4UsofHWbWK_m0SwKKvr7dkxGM ("Pedidos - PDA")
+
+Reemplaza el esquema de un archivo por mes ("AGOSTO 26", "SEPTIEMBRE 26",
+...) por un solo archivo acumulado, para poder hacer informes en el tiempo.
+Es parte del mismo proyecto que el tablero de mora (misma administración de
+planes); el objetivo final es un dashboard con toda la información e
+incentivos.
+
+## Cómo trabajaban hasta ahora (archivo mensual)
+- Bajan de SGA el reporte "Cartera de clientes - Adjudicados" **por acto de
+  adjudicación** (filtro tipo "Adjudicados; 15/09/2026"). Es un .XLS que en
+  realidad es HTML: 7 filas de encabezado (título, fecha, usuario, filtros),
+  títulos en la fila 8, 37 columnas, y una fila final "Cantidad de
+  registros listados".
+- Borran 21 columnas, ocultan 9, renombran 2 (`Av.` → Avance,
+  `Mod. Ganador` → Modalidad), reordenan y agregan 7 columnas de trabajo
+  (Mes, Responsable, Llave x llave, Pedido, Carpeta, Observacion,
+  RESPONSABLE).
+- **"Mes" = mes de cierre** (confirmado): el mes en que la operación sale
+  aprobada y cuenta como neto. Un adjudicado de agosto puede cerrar en
+  septiembre (en AGOSTO 26 hay 8 así), y por eso el RESUMEN de septiembre
+  tenía que leer el archivo de agosto con IMPORTRANGE.
+- Los objetivos cambian mes a mes (llegan por circular).
+- Problemas vistos: nombres inconsistentes entre meses (CLARI/CLARISA,
+  SERGY/SERGIO), ajustes "+1" a mano dentro de fórmulas, fórmulas que
+  apuntan a columnas corridas, precios V.M copiados a mano en cada mes.
+
+## Hojas del archivo nuevo
+- **BASE**: una fila por adjudicación, todos los actos. Clave = Acto +
+  Solicitud (las solicitudes casi no se repiten entre actos; si una se
+  re-adjudica en otro acto, es otra fila). Mismas columnas y orden que la
+  hoja mensual, con estos cambios:
+  - `Acto` (nueva, columna A): mes del acto de adjudicación, formato
+    `SEPTIEMBRE 26`.
+  - `Mes` → `Mes cierre`, mismo formato `MES AA`. Se completa solo con el
+    mes actual al marcar Pedido = APROBADO y Carpeta = APROBADA (si está
+    vacío; se puede corregir a mano).
+  - Desplegables estrictos en Acto, Mes cierre, Responsable, Pedido,
+    Carpeta, Modalidad y Llave x llave. RESPONSABLE (vendedor) tiene
+    desplegable pero acepta nombres nuevos con aviso.
+  - Columnas extra ocultas al final con datos de SGA que antes se borraban
+    (Vendedor SGA, Monto licitado, Mail, Dirección), pensando en el
+    dashboard / incentivos.
+  - Pedido con colores (aprobado verde, pendiente amarillo, suspendido
+    naranja, baja rojo) y filtro activado.
+- **PEGAR SGA**: se pega el reporte tal cual se baja. El script detecta la
+  fila de títulos y el acto (de la fila de filtros), mapea las columnas por
+  nombre, no duplica lo ya cargado y limpia la hoja al terminar.
+- **RESUMEN**: el tablero del mes, eligiendo el mes en B1. Tres bloques
+  (adjudicados del acto, estado del acto, cierres del mes) + tabla por
+  modelo. Los "netos del mes" cuentan cierres de **cualquier** acto, y se
+  separan en "del acto del mes" y "de actos anteriores" (lo que antes se
+  traía con IMPORTRANGE).
+- **INFORME**: una fila por mes (desde el primer acto) con adjudicados,
+  bajas, % bajas, aprobados del acto, % conversión, sin cerrar, netos del
+  mes (del acto / arrastre), objetivo, % cumplimiento y VM netos. Abajo, por
+  responsable (todos los actos).
+- **PRECIOS**: Mes | Modelo | V.M. Se carga una vez por mes. Sembrado con los
+  precios de agosto y septiembre tomados de los RESUMEN mensuales (bloque
+  "Enviados"/"Netos", que es el que tenía los precios actualizados).
+- **OBJETIVOS**: Mes | Objetivo | Circular. Sembrado: agosto 57,
+  septiembre 60.
+- **LISTAS**: valores de los desplegables. Para agregar un responsable, un
+  estado o un vendedor, se agrega acá.
+
+## Instalación (una sola vez)
+1. Abrir "Pedidos - PDA" → Extensiones > Apps Script.
+2. Pegar el contenido de `pedidos_pda.gs` en `Code.gs` y guardar.
+3. Recargar la planilla: aparece el menú **Pedidos**.
+4. Pedidos > **Armar / reparar estructura** (pide permisos la primera vez).
+5. Pedidos > **Importar meses anteriores (una sola vez)**: copia AGOSTO 26 y
+   SEPTIEMBRE 26 a BASE (normaliza CLARI/SERGY, convierte "SEPTIEMBRE" en
+   "SEPTIEMBRE 26", etc.). Se puede correr de nuevo sin duplicar.
+
+## Uso mensual
+1. Bajar el reporte de SGA del acto (como siempre).
+2. Abrirlo en Excel, Ctrl+A, Ctrl+C, y pegar en **PEGAR SGA**, celda A1.
+3. Pedidos > **Agregar acto pegado a BASE** → confirma el acto detectado.
+4. Cargar en PRECIOS los V.M del mes y en OBJETIVOS el objetivo de la
+   circular.
+5. Trabajar en BASE filtrando por Acto (y los pendientes de actos anteriores
+   siguen en la misma hoja).
+
+## Validado contra los datos reales (simulación del script)
+- Import de AGOSTO 26 (111) + SEPTIEMBRE 26 (117) = 228 filas; reimportar no
+  duplica; pegar el reporte de SGA del 15/09/2026 detecta "SEPTIEMBRE 26" y
+  sus 114 solicitudes ya estaban cargadas.
+- Septiembre: 117 adjudicados, 71 por licitación, 25 bajas, 51 aprobados del
+  acto; netos del mes = 59 (51 del acto + 8 arrastrados de agosto).
+
+## Pendiente / decisiones
+- "RESPONSABLE" (vendedor) y "Responsable" (CLARISA/SERGIO/TP/CHEXA) se
+  mantienen con el nombre de siempre; evaluar renombrar el primero a
+  "Vendedor" para evitar confusión.
+- VM netos = netos del mes × V.M del mes de cierre (el RESUMEN viejo tenía
+  además un bloque VM × (aprobados + suspendidos con CC aprobada) con
+  precios desactualizados; no se replicó).
