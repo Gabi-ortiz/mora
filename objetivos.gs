@@ -73,6 +73,7 @@ function onOpen() {
     .addSeparator()
     .addItem('Revisar carpeta de señales ahora', 'revisarCarpeta')
     .addItem('Leer contenido de señales ya registradas', 'leerSenalesRegistradas')
+    .addItem('Rehacer extractos de señales', 'rehacerExtractos')
     .addItem('Instalar revisión automática de señales (cada hora)', 'instalarTriggerSenales')
     .addToUi();
 }

@@ -264,11 +264,102 @@ function textoDeArchivo(archivo) {
   }
 }
 
-/** Primeras oraciones que mencionan algún tema, para tener una idea sin abrir el PDF. */
+/**
+ * Resumen legible de una señal: los temas del "REF:" (1- Liquidación flujo,
+ * 2.a Bonus cumplimiento...) en una lista corta + el primer dato con % o $.
+ * Limpia lo que ensucia el OCR: encabezados con letras separadas
+ * ("T O D O S L O S ..."), mails, "®" y el texto de cortesía.
+ */
 function extracto(texto) {
-  const oraciones = texto.replace(/\s+/g, ' ').split(/(?<=[.:])\s+/);
-  const utiles = oraciones.filter((o) => TEMAS.some((x) => x.re.test(o.toUpperCase())) && o.length > 25);
-  return (utiles.length ? utiles : oraciones).join(' ').slice(0, 500);
+  const t = limpiarTexto(texto);
+  const corte = /\b(Nos dirigimos|Informamos|Por la presente|Se informa|Estimad[oa]s?|Buenos Aires|Les recordamos|Les informamos)\b/i;
+
+  // Temas: después de "REF" si existe; si no, desde el principio.
+  const iRef = t.search(/\bREF\b\s*[:.]?/i);
+  let cabecera = iRef >= 0 ? t.slice(iRef).replace(/^REF\s*[:.]?\s*/i, '') : t;
+  const iCorte = cabecera.search(corte);
+  cabecera = cabecera.slice(0, iCorte > 0 ? iCorte : 300).slice(0, 300);
+  const vistos = new Set();
+  const temas = cabecera
+    .split(/\s(?=\d{1,2}(?:\.?[a-zA-Z])?\s*[-–.)]?\s+[A-ZÁÉÍÓÚÑ][A-Za-zÁÉÍÓÚÑáéíóúñ]{2})/)
+    .map((x) => x.replace(/^\d{1,2}(?:\.?[a-zA-Z])?\s*[-–.)]?\s*/, '').replace(/[\s\-–.:,]+$/, '').trim())
+    .filter((x) => x.length > 4)
+    .filter((x) => {
+      // Clave por las primeras letras: "Actualización extra bonus pedido(s)..." cuenta como el mismo tema.
+      const k = x.toUpperCase().normalize('NFD').replace(/[^A-Z0-9]/g, '').slice(0, 20);
+      if (vistos.has(k)) return false;
+      vistos.add(k);
+      return true;
+    })
+    .slice(0, 6)
+    .map((x) => enOracion(x.length > 90 ? `${x.slice(0, 88).replace(/\s\S*$/, '')}…` : x));
+
+  // Dato clave: primera oración del cuerpo con un % o un $.
+  const iCuerpo = t.search(corte);
+  const cuerpo = iCuerpo >= 0 ? t.slice(iCuerpo) : t;
+  let dato = (cuerpo.split(/(?<=[.;])\s+/).find((o) => /%|\$/.test(o) && o.length < 300) || '')
+    .replace(/^(Nos dirigimos a ustedes para informarles que|Por la presente le?s? informamos que|Se informa que|Les informamos que|Informamos)\s*/i, '')
+    .trim();
+  if (dato) dato = dato.charAt(0).toUpperCase() + dato.slice(1);
+  const k = (x) => x.toUpperCase().normalize('NFD').replace(/[^A-Z0-9]/g, '').slice(0, 30);
+  if (temas.some((x) => k(x) === k(dato))) dato = '';
+
+  let res = temas.length ? temas.map((x) => `• ${x}`).join('  ') : enOracion(cuerpo.slice(0, 200));
+  if (dato) res += `  |  Dato: ${enOracion(dato)}`;
+  return res.slice(0, 400);
+}
+
+function limpiarTexto(texto) {
+  return texto
+    .replace(/[®•▪●]/g, ' ')
+    .replace(/(?:\b\p{L}\s+){4,}\p{L}\b/gu, ' ')       // "T O D O S L O S ..." del OCR
+    .replace(/(?:\s(?:a|y))?\s\S+@\S+/g, ' ')            // mails (y el "a ... y a ..." que los rodea)
+    .replace(/\s+(?:y|a)\s*(?=,)/g, '')
+    .replace(/A todos los concesionarios de la red\s+\w+/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+// Siglas que quedan en mayúscula al pasar un texto a "oración".
+const SIGLAS = ['ABC', 'NPS', 'REU', 'TP', 'RAM', 'JEEP', 'FIAT', 'IVA', 'CC', 'CE', 'SGA', 'CTA', 'JUL', 'SEPT', 'AGO', 'OCT', 'DIC'];
+
+/** "BONUS CUMPLIMIENTO PEDIDOS TOTALES" -> "Bonus cumplimiento pedidos totales" (solo si viene todo en mayúsculas). */
+function enOracion(x) {
+  const letras = x.replace(/[^A-Za-zÁÉÍÓÚÑáéíóúñ]/g, '');
+  if (!letras || letras !== letras.toUpperCase()) return x;
+  const lower = x.toLowerCase().replace(/\S+/g, (w) => {
+    const W = w.toUpperCase();
+    const limpio = W.replace(/[^A-ZÁÉÍÓÚÑ0-9]/g, '');
+    return SIGLAS.indexOf(limpio) >= 0 || /\d/.test(w) ? W : w;
+  });
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
+
+/**
+ * Vuelve a leer las señales (no las cartas) para rehacer Afecta y Extracto con
+ * el formato actual. Lee de a MAX_LECTURAS_POR_CORRIDA: repetir hasta terminar.
+ */
+function rehacerExtractos() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = hojaSenales(ss);
+  const col = columnasSenales(sh);
+  const props = PropertiesService.getDocumentProperties();
+  if (!props.getProperty('REHACER_EXTRACTOS')) {
+    const ultima = sh.getLastRow();
+    if (ultima > 1) {
+      const tipos = sh.getRange(2, col.Tipo, ultima - 1, 1).getValues();
+      tipos.forEach((f, i) => {
+        if (f[0] !== 'Carta de objetivos') sh.getRange(i + 2, col.Afecta).setValue('');
+      });
+    }
+    props.setProperty('REHACER_EXTRACTOS', 'en curso');
+  }
+  leerPendientes(ss, sh, col);
+  const quedan = filasSinLeer(sh, col).length;
+  if (!quedan) props.deleteProperty('REHACER_EXTRACTOS');
+  SpreadsheetApp.getUi().alert(quedan
+    ? `Quedan ${quedan} por rehacer: volvé a correrlo.`
+    : 'Listo: extractos rehechos.');
 }
 
 /**

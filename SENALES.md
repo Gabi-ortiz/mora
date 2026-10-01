@@ -36,8 +36,12 @@ opcionales y listas de cambio de modelo no se leen.
   en Notas. Indicadores nuevos se agregan solos a LISTAS_OBJ. La carta queda
   en Estado = "Cargada" y el mail muestra lo cargado para controlarlo.
 - **Señal comercial**: columna **Afecta** (Objetivos, Incentivos, Categoría,
-  Flujo, Mora / permanencia, Pedidos) y columna **Extracto** con las
-  oraciones relevantes. Los % de incentivo se cargan a mano en INCENTIVOS
+  Flujo, Mora / permanencia, Pedidos) y columna **Extracto** con los temas
+  del "REF:" en lista corta (• Liquidación de flujo septiembre 2026 • Bonus
+  cumplimiento pedidos totales ...) + el primer dato con % o $. Se limpia
+  el ruido del OCR (encabezados "T O D O S L O S ...", mails, texto de
+  cortesía). "Rehacer extractos de señales" vuelve a leer las señales (no
+  las cartas) con este formato. Los % de incentivo se cargan a mano en INCENTIVOS
   (cada señal tiene otro formato y un número mal leído afecta la
   liquidación).
 - Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
