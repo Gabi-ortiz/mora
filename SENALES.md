@@ -24,7 +24,30 @@ junto con `objetivos.gs`, que es el que arma el menú:
   cada vez que aparece algo (la primera corrida manda un único mail con todo
   lo registrado).
 
-Instalación: ver OBJETIVOS.md. Desde el menú **Objetivos**: "Revisar
+### Lectura del contenido (versión 2)
+Además del nombre, el script **lee el archivo** (PDF e imágenes con OCR de
+Google Drive; PowerPoint convirtiéndolo a Slides). Las tablas de cuotas,
+opcionales y listas de cambio de modelo no se leen.
+- **Carta de objetivos** (se reconoce por el texto "CARTA DE OBJETIVOS",
+  aunque el archivo se llame "TURIN S.A_3.pdf"): carga sola en OBJETIVOS mes,
+  concesionario, marca, categoría, cada indicador con su número, Nº y fecha
+  de carta, fecha y % de flujo (en la fila de SUSCRIPCIONES). Si el mes ya
+  estaba cargado y un número cambió, lo actualiza y anota el valor anterior
+  en Notas. Indicadores nuevos se agregan solos a LISTAS_OBJ. La carta queda
+  en Estado = "Cargada" y el mail muestra lo cargado para controlarlo.
+- **Señal comercial**: columna **Afecta** (Objetivos, Incentivos, Categoría,
+  Flujo, Mora / permanencia, Pedidos) y columna **Extracto** con las
+  oraciones relevantes. Los % de incentivo se cargan a mano en INCENTIVOS
+  (cada señal tiene otro formato y un número mal leído afecta la
+  liquidación).
+- Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
+  los 33 ya registrados se van leyendo en las próximas corridas automáticas
+  o con "Leer contenido de señales ya registradas".
+- Probado contra el texto real de la Carta 09/2026 y contra un formato
+  "tipo OCR" (nombres y números en líneas separadas).
+
+Instalación: ver OBJETIVOS.md (requiere activar el servicio avanzado
+**Drive API**). Desde el menú **Objetivos**: "Revisar
 carpeta de señales ahora" (pide permisos de Drive y Gmail) e "Instalar
 revisión automática de señales (cada hora)".
 

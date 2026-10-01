@@ -13,6 +13,9 @@
  * - MES: vista de un mes elegido (objetivos, categoría vigente e incentivos).
  * - LISTAS_OBJ: valores de los desplegables.
  *
+ * Las cartas de objetivos que se suben a la carpeta de señales se cargan
+ * solas en OBJETIVOS (cargarCartaObjetivos, llamada desde senales.gs).
+ *
  * Instalación: ver OBJETIVOS.md.
  */
 
@@ -69,6 +72,7 @@ function onOpen() {
     .addItem('Armar / reparar estructura', 'armarObjetivos')
     .addSeparator()
     .addItem('Revisar carpeta de señales ahora', 'revisarCarpeta')
+    .addItem('Leer contenido de señales ya registradas', 'leerSenalesRegistradas')
     .addItem('Instalar revisión automática de señales (cada hora)', 'instalarTriggerSenales')
     .addToUi();
 }
@@ -184,4 +188,85 @@ function armarVistaMes(ss) {
 
   sh.setColumnWidth(1, 300);
   sh.setColumnWidth(2, 320);
+}
+
+// ---------------------------------------------------------------------------
+// Carga automática de cartas de objetivos (la llama senales.gs)
+// ---------------------------------------------------------------------------
+
+/**
+ * Vuelca una carta interpretada (ver interpretarCarta en senales.gs) en
+ * OBJETIVOS. Clave = Mes + Concesionario + Marca + Indicador: si la fila ya
+ * existe con el mismo objetivo solo completa lo que falte; si el objetivo
+ * cambió, lo actualiza y deja constancia en Notas. Devuelve un resumen.
+ */
+function cargarCartaObjetivos(ss, carta, link) {
+  armarListasObj(ss);
+  const sh = ss.getSheetByName(HOJA_OBJ) || tabla(ss, HOJA_OBJ, ENC_OBJ, []);
+  const c = (h) => ENC_OBJ.indexOf(h);
+  const conc = carta.concesionario || LISTAS_OBJ.Concesionario[0];
+  const ultima = sh.getLastRow();
+  const datos = ultima > 1 ? sh.getRange(2, 1, ultima - 1, ENC_OBJ.length).getValues() : [];
+  const conFlujo = carta.indicadores.some((x) => x.indicador === 'SUSCRIPCIONES')
+    ? 'SUSCRIPCIONES' : carta.indicadores[0].indicador;
+  const nCarta = carta.nCarta ? `'${carta.nCarta}` : '';
+
+  const nuevas = [];
+  const cambios = [];
+  const iguales = [];
+  carta.indicadores.forEach((x) => {
+    const flujo = x.indicador === conFlujo;
+    const fila = [carta.mes, conc, carta.marca, x.indicador, x.objetivo, carta.categoria, nCarta,
+      aFecha(carta.fechaCarta), flujo ? aFecha(carta.fechaFlujo) : '', flujo ? carta.pctFlujo : '',
+      link, `Cargado automáticamente de la carta ${carta.nCarta}`.trim()];
+    const i = datos.findIndex((d) => d[c('Mes')] === carta.mes && d[c('Concesionario')] === conc &&
+      (d[c('Marca')] === carta.marca || d[c('Marca')] === '') && d[c('Indicador')] === x.indicador);
+    if (i < 0) {
+      nuevas.push(fila);
+      return;
+    }
+    const actual = datos[i];
+    const antes = actual[c('Objetivo')];
+    const combinada = actual.map((v, j) => (v === '' || v === null ? fila[j] : v));
+    if (Number(antes) !== x.objetivo) {
+      combinada[c('Objetivo')] = x.objetivo;
+      combinada[c('Nº carta')] = nCarta || combinada[c('Nº carta')];
+      combinada[c('Link')] = link;
+      combinada[c('Notas')] = `Actualizado por carta ${carta.nCarta} (antes ${antes})`;
+      cambios.push(`${x.indicador} ${antes} → ${x.objetivo}`);
+    } else {
+      iguales.push(x.indicador);
+    }
+    sh.getRange(i + 2, 1, 1, ENC_OBJ.length).setValues([combinada]);
+  });
+  if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, ENC_OBJ.length).setValues(nuevas);
+
+  agregarAListaObj(ss, 'Indicador', carta.indicadores.map((x) => x.indicador));
+  agregarAListaObj(ss, 'Concesionario', [conc]);
+
+  const partes = [];
+  if (nuevas.length) partes.push(`${nuevas.length} objetivo(s) nuevo(s)`);
+  if (cambios.length) partes.push(`cambiaron: ${cambios.join(', ')}`);
+  if (iguales.length) partes.push(`sin cambios: ${iguales.join(', ')}`);
+  return `${carta.mes}: ${partes.join('; ')}`;
+}
+
+/** Agrega a una columna de LISTAS_OBJ los valores que todavía no están. */
+function agregarAListaObj(ss, encabezado, valores) {
+  const sh = ss.getSheetByName(HOJA_LISTAS_OBJ);
+  const enc = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const col = enc.indexOf(encabezado) + 1;
+  if (!col) return;
+  const actuales = sh.getRange(2, col, sh.getMaxRows() - 1, 1).getValues()
+    .map((f) => f[0]).filter((v) => v !== '');
+  const faltan = [...new Set(valores)].filter((v) => v && actuales.indexOf(v) < 0);
+  if (faltan.length) {
+    sh.getRange(actuales.length + 2, col, faltan.length, 1).setValues(faltan.map((v) => [v]));
+  }
+}
+
+/** "07/09/2026" -> Date (o '' si no hay fecha). */
+function aFecha(texto) {
+  const m = String(texto || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : '';
 }

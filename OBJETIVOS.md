@@ -39,10 +39,19 @@ a nivel país; acá solo se cargan tal cual llegan en la circular.
    aviso va fijo a gortiz@grupoantun.com.ar y ya no trae menú propio).
 3. Agregar un archivo nuevo (+ > Secuencia de comandos) llamado `objetivos`
    y pegar `objetivos.gs`. Guardar.
-4. Recargar la planilla: aparece el menú **Objetivos**.
-5. Objetivos > **Armar / reparar estructura**.
-6. Si la revisión automática de señales ya estaba instalada, no hace falta
+4. En el editor de Apps Script: **Servicios (+)** > **Drive API** > Agregar
+   (lo usa el lector para convertir los PDF a texto).
+5. Recargar la planilla: aparece el menú **Objetivos**.
+6. Objetivos > **Armar / reparar estructura**.
+7. Objetivos > **Leer contenido de señales ya registradas** (pide permisos
+   nuevos; repetir hasta que diga que no quedan pendientes).
+8. Si la revisión automática de señales ya estaba instalada, no hace falta
    reinstalarla.
+
+## Carga automática de cartas
+Las cartas de objetivos que se suban a la carpeta de señales se cargan solas
+en OBJETIVOS (ver SENALES.md). Controlar en el mail que los números
+coincidan con el PDF.
 
 ## Próximos pasos
 - Pedidos PDA: que su hoja OBJETIVOS lea de acá (IMPORTRANGE) en vez de
