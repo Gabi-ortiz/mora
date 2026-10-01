@@ -40,8 +40,8 @@ opcionales y listas de cambio de modelo no se leen.
   del "REF:" en lista corta (• Liquidación de flujo septiembre 2026 • Bonus
   cumplimiento pedidos totales ...) + el primer dato con % o $. Se limpia
   el ruido del OCR (encabezados "T O D O S L O S ...", mails, texto de
-  cortesía). "Rehacer extractos de señales" vuelve a leer las señales (no
-  las cartas) con este formato. Los % de incentivo se cargan a mano en INCENTIVOS
+  cortesía). `rehacerExtractos` (desde el editor; ya no está en el menú)
+  vuelve a leer las señales (no las cartas) con este formato. Los % de incentivo se cargan a mano en INCENTIVOS
   (cada señal tiene otro formato y un número mal leído afecta la
   liquidación).
 - **Tabla desarmada por el OCR**: en la carta 09/2026 real, Google devuelve
@@ -52,14 +52,15 @@ opcionales y listas de cambio de modelo no se leen.
   tenía los objetivos cargados, no los toca.
 - Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
   los 33 ya registrados se van leyendo en las próximas corridas automáticas
-  o con "Leer contenido de señales ya registradas".
+  o con `leerSenalesRegistradas` desde el editor.
 - Probado contra el texto real de la Carta 09/2026 y contra un formato
   "tipo OCR" (nombres y números en líneas separadas).
 
 Instalación: ver OBJETIVOS.md (requiere activar el servicio avanzado
 **Drive API**). Desde el menú **Objetivos**: "Revisar
-carpeta de señales ahora" (pide permisos de Drive y Gmail) e "Instalar
-revisión automática de señales (cada hora)".
+carpeta de señales ahora". La revisión automática cada hora ya está
+instalada (`instalarTriggerSenales`, desde el editor si hubiera que
+reinstalarla).
 
 ## Lo que dicen las señales (resumen para el dashboard)
 Fuente principal: Señal madre **1065/2021** (Nueva Política Comercial Fiat

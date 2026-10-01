@@ -81,8 +81,8 @@ incentivos.
 2. Pegar el contenido de `pedidos_pda.gs` en `Code.gs` y guardar.
 3. Recargar la planilla: aparece el menú **Pedidos**.
 4. Pedidos > **Armar / reparar estructura** (pide permisos la primera vez).
-5. Pedidos > **Importar meses anteriores (una sola vez)**: copia AGOSTO 26 y
-   SEPTIEMBRE 26 a BASE (normaliza CLARI/SERGY, convierte "SEPTIEMBRE" en
+5. (Ya hecho; quedó fuera del menú) `importarHistorico` desde el editor:
+   copia AGOSTO 26 y SEPTIEMBRE 26 a BASE (normaliza CLARI/SERGY, convierte "SEPTIEMBRE" en
    "SEPTIEMBRE 26", etc.). Se puede correr de nuevo sin duplicar.
 
 ## Uso mensual

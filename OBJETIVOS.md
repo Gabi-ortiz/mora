@@ -43,8 +43,8 @@ a nivel país; acá solo se cargan tal cual llegan en la circular.
    (lo usa el lector para convertir los PDF a texto).
 5. Recargar la planilla: aparece el menú **Objetivos**.
 6. Objetivos > **Armar / reparar estructura**.
-7. Objetivos > **Leer contenido de señales ya registradas** (pide permisos
-   nuevos; repetir hasta que diga que no quedan pendientes).
+7. (Ya hecho; quedó fuera del menú) `leerSenalesRegistradas` desde el
+   editor para leer lo ya registrado.
 8. Si la revisión automática de señales ya estaba instalada, no hace falta
    reinstalarla.
 

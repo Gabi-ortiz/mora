@@ -87,7 +87,7 @@ const LISTAS = {
 // Variantes de nombres vistas en los archivos mensuales.
 const NORMALIZAR_RESPONSABLE = { CLARI: 'CLARISA', SERGY: 'SERGIO' };
 
-// Archivos mensuales a importar una sola vez con "Importar meses anteriores".
+// Archivos mensuales que se importaron una sola vez con importarHistorico() (ya hecho).
 const HISTORICOS = [
   { id: '16IQ8wKAHrRA2Oy2pntrB9ZeZxjTZkdjPj-7kZPYuREY', hoja: 'AGOSTO', acto: 'AGOSTO 26' },
   { id: '1_5SnWB3QvWHHkV2nNZ0kH3ZVhNBNJX0W4ipnlBrvaOI', hoja: 'SEPTIEMBRE', acto: 'SEPTIEMBRE 26' },
@@ -123,8 +123,9 @@ function onOpen() {
     .addItem('Actualizar informe', 'actualizarInforme')
     .addSeparator()
     .addItem('Armar / reparar estructura', 'armarEstructura')
-    .addItem('Importar meses anteriores (una sola vez)', 'importarHistorico')
     .addToUi();
+  // importarHistorico() ya se usó (agosto y septiembre en BASE): quedó fuera del menú.
+  // Si hiciera falta de nuevo, se corre desde el editor de Apps Script (no duplica).
 }
 
 /**
