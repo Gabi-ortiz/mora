@@ -147,6 +147,19 @@ incentivos.
   dejaba afuera los 2 FP3 aprobados porque el modelo no estaba en su tabla
   (correcto: 50).
 
+## Qué hace "Armar / reparar estructura" con lo cargado a mano
+- **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;
+  después no se tocan (PRECIOS tampoco el formato). Solo se corrigen meses
+  que Sheets haya convertido en fecha.
+- **LISTAS**: lo agregado a mano se mantiene; un valor nuevo que trae el
+  script se agrega una sola vez (si se borra, no vuelve); columnas nuevas
+  agregadas a la derecha se respetan. La columna A (Meses con datos) es
+  calculada y se rehace.
+- **BASE**: los datos no se tocan; se rehacen formato, desplegables, bordes y
+  filtro.
+- **RESUMEN / INFORME / OBJETIVOS / INCENTIVOS**: se rehacen enteras (son
+  fórmulas / datos leídos de otro archivo).
+
 ## VM netos del INFORME (corregido)
 La fórmula usaba SUMPRODUCT con un SUMIFS de criterio matriz (el modelo de
 cada fila de BASE). Google Sheets lo resolvía con un solo precio (el del

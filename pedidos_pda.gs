@@ -227,15 +227,31 @@ function armarListas(ss) {
       sh.getRange(2, i + 2, vals.length, 1).setValues(vals.map((v) => [v]));
     });
   }
-  // Valores nuevos de las listas fijas (p. ej. REINGRESADA) en una hoja ya creada.
+  // Valores nuevos de las listas que trae el script (p. ej. REINGRESADA) en una hoja ya
+  // creada: cada valor se agrega UNA sola vez. Si después se borra a mano, no vuelve.
+  const props = PropertiesService.getDocumentProperties();
+  const aplicados = JSON.parse(props.getProperty('LISTAS_APLICADAS') || 'null') ||
+    // Primera vez con este control: todo lo que ya traía el script se toma como aplicado,
+    // salvo lo agregado después (REINGRESADA), para no reponer lo que se haya borrado.
+    Object.fromEntries(nombres.map((n) => [n, LISTAS[n].filter((v) => v !== 'REINGRESADA')]));
+  if (nueva) nombres.forEach((n) => { aplicados[n] = LISTAS[n].slice(); });
   nombres.forEach((nombre, i) => {
+    const yaAplicados = aplicados[nombre] || [];
     const actuales = sh.getRange(2, i + 2, sh.getMaxRows() - 1, 1).getValues().map((f) => f[0]).filter((v) => v !== '');
-    const faltan = LISTAS[nombre].filter((v) => actuales.indexOf(v) < 0);
+    const faltan = LISTAS[nombre].filter((v) => yaAplicados.indexOf(v) < 0 && actuales.indexOf(v) < 0);
     if (faltan.length) sh.getRange(actuales.length + 2, i + 2, faltan.length, 1).setValues(faltan.map((v) => [v]));
+    aplicados[nombre] = [...new Set(yaAplicados.concat(LISTAS[nombre]))];
   });
-  // Columnas de versiones anteriores que ya no se usan: vendedores (RESPONSABLE) y las
-  // listas de meses calculadas que estaban después de las listas fijas.
-  sh.getRange(1, nombres.length + 2, sh.getMaxRows(), Math.max(1, sh.getMaxColumns() - nombres.length - 1)).clear();
+  props.setProperty('LISTAS_APLICADAS', JSON.stringify(aplicados));
+
+  // Columnas de versiones anteriores que ya no se usan (solo esas; otras columnas que
+  // se agreguen a mano a la derecha se respetan).
+  const encActual = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  encActual.forEach((h, i) => {
+    if (i > nombres.length && ['RESPONSABLE', 'Meses cierre', 'Meses con datos'].indexOf(h) >= 0) {
+      sh.getRange(1, i + 1, sh.getMaxRows(), 1).clear();
+    }
+  });
 
   // A: "Meses con datos" = UNIQUE de los meses de BASE (Acto y Mes cierre), el más reciente
   // primero. Es la lista del selector de mes del RESUMEN. Calculada: no se edita.
@@ -346,11 +362,13 @@ function armarPrecios(ss) {
     sh.getRange('A:A').setNumberFormat('@');
     sh.getRange(1, 1, 1, 3).setValues([['Mes', 'Modelo', 'V.M']]);
     sh.getRange(2, 1, filas.length, 3).setValues(filas);
+    sh.getRange('C:C').setNumberFormat('$ #,##0');
+    sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+    sh.setFrozenRows(1);
   }
+  // Hoja ya creada: los precios (valores y formato) no se tocan. Solo se corrige un mes
+  // que Sheets haya convertido en fecha (26/09/2026 -> "SEPTIEMBRE 26"); el resto queda igual.
   mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
-  sh.getRange('C:C').setNumberFormat('$ #,##0');
-  sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  sh.setFrozenRows(1);
 }
 
 /**
