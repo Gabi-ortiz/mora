@@ -199,7 +199,7 @@ function leerPendientes(ss, sh, col) {
       return;
     }
 
-    const carta = interpretarCarta(texto);
+    const carta = interpretarCarta(texto, indicadoresConocidos(ss));
     if (carta) {
       res.carta = carta;
       const resumen = cargarCartaObjetivos(ss, carta, res.link);
@@ -212,7 +212,7 @@ function leerPendientes(ss, sh, col) {
         (carta.fechaFlujo ? ` · Flujo ${carta.fechaFlujo} al ${Math.round(carta.pctFlujo * 100)}%` : ''));
       set('Estado', carta.incompleta ? 'Pendiente' : 'Cargada');
       set('Notas', carta.incompleta
-        ? `⚠ No se pudieron leer los números de la tabla: completar el objetivo en OBJETIVOS. ${resumen}`
+        ? `⚠ Revisar: el PDF no dejó leer los números. ${resumen}`
         : resumen);
       res.temas = ['Objetivos'];
       res.resumen = resumen;
@@ -371,7 +371,35 @@ function rehacerExtractos() {
  * "CATEGORÍA A", una línea por indicador con su número y "El flujo es el día
  * 23/09/2026 ... el 65% o más".
  */
-function interpretarCarta(texto) {
+/** Indicadores de LISTAS_OBJ (SUSCRIPCIONES, PATENTAMIENTOS, PEDIDOS TOTALES, ...). */
+function indicadoresConocidos(ss) {
+  const sh = ss.getSheetByName('LISTAS_OBJ');
+  if (!sh || sh.getLastRow() < 2) return ['SUSCRIPCIONES', 'PATENTAMIENTOS', 'PEDIDOS TOTALES'];
+  const enc = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const c = enc.indexOf('Indicador') + 1;
+  if (!c) return [];
+  return sh.getRange(2, c, sh.getLastRow() - 1, 1).getValues().map((f) => String(f[0]).trim().toUpperCase())
+    .filter((v) => v !== '');
+}
+
+/**
+ * Si el OCR juntó dos indicadores en un renglón ("PATENTAMIENTOS PEDIDOS TOTALES"),
+ * los separa usando los indicadores conocidos. Si no reconoce ninguno, lo deja igual.
+ */
+function separarIndicadores(nombre, conocidos) {
+  const n = normalizarIndicador(nombre);
+  if (!conocidos || !conocidos.length || conocidos.indexOf(n) >= 0) return [n];
+  const encontrados = conocidos
+    .map((k) => ({ k, i: n.indexOf(k) }))
+    .filter((x) => x.i >= 0)
+    // si uno contiene a otro (p. ej. "PEDIDOS" y "PEDIDOS TOTALES"), queda el más largo
+    .filter((x, _, arr) => !arr.some((y) => y !== x && y.k.length > x.k.length && y.k.indexOf(x.k) >= 0 && y.i <= x.i))
+    .sort((a, b) => a.i - b.i)
+    .map((x) => x.k);
+  return encontrados.length >= 2 ? encontrados : [n];
+}
+
+function interpretarCarta(texto, conocidos) {
   const t = texto.replace(/\r/g, '');
   const T = t.toUpperCase();
   if (!/CARTA\s+DE\s+OBJETIVOS/.test(T)) return null;
@@ -412,16 +440,29 @@ function interpretarCarta(texto) {
     if (/^CATEGOR/.test(m[1])) continue;
     indicadores.push({ indicador: normalizarIndicador(m[1]), objetivo: Number(m[2]) });
   }
-  // 2) Nombres y números en líneas separadas: solo si hay la misma cantidad de cada uno.
+  // 2) Nombres y números en líneas separadas. Solo se asignan por orden si es una tabla
+  //    "limpia": todos los nombres en renglones seguidos y, justo debajo, la misma
+  //    cantidad de números también seguidos. Si el OCR los mezcló, no se adivina.
   if (!indicadores.length) {
-    const nombres = lineas.filter((l) => /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}$/.test(l) && !/^CATEGOR/.test(l));
-    const numeros = lineas.filter((l) => /^\d{1,6}$/.test(l)).map(Number);
+    const esNombre = (l) => /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}$/.test(l) && !/^CATEGOR/.test(l);
+    const esNumero = (l) => /^\d{1,6}$/.test(l);
+    const iNombres = [];
+    const iNumeros = [];
+    lineas.forEach((l, k) => {
+      if (esNombre(l)) iNombres.push(k);
+      else if (esNumero(l)) iNumeros.push(k);
+    });
+    const nombres = iNombres.reduce((acc, k) => acc.concat(separarIndicadores(lineas[k], conocidos)), []);
+    const numeros = iNumeros.map((k) => Number(lineas[k]));
     if (!nombres.length) return null;
-    if (nombres.length === numeros.length) {
+    const seguidos = (idx) => idx.every((k, n) => n === 0 || k === idx[n - 1] + 1);
+    const tablaLimpia = nombres.length === numeros.length && seguidos(iNombres) && seguidos(iNumeros) &&
+      iNumeros[0] === iNombres[iNombres.length - 1] + 1;
+    if (tablaLimpia) {
       indicadores = nombres.map((n, k) => ({ indicador: normalizarIndicador(n), objetivo: numeros[k] }));
     } else {
-      // 3) El OCR desarmó la tabla (p. ej. "4360" = 43 y 60 pegados): se cargan los
-      //    indicadores sin número, para completar a mano. No se adivina.
+      // 3) Tabla desarmada (p. ej. "4360" = 43 y 60 pegados, o números en otro orden):
+      //    se cargan los indicadores sin número, para completar a mano.
       indicadores = nombres.map((n) => ({ indicador: normalizarIndicador(n), objetivo: '' }));
       incompleta = true;
     }

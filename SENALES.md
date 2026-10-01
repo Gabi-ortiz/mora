@@ -50,6 +50,15 @@ opcionales y listas de cambio de modelo no se leen.
   pero NO adivina números: deja el objetivo vacío con "⚠ Completar
   objetivo", la carta queda "Pendiente" y el mail lo avisa. Si el mes ya
   tenía los objetivos cargados, no los toca.
+- **Indicadores pegados por el OCR** ("PATENTAMIENTOS PEDIDOS TOTALES" en un
+  renglón): se separan usando los indicadores de LISTAS_OBJ. "Armar /
+  reparar estructura" borra las filas sin número que haya dejado una lectura
+  anterior con el indicador pegado (y lo saca de LISTAS_OBJ).
+- **Asignación por orden** (nombres en un renglón y números en otro): solo si
+  es una tabla limpia, con los nombres en renglones seguidos y los números
+  justo debajo, también seguidos. Si el OCR los mezcló, no se asigna nada
+  (con el texto real de la carta 09/2026, mezclar el orden daba
+  suscripciones = 43).
 - Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
   los 33 ya registrados se van leyendo en las próximas corridas automáticas
   o con `leerSenalesRegistradas` desde el editor.

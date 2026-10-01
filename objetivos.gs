@@ -84,6 +84,7 @@ function armarObjetivos() {
   const obj = tabla(ss, HOJA_OBJ, ENC_OBJ, SEMILLA_OBJ);
   const cat = tabla(ss, HOJA_CAT, ENC_CAT, SEMILLA_CAT);
   const inc = tabla(ss, HOJA_INC, ENC_INC, SEMILLA_INC);
+  limpiarIndicadoresPegados(ss, obj);
 
   // Meses como texto ("SEPTIEMBRE 26"), corrigiendo los que Sheets convirtió en fecha.
   mesesComoTextoObj(obj.getRange(2, 1, obj.getMaxRows() - 1, 1));
@@ -292,4 +293,31 @@ function agregarAListaObj(ss, encabezado, valores) {
 function aFecha(texto) {
   const m = String(texto || '').match(/(\d{2})\/(\d{2})\/(\d{4})/);
   return m ? new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1])) : '';
+}
+
+/**
+ * Borra lo que dejó una carta leída antes de que el lector separara indicadores
+ * pegados por el OCR: filas de OBJETIVOS sin número cuyo indicador son dos conocidos
+ * juntos (p. ej. "PATENTAMIENTOS PEDIDOS TOTALES"), y ese valor en LISTAS_OBJ.
+ */
+function limpiarIndicadoresPegados(ss, obj) {
+  const listas = ss.getSheetByName(HOJA_LISTAS_OBJ);
+  const enc = listas.getRange(1, 1, 1, listas.getLastColumn()).getValues()[0];
+  const cInd = enc.indexOf('Indicador') + 1;
+  if (!cInd) return;
+  const rInd = listas.getRange(2, cInd, listas.getMaxRows() - 1, 1);
+  const valores = rInd.getValues().map((f) => String(f[0]).trim()).filter((v) => v !== '');
+  const pegado = (v) => separarIndicadores(v, valores.filter((x) => x !== v)).length >= 2;
+  const malos = valores.filter(pegado);
+  if (!malos.length) return;
+
+  const iInd = ENC_OBJ.indexOf('Indicador');
+  const iObj = ENC_OBJ.indexOf('Objetivo');
+  for (let r = obj.getLastRow(); r >= 2; r--) {
+    const fila = obj.getRange(r, 1, 1, ENC_OBJ.length).getValues()[0];
+    if (malos.indexOf(String(fila[iInd]).trim()) >= 0 && fila[iObj] === '') obj.deleteRow(r);
+  }
+  const quedan = valores.filter((v) => malos.indexOf(v) < 0);
+  rInd.clearContent();
+  rInd.offset(0, 0, quedan.length, 1).setValues(quedan.map((v) => [v]));
 }
