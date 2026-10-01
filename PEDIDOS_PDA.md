@@ -102,8 +102,9 @@ incentivos.
   acto; netos del mes = 59 (51 del acto + 8 arrastrados de agosto).
 
 ## Rediseño RESUMEN / INFORME (v3)
-- **RESUMEN**: título + selector de mes en **H1** (lista "Meses con datos",
-  solo meses con acto o cierre, el más reciente primero). Fila de 4
+- **RESUMEN**: título + selector de mes en **H1** (lista "Meses con datos"
+  = LISTAS!A, un UNIQUE de los meses de BASE —Acto y Mes cierre— ordenado
+  del más reciente al más viejo; ya no se guarda la lista fija de 36 meses). Fila de 4
   tarjetas (adjudicados del acto, aprobados del acto con % conversión,
   netos del mes con del acto / anteriores, cumplimiento con objetivo y
   categoría, en semáforo verde ≥100% / naranja ≥90% / rojo). Debajo, 4

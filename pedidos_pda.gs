@@ -204,15 +204,6 @@ function hoja(ss, nombre, posicion) {
 
 function armarListas(ss) {
   const { sh, nueva } = hoja(ss, HOJA_LISTAS, 6);
-  const meses = [];
-  for (let a = ANIO_DESDE; a <= ANIO_HASTA; a++) {
-    for (let m = 0; m < 12; m++) meses.push(etiquetaMes(m, a));
-  }
-  // Meses se reescribe siempre (orden cronológico, lo usa el INFORME), como texto.
-  sh.getRange('A:A').setNumberFormat('@');
-  sh.getRange(1, 1, 1, 1).setValue('Meses');
-  sh.getRange(2, 1, meses.length, 1).setValues(meses.map((m) => [m]));
-
   const nombres = Object.keys(LISTAS);
   if (nueva) {
     nombres.forEach((nombre, i) => {
@@ -221,30 +212,28 @@ function armarListas(ss) {
       sh.getRange(2, i + 2, vals.length, 1).setValues(vals.map((v) => [v]));
     });
   }
-  // Versiones anteriores llevaban acá la lista de vendedores (RESPONSABLE): ya no se usa.
-  const encListas = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
-  const cVend = encListas.indexOf('RESPONSABLE') + 1;
-  if (cVend) sh.getRange(1, cVend, sh.getMaxRows(), 1).clear();
+  // Columnas de versiones anteriores que ya no se usan: vendedores (RESPONSABLE) y las
+  // listas de meses calculadas que estaban después de las listas fijas.
+  sh.getRange(1, nombres.length + 2, sh.getMaxRows(), Math.max(1, sh.getMaxColumns() - nombres.length - 1)).clear();
 
-  // "Meses con datos" (calculada, no se edita): los meses que tienen acto o cierre en
-  // BASE, el más reciente primero. Es la lista del selector de mes del RESUMEN.
-  const cMesesDatos = nombres.length + 2;
-  const filasMeses = meses.length;
-  const i = `SEQUENCE(${filasMeses})`;
-  sh.getRange(1, cMesesDatos + 1, sh.getMaxRows(), 1).clear(); // versión anterior: dos listas calculadas
-  sh.getRange(1, cMesesDatos).setValue('Meses con datos');
-  sh.getRange(2, cMesesDatos).setFormula(
-    `=LET(i,${i},m,A2:A${filasMeses + 1},c,COUNTIF(${HOJA_BASE}!A2:A,m)+COUNTIF(${HOJA_BASE}!F2:F,m),` +
-    'IFERROR(SORT(FILTER(m,c>0),FILTER(i,c>0),FALSE),""))');
-  sh.getRange(1, 1, 1, cMesesDatos)
+  // A: "Meses con datos" = UNIQUE de los meses de BASE (Acto y Mes cierre), el más reciente
+  // primero. Es la lista del selector de mes del RESUMEN. Calculada: no se edita.
+  const nombresMes = MESES.map((m) => `"${m}"`).join(',');
+  sh.getRange('A:A').clear().setNumberFormat('@');
+  sh.getRange('A1').setValue('Meses con datos');
+  sh.getRange('A2').setFormula(
+    `=IFERROR(LET(v,{${HOJA_BASE}!A2:A;${HOJA_BASE}!F2:F},` +
+    'u,UNIQUE(FILTER(v,REGEXMATCH(v&"","^[A-Z]+ [0-9]{2}$"))),' +
+    `SORT(u,ARRAYFORMULA(DATE(2000+VALUE(RIGHT(u,2)),MATCH(LEFT(u,LEN(u)-3),{${nombresMes}},0),1)),FALSE)),"")`);
+  sh.getRange(1, 1, 1, nombres.length + 1)
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   sh.setFrozenRows(1);
 
   // Rango de cada lista, para los desplegables.
-  const rangos = { Meses: sh.getRange('A2:A') };
-  const encabezados = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const rangos = {};
+  const encabezados = sh.getRange(1, 1, 1, nombres.length + 1).getValues()[0];
   encabezados.forEach((h, i) => {
-    if (h && h !== 'Meses') rangos[h] = sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1);
+    if (h) rangos[h] = sh.getRange(2, i + 1, sh.getMaxRows() - 1, 1);
   });
   return rangos;
 }
