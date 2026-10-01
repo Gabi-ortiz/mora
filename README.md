@@ -2,6 +2,7 @@
 
 > Otros trabajos de la misma administración de planes en este repo:
 > - `PEDIDOS_PDA.md` / `pedidos_pda.gs`: base acumulada de adjudicados de SGA.
+> - `OBJETIVOS.md` / `objetivos.gs`: archivo de objetivos, categorías ABC e incentivos.
 > - `SENALES.md` / `senales.gs`: lector y alerta de la carpeta de señales comerciales + resumen de la política comercial.
 
 ## Archivo de trabajo

@@ -8,8 +8,8 @@ De ahora en más todas las señales nuevas se suben ahí. Al 01/10/2026 tiene
 opcionales, listas de cambio de modelo). Seguramente faltan señales.
 
 ## Lector / alerta (`senales.gs`)
-Script que va en un Google Sheet (el futuro archivo de objetivos e
-incentivos, o uno propio):
+Script que va en el archivo de objetivos e incentivos (ver OBJETIVOS.md),
+junto con `objetivos.gs`, que es el que arma el menú:
 - Hoja **SEÑALES**: un registro por archivo de la carpeta (y subcarpetas),
   con Nº, marca, tipo y mes detectados del título, link, quién lo subió y
   una columna **Estado** (Pendiente / Leída / Cargada) para saber qué señal
@@ -20,17 +20,13 @@ incentivos, o uno propio):
   faltante puede ser de otra marca o de otro tema. Sirve como lista para
   pedirle al zonal. Hoy, entre la 1527 y la 1604, hay 27 en la carpeta y
   faltan 51.
-- **Mail** con los archivos nuevos cada vez que aparece algo (la primera
-  corrida manda un único mail con todo lo registrado).
+- **Mail** a gortiz@grupoantun.com.ar (`MAIL_AVISO`) con los archivos nuevos
+  cada vez que aparece algo (la primera corrida manda un único mail con todo
+  lo registrado).
 
-Instalación:
-1. En el Sheet: Extensiones > Apps Script, pegar `senales.gs`, guardar.
-2. Recargar: aparece el menú **Señales**.
-3. Señales > **Revisar carpeta ahora** (pide permisos de Drive y Gmail).
-4. Señales > **Instalar revisión automática (cada hora)**.
-
-Si el script va en el mismo proyecto de Apps Script que otro (por ejemplo
-Pedidos PDA), hay que unir los `onOpen` en uno solo.
+Instalación: ver OBJETIVOS.md. Desde el menú **Objetivos**: "Revisar
+carpeta de señales ahora" (pide permisos de Drive y Gmail) e "Instalar
+revisión automática de señales (cada hora)".
 
 ## Lo que dicen las señales (resumen para el dashboard)
 Fuente principal: Señal madre **1065/2021** (Nueva Política Comercial Fiat

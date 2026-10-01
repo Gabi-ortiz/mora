@@ -8,15 +8,15 @@
  * señal que no están en la carpeta (la numeración es correlativa entre Fiat,
  * Jeep y RAM, así que no todos los faltantes son necesariamente de Fiat Plan).
  *
- * Instalación: ver SENALES.md.
+ * Va en el archivo de objetivos, junto con objetivos.gs. Instalación: ver SENALES.md.
  */
 
 // --- CONFIGURACIÓN ---
 const CARPETA_SENALES = '103O9LnAq7tljmQpwdFl7dUlwkecehcd_';
 const HOJA_SENALES = 'SEÑALES';
 const HOJA_FALTANTES = 'FALTANTES';
-// Vacío = el mail de quien instala el trigger. Se pueden poner varios separados por coma.
-const MAIL_AVISO = '';
+// Destinatario del aviso. Se pueden poner varios separados por coma.
+const MAIL_AVISO = 'gortiz@grupoantun.com.ar';
 // Para FALTANTES: no mirar números más viejos que este (la señal madre 1065 es de 2021).
 const NUMERO_DESDE = 1500;
 
@@ -28,13 +28,7 @@ const MESES_SENAL = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JUL
   'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
 const MESES_CORTOS = { ENE: 0, FEB: 1, MAR: 2, ABR: 3, MAY: 4, JUN: 5, JUL: 6, AGO: 7, SEP: 8, SEPT: 8, OCT: 9, NOV: 10, DIC: 11 };
 
-function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('Señales')
-    .addItem('Revisar carpeta ahora', 'revisarCarpeta')
-    .addItem('Instalar revisión automática (cada hora)', 'instalarTriggerSenales')
-    .addToUi();
-}
+// El menú lo arma onOpen() en objetivos.gs (un solo onOpen por proyecto).
 
 function instalarTriggerSenales() {
   ScriptApp.getProjectTriggers()
