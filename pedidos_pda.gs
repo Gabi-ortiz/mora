@@ -64,7 +64,7 @@ const COLUMNAS_BASE = [
   { h: 'Pedido', oculta: false, sga: null },
   { h: 'Carpeta', oculta: false, sga: null },
   { h: 'Observacion', oculta: false, sga: null },
-  { h: 'RESPONSABLE', oculta: false, sga: null },
+  { h: 'RESPONSABLE', oculta: false, sga: 'Of. Cuenta' }, // oficial de cuenta, viene de SGA
   // Datos de SGA que hoy se borran: se guardan ocultos para el dashboard.
   { h: 'Vendedor SGA', oculta: true, sga: 'Vendedor' },
   { h: 'Monto licitado', oculta: true, sga: 'Monto licitado' },
@@ -75,7 +75,7 @@ const COLUMNAS_BASE = [
 const COLUMNAS_NUMERICAS = ['Solicitud', 'Grupo', 'Orden', 'Avance', 'Documento', 'CP', 'Monto licitado'];
 
 // Valores de los desplegables (columna de LISTAS: [encabezado, valores]).
-// RESPONSABLE (vendedor) es la única lista que acepta valores nuevos con aviso.
+// RESPONSABLE (oficial de cuenta) no tiene desplegable: viene de SGA ("Of. Cuenta").
 const LISTAS = {
   Responsable: ['CLARISA', 'SERGIO', 'TP', 'CHEXA'],
   Pedido: ['APROBADO', 'PENDIENTE', 'SUSPENDIDO', 'BAJA ADJ'],
@@ -129,22 +129,35 @@ function onOpen() {
 }
 
 /**
- * Al marcar Pedido = APROBADO y Carpeta = APROBADA, completa "Mes cierre" con
- * el mes actual si está vacío. Se puede corregir a mano.
+ * BASE: al marcar Pedido = APROBADO y Carpeta = APROBADA completa "Mes cierre"
+ * con el mes actual (si está vacío). Si "Mes cierre" se escribe a mano, lo
+ * pasa al formato MES AA y avisa si no es un mes válido.
  */
 function onEdit(e) {
   const sh = e.range.getSheet();
   if (sh.getName() !== HOJA_BASE || e.range.getRow() < 2) return;
   const cPedido = colBase('Pedido');
   const cCarpeta = colBase('Carpeta');
+  const cMes = colBase('Mes cierre');
   const c0 = e.range.getColumn();
   const c1 = c0 + e.range.getNumColumns() - 1;
-  if (c1 < Math.min(cPedido, cCarpeta) || c0 > Math.max(cPedido, cCarpeta)) return;
-
-  const cMes = colBase('Mes cierre');
-  const mesActual = etiquetaMes(new Date().getMonth(), new Date().getFullYear() % 100);
   const fila0 = e.range.getRow();
   const n = e.range.getNumRows();
+
+  // Mes cierre escrito a mano: "septiembre 26" -> "SEPTIEMBRE 26"; si no es un mes válido, avisa.
+  if (c0 <= cMes && cMes <= c1) {
+    const rango = sh.getRange(fila0, cMes, n, 1);
+    const vals = rango.getValues().map((f) => [textoMes(f[0])]);
+    rango.setValues(vals);
+    if (vals.some((f) => f[0] !== '' && !esMesValido(f[0]))) {
+      SpreadsheetApp.getActive().toast('Mes cierre: usar el formato MES AA, por ejemplo SEPTIEMBRE 26.',
+        'Formato de mes', 8);
+    }
+  }
+
+  // Al marcar Pedido = APROBADO y Carpeta = APROBADA, completa Mes cierre con el mes actual si está vacío.
+  if (c1 < Math.min(cPedido, cCarpeta) || c0 > Math.max(cPedido, cCarpeta)) return;
+  const mesActual = etiquetaMes(new Date().getMonth(), new Date().getFullYear() % 100);
   const datos = sh.getRange(fila0, 1, n, COLUMNAS_BASE.length).getValues();
   datos.forEach((fila, i) => {
     if (fila[cPedido - 1] === 'APROBADO' && fila[cCarpeta - 1] === 'APROBADA' && fila[cMes - 1] === '') {
@@ -207,9 +220,23 @@ function armarListas(ss) {
       sh.getRange(1, i + 2).setValue(nombre);
       sh.getRange(2, i + 2, vals.length, 1).setValues(vals.map((v) => [v]));
     });
-    sh.getRange(1, nombres.length + 2).setValue('RESPONSABLE');
   }
-  sh.getRange(1, 1, 1, nombres.length + 2)
+  // Versiones anteriores llevaban acá la lista de vendedores (RESPONSABLE): ya no se usa.
+  const encListas = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  const cVend = encListas.indexOf('RESPONSABLE') + 1;
+  if (cVend) sh.getRange(1, cVend, sh.getMaxRows(), 1).clear();
+
+  // "Meses con datos" (calculada, no se edita): los meses que tienen acto o cierre en
+  // BASE, el más reciente primero. Es la lista del selector de mes del RESUMEN.
+  const cMesesDatos = nombres.length + 2;
+  const filasMeses = meses.length;
+  const i = `SEQUENCE(${filasMeses})`;
+  sh.getRange(1, cMesesDatos + 1, sh.getMaxRows(), 1).clear(); // versión anterior: dos listas calculadas
+  sh.getRange(1, cMesesDatos).setValue('Meses con datos');
+  sh.getRange(2, cMesesDatos).setFormula(
+    `=LET(i,${i},m,A2:A${filasMeses + 1},c,COUNTIF(${HOJA_BASE}!A2:A,m)+COUNTIF(${HOJA_BASE}!F2:F,m),` +
+    'IFERROR(SORT(FILTER(m,c>0),FILTER(i,c>0),FALSE),""))');
+  sh.getRange(1, 1, 1, cMesesDatos)
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   sh.setFrozenRows(1);
 
@@ -248,14 +275,20 @@ function armarBase(ss, listas) {
       .build();
     sh.getRange(2, colBase(columna), filas, 1).setDataValidation(regla);
   };
-  desplegable('Acto', listas.Meses, true);
-  desplegable('Mes cierre', listas.Meses, true);
+  // Acto y Mes cierre los completa el script (al importar / al aprobar): sin desplegable y en
+  // gris. Acto avisa si se edita; Mes cierre se puede corregir a mano (onEdit lo normaliza).
+  const rActo = sh.getRange(2, colBase('Acto'), filas, 1);
+  const rCierre = sh.getRange(2, colBase('Mes cierre'), filas, 1);
+  [rActo, rCierre].forEach((rg) => rg.clearDataValidations().setBackground('#f3f3f3').setFontColor(GRIS_TEXTO));
+  sh.getProtections(SpreadsheetApp.ProtectionType.RANGE)
+    .filter((pr) => pr.getDescription() === 'Acto (viene de SGA)').forEach((pr) => pr.remove());
+  rActo.protect().setDescription('Acto (viene de SGA)').setWarningOnly(true);
   desplegable('Responsable', listas.Responsable, true);
   desplegable('Pedido', listas.Pedido, true);
   desplegable('Carpeta', listas.Carpeta, true);
   desplegable('Modalidad', listas.Modalidad, true);
   desplegable('Llave x llave', listas['Llave x llave'], true);
-  desplegable('RESPONSABLE', listas.RESPONSABLE, false);
+  sh.getRange(2, colBase('RESPONSABLE'), filas, 1).clearDataValidations();
 
   // Colores de Pedido.
   const rPedido = sh.getRange(2, colBase('Pedido'), filas, 1);
@@ -340,123 +373,192 @@ function armarIncentivos(ss) {
 }
 
 // ---------------------------------------------------------------------------
-// RESUMEN (fórmulas vivas sobre BASE, el mes se elige en B1)
+// RESUMEN (fórmulas vivas sobre BASE, el mes se elige en H1)
 // ---------------------------------------------------------------------------
+
+// Celdas del RESUMEN que usan otras fórmulas / el script.
+const CELDA_MES_RESUMEN = 'H1';
+const CELDA_CATEGORIA_RESUMEN = 'I21';
+
+// Paleta: el bordó del reporte de SGA + grises suaves.
+const GRIS_TEXTO = '#666666';
+const GRIS_LINEA = '#e0e0e0';
+const FONDO_TARJETA = '#f8f4f4';
+const FONDO_TOTAL = '#efe7e7';
 
 function armarResumen(ss, listas) {
   const { sh } = hoja(ss, HOJA_RESUMEN, 2);
-  const mesElegido = textoMes(sh.getRange('B1').getValue());
+  // El mes elegido se conserva; B1 es donde estaba el selector en la versión anterior.
+  const mesElegido = [CELDA_MES_RESUMEN, 'B1'].map((c) => textoMes(sh.getRange(c).getValue()))
+    .find(esMesValido) || '';
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
-  sh.getRange('B1').setNumberFormat('@');
-  sh.getRange('A1:B1').setValues([['Mes:', mesElegido || '']]);
-  sh.getRange('B1').setDataValidation(
-    SpreadsheetApp.newDataValidation().requireValueInRange(listas.Meses, true).build())
-    .setFontWeight('bold').setBackground('#fff2cc');
-  sh.getRange('A1').setFontWeight('bold');
+  sh.clearConditionalFormatRules();
+  sh.setFrozenRows(0);
+  if (sh.getMaxColumns() < 10) sh.insertColumnsAfter(sh.getMaxColumns(), 10 - sh.getMaxColumns());
+  sh.setHiddenGridlines(true);
 
   const r = rangosBase();
-  const M = '$B$1';
+  const M = `$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`; // $H$1
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
   const acto = `${r.Acto},${M}`;
 
-  const bloques = [
-    {
-      col: 1, titulo: 'ADJUDICADOS DEL ACTO',
-      filas: [
-        ['Total adjudicados', `=COUNTIFS(${acto})`],
-        ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`],
-        ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`],
-        ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`],
-        ['   CHEXA', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"CHEXA")`],
-        ['   Netos licitación', '=B5-B6-B7-B8'],
-        ['Por sorteo', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo")`],
-        ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Pedido},"BAJA ADJ")`],
-        ['   ADM', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.RESPONSABLE},"ADM")`],
-        ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Responsable},"TP")`],
-      ],
-    },
-    {
-      col: 4, titulo: 'ESTADO DEL ACTO',
-      filas: [
-        ['Aprobados (pedido + carpeta)', `=COUNTIFS(${acto},${aprob})`],
-        ['Suspendidos', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO")`],
-        ['   con CC aprobada', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`],
-        ['   con CC ingresada (WEB)', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO",${r.Carpeta},"WEB")`],
-        ['Pendientes', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE")`],
-        ['   con CC aprobada', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE",${r.Carpeta},"APROBADA")`],
-        ['Bajas', `=COUNTIFS(${acto},${r.Pedido},"BAJA ADJ")`],
-        ['Sin estado', `=COUNTIFS(${acto},${r.Pedido},"")`],
-        ['Trabajados', '=B4-E6-E7-E9-E10'],
-      ],
-    },
-    {
-      col: 7, titulo: 'CIERRES DEL MES',
-      filas: [
-        ['Netos del mes (todos los actos)', `=COUNTIFS(${r['Mes cierre']},${M},${aprob})`],
-        ['   del acto del mes', `=COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`],
-        ['   de actos anteriores', '=H4-H5'],
-        ['   TP', `=COUNTIFS(${r['Mes cierre']},${M},${aprob},${r.Responsable},"TP")`],
-        ['Objetivo', `=IFERROR(VLOOKUP(${M},OBJETIVOS!$A:$B,2,FALSE),"")`],
-        ['Proyección (+15%)', '=IF(H8="","",H8*1.15)'],
-        ['Faltan para objetivo', '=IF(H8="","",MAX(0,H8-H4))'],
-        ['% cumplimiento', '=IF(N(H8)=0,"",H4/H8)'],
-        ['VM netos del mes', '=SUM(G16:G)'],
-      ],
-    },
-    {
-      col: 10, titulo: 'INCENTIVO PEDIDOS',
-      filas: [
-        ['Categoría del mes', '=IFERROR(VLOOKUP($B$1,OBJETIVOS!$A:$C,3,FALSE),"")'],
-        ['% cumplimiento pedidos', '=H11'],
-        ['Bonus cumplimiento pedidos totales', `=${bonusSegunCategoria('CUMPLIMIENTO PEDIDOS', 'N(H11)<1')}`],
-        ['Pedidos adicionales al objetivo', '=IF(N(H8)=0,"",MAX(0,H4-H8))'],
-        ['Bonus por pedido adicional', `=${bonusSegunCategoria('ADICIONALES', 'N(K7)=0')}`],
-      ],
-    },
+  // Grilla: A = margen; B..I = 8 columnas iguales.
+  sh.setColumnWidth(1, 16);
+  for (let c = 2; c <= 9; c++) sh.setColumnWidth(c, 118);
+  sh.setColumnWidth(10, 16);
+
+  // Título y selector de mes.
+  sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
+    .setFontSize(16).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
+  sh.getRange('G1').setValue('Mes').setHorizontalAlignment('right').setFontWeight('bold');
+  sh.getRange('H1:I1').merge().setNumberFormat('@').setValue(mesElegido || '')
+    .setDataValidation(SpreadsheetApp.newDataValidation()
+      .requireValueInRange(listas['Meses con datos'], true).setAllowInvalid(true).build())
+    .setFontWeight('bold').setFontSize(12).setBackground('#fff2cc').setHorizontalAlignment('center');
+  sh.getRange('B2:I2').merge()
+    .setValue('Acto = adjudicados en el acto del mes elegido.   Cierres = aprobados (pedido + carpeta) en el mes, de cualquier acto.')
+    .setFontSize(9).setFontColor(GRIS_TEXTO);
+  sh.setRowHeight(1, 34);
+  sh.setRowHeight(3, 8);
+
+  // --- Bloques (filas 9-18 y 21-29). Valores en E (izquierda) e I (derecha).
+  const izq1 = [
+    ['Total adjudicados', `=COUNTIFS(${acto})`],
+    ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`],
+    ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`, true],
+    ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`, true],
+    ['   CHEXA', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"CHEXA")`, true],
+    ['   Netos licitación', '=E10-E11-E12-E13', true],
+    ['Por sorteo', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo")`],
+    ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Pedido},"BAJA ADJ")`, true],
+    ['   ADM', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.RESPONSABLE},"ADM")`, true],
+    ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Responsable},"TP")`, true],
   ];
+  const der1 = [
+    ['Aprobados (pedido + carpeta)', `=COUNTIFS(${acto},${aprob})`],
+    ['Suspendidos', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO")`],
+    ['   con CC aprobada', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`, true],
+    ['   con CC ingresada (WEB)', `=COUNTIFS(${acto},${r.Pedido},"SUSPENDIDO",${r.Carpeta},"WEB")`, true],
+    ['Pendientes', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE")`],
+    ['   con CC aprobada', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE",${r.Carpeta},"APROBADA")`, true],
+    ['Bajas', `=COUNTIFS(${acto},${r.Pedido},"BAJA ADJ")`],
+    ['Sin estado', `=COUNTIFS(${acto},${r.Pedido},"")`],
+    ['Trabajados', '=E9-I11-I12-I14-I15'],
+  ];
+  const izq2 = [
+    ['Netos del mes (todos los actos)', `=COUNTIFS(${r['Mes cierre']},${M},${aprob})`],
+    ['   del acto del mes', `=COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`, true],
+    ['   de actos anteriores', '=E21-E22', true],
+    ['   TP', `=COUNTIFS(${r['Mes cierre']},${M},${aprob},${r.Responsable},"TP")`, true],
+    ['Objetivo', `=IFERROR(VLOOKUP(${M},OBJETIVOS!$A:$B,2,FALSE),"")`],
+    ['Proyección (+15%)', '=IF(E25="","",ROUND(E25*1.15))'],
+    ['Faltan para el objetivo', '=IF(E25="","",MAX(0,E25-E21))'],
+    ['% cumplimiento', '=IF(N(E25)=0,"",E21/E25)'],
+    ['VM netos del mes', '=I33'],
+  ];
+  const der2 = [
+    ['Categoría del mes', '=IFERROR(VLOOKUP(' + M + ',OBJETIVOS!$A:$C,3,FALSE),"")'],
+    ['% cumplimiento pedidos', '=E28'],
+    ['Bonus cumplimiento pedidos totales', `=${bonusSegunCategoria('CUMPLIMIENTO PEDIDOS', 'N(E28)<1')}`],
+    ['Pedidos adicionales al objetivo', '=IF(N(E25)=0,"",MAX(0,E21-E25))'],
+    ['Bonus por pedido adicional', `=${bonusSegunCategoria('ADICIONALES', 'N(I24)=0')}`],
+  ];
+  bloqueResumen(sh, 8, 2, 'ADJUDICADOS DEL ACTO', izq1);
+  bloqueResumen(sh, 8, 6, 'ESTADO DEL ACTO', der1);
+  bloqueResumen(sh, 20, 2, 'CIERRES DEL MES', izq2);
+  bloqueResumen(sh, 20, 6, 'INCENTIVO PEDIDOS', der2);
+  sh.getRange('F27:I29').merge().setWrap(true).setVerticalAlignment('top')
+    .setValue('El bonus de cumplimiento exige además el 100% del objetivo de suscripciones (no se mide en ' +
+      'este archivo). Los % salen de la hoja INCENTIVOS según la categoría.')
+    .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
+  ['E28', 'I22'].forEach((c) => sh.getRange(c).setNumberFormat('0%'));
+  ['I23', 'I25'].forEach((c) => sh.getRange(c).setNumberFormat('0.00%'));
+  sh.getRange('E29').setNumberFormat('$ #,##0');
+  sh.setRowHeight(7, 10);
+  sh.setRowHeight(19, 14);
+  sh.setRowHeight(30, 14);
 
-  bloques.forEach((b) => {
-    sh.getRange(3, b.col, 1, 2).merge().setValue(b.titulo)
-      .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-    sh.getRange(4, b.col, b.filas.length, 1).setValues(b.filas.map((f) => [f[0]]));
-    sh.getRange(4, b.col + 1, b.filas.length, 1).setFormulas(b.filas.map((f) => [f[1]]))
-      .setFontWeight('bold').setHorizontalAlignment('center');
+  // --- Tarjetas (filas 4-6): lo más importante, a la vista.
+  const tarjetas = [
+    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E15', '0'],
+    ['D', 'E', 'Aprobados del acto', '=I9', '=IF(N(E9)=0,"","Conversión "&TEXT(I9/E9,"0%"))', '0'],
+    ['F', 'G', 'Netos del mes', '=E21', '="Del acto "&E22&"   ·   Anteriores "&E23', '0'],
+    ['H', 'I', 'Cumplimiento objetivo', '=E28',
+      '=IF(E25="","Sin objetivo cargado","Objetivo "&E25&"   ·   Categoría "&I21)', '0%'],
+  ];
+  tarjetas.forEach(([c1, c2, titulo, valor, detalle, formato]) => {
+    sh.getRange(`${c1}4:${c2}6`).setBackground(FONDO_TARJETA)
+      .setBorder(true, null, null, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID_THICK);
+    sh.getRange(`${c1}4:${c2}4`).merge().setValue(titulo).setFontSize(9).setFontColor(GRIS_TEXTO)
+      .setHorizontalAlignment('center');
+    sh.getRange(`${c1}5:${c2}5`).merge().setFormula(valor).setFontSize(22).setFontWeight('bold')
+      .setHorizontalAlignment('center').setNumberFormat(formato);
+    sh.getRange(`${c1}6:${c2}6`).merge().setFormula(detalle).setFontSize(9).setFontColor(GRIS_TEXTO)
+      .setHorizontalAlignment('center');
   });
-  sh.getRange('H11').setNumberFormat('0%');
-  sh.getRange('H12').setNumberFormat('$ #,##0');
-  sh.getRange('K5').setNumberFormat('0%');
-  sh.getRange('K6').setNumberFormat('0.00%');
-  sh.getRange('K8').setNumberFormat('0.00%');
-  sh.getRange('J9').setValue('El bonus de cumplimiento exige además el 100% del objetivo de suscripciones ' +
-    '(no se mide en este archivo). % según categoría, de la hoja INCENTIVOS.')
-    .setFontStyle('italic').setWrap(true);
-  sh.getRange('J9:K9').merge();
-  sh.setRowHeight(9, 48);
-  sh.setColumnWidth(10, 230);
+  sh.setRowHeight(5, 40);
 
-  // Por modelo: lista dinámica con los modelos que tienen movimiento en el mes.
-  const enc = ['Modelo', 'Adjudicados (acto)', 'Susp. c/CC aprobada', 'Aprobados (acto)',
+  // Semáforo del cumplimiento (tarjeta y bloque).
+  const semaforo = [sh.getRange('H5'), sh.getRange('E28'), sh.getRange('I22')];
+  sh.setConditionalFormatRules([
+    SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(1)
+      .setFontColor('#38761d').setRanges(semaforo).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(0.9, 0.9999)
+      .setFontColor('#b45f06').setRanges(semaforo).build(),
+    SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0.9)
+      .setFontColor('#cc0000').setRanges(semaforo).build(),
+  ]);
+
+  // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba.
+  sh.getRange('B31:I31').merge().setValue('POR MODELO')
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  const enc = ['Modelo', 'Adjudicados (acto)', 'Aprobados (acto)', 'Susp. c/CC aprobada', '% conversión',
     'Netos del mes', 'V.M', 'VM netos'];
-  sh.getRange(15, 1, 1, enc.length).setValues([enc])
-    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white').setWrap(true);
-  const mod = r['Modelo ahorro'];
-  const lista = 'A16:A60';
-  const mapa = (expr) => `=MAP(${lista},LAMBDA(m,IF(m="","",${expr})))`;
-  sh.getRange('A16').setFormula(
-    `=IFERROR(SORT(UNIQUE(FILTER(${mod},${mod}<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})))),"")`);
-  sh.getRange('B16').setFormula(mapa(`COUNTIFS(${acto},${mod},m)`));
-  sh.getRange('C16').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`));
-  sh.getRange('D16').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${aprob})`));
-  sh.getRange('E16').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})`));
-  sh.getRange('F16').setFormula(mapa(`SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
-  sh.getRange('G16').setFormula(`=MAP(E16:E60,F16:F60,LAMBDA(n,p,IF(n="","",n*p)))`);
-  sh.getRange('F16:G60').setNumberFormat('$ #,##0');
+  sh.getRange('B32:I32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+    .setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
+    .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('B32').setHorizontalAlignment('left');
+  sh.setRowHeight(32, 32);
 
-  sh.setColumnWidth(1, 190);
-  sh.setColumnWidth(4, 210);
-  sh.setColumnWidth(7, 230);
-  sh.setFrozenRows(1);
+  const mod = r['Modelo ahorro'];
+  const lista = 'B34:B80';
+  const mapa = (expr) => `=MAP(${lista},LAMBDA(m,IF(m="","",${expr})))`;
+  sh.getRange('B34').setFormula(
+    `=IFERROR(SORT(UNIQUE(FILTER(${mod},${mod}<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})))),"")`);
+  sh.getRange('C34').setFormula(mapa(`COUNTIFS(${acto},${mod},m)`));
+  sh.getRange('D34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${aprob})`));
+  sh.getRange('E34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`));
+  sh.getRange('F34').setFormula('=MAP(C34:C80,D34:D80,LAMBDA(a,b,IF(N(a)=0,"",b/a)))');
+  sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})`));
+  sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
+  sh.getRange('I34').setFormula('=MAP(G34:G80,H34:H80,LAMBDA(n,p,IF(n="","",n*p)))');
+  sh.getRange('C34:I80').setHorizontalAlignment('center');
+  sh.getRange('B34:I80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+
+  sh.getRange('B33:I33').setValues([['TOTAL', '=SUM(C34:C80)', '=SUM(D34:D80)', '=SUM(E34:E80)',
+    '=IF(N(C33)=0,"",D33/C33)', '=SUM(G34:G80)', '', '=SUM(I34:I80)']])
+    .setFontWeight('bold').setBackground(FONDO_TOTAL).setHorizontalAlignment('center');
+  sh.getRange('B33').setHorizontalAlignment('left');
+  sh.getRange('F33:F80').setNumberFormat('0%');
+  sh.getRange('H33:I80').setNumberFormat('$ #,##0');
+  sh.getRange('I33:I80').setHorizontalAlignment('right');
+  sh.getRange('H34:H80').setHorizontalAlignment('right');
+}
+
+/** Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. */
+function bloqueResumen(sh, f0, c0, titulo, filas) {
+  sh.getRange(f0, c0, 1, 4).merge().setValue(titulo)
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  filas.forEach(([etiqueta, formula, secundaria], i) => {
+    const f = f0 + 1 + i;
+    sh.getRange(f, c0, 1, 3).merge().setValue(etiqueta)
+      .setFontColor(secundaria ? GRIS_TEXTO : '#000000');
+    sh.getRange(f, c0 + 3).setFormula(formula).setHorizontalAlignment('center')
+      .setFontWeight(secundaria ? 'normal' : 'bold');
+    sh.getRange(f, c0, 1, 4)
+      .setBorder(null, null, true, null, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -466,85 +568,129 @@ function armarResumen(ss, listas) {
 function actualizarInforme() {
   const ss = SpreadsheetApp.getActive();
   const { sh } = hoja(ss, HOJA_INFORME, 3);
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
+  sh.clearConditionalFormatRules();
+  sh.setFrozenColumns(0);
+  sh.setHiddenGridlines(true);
+  if (sh.getMaxColumns() < 12) sh.insertColumnsAfter(sh.getMaxColumns(), 12 - sh.getMaxColumns());
 
   const meses = mesesConDatos(ss);
   const r = rangosBase();
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
 
-  sh.getRange('A1').setValue('Evolución por mes').setFontWeight('bold').setFontSize(12);
-  const enc = ['Mes', 'Adjudicados (acto)', 'Por licitación', 'Por sorteo', 'Bajas', '% bajas',
-    'Aprobados del acto', '% conversión acto', 'Sin cerrar', 'Netos cerrados en el mes',
-    '   del acto del mes', '   de actos anteriores', 'Objetivo', '% cumplimiento', 'VM netos del mes',
-    'Categoría'];
-  sh.getRange(3, 1, 1, enc.length).setValues([enc])
-    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white').setWrap(true);
+  sh.setColumnWidth(1, 16);
+  sh.setColumnWidth(2, 140);
+  for (let c = 3; c <= 11; c++) sh.setColumnWidth(c, 104);
+  sh.getRange('B1:G1').merge().setValue('Evolución mensual')
+    .setFontSize(16).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
+  sh.getRange('B2:K2').merge()
+    .setValue('Acto: lo adjudicado en el acto de ese mes y cuánto se aprobó.   Cierre: los netos aprobados en ese mes (de cualquier acto) contra el objetivo.')
+    .setFontSize(9).setFontColor(GRIS_TEXTO);
+  sh.setRowHeight(1, 34);
 
+  // Encabezado en dos niveles.
+  sh.getRange('B4:B5').merge().setValue('Mes');
+  sh.getRange('C4:F4').merge().setValue('ACTO');
+  sh.getRange('G4:K4').merge().setValue('CIERRE DEL MES');
+  sh.getRange('B4:K4').setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white')
+    .setHorizontalAlignment('center').setVerticalAlignment('middle');
+  sh.getRange('C5:K5').setValues([['Adjudicados', 'Bajas', 'Aprobados', '% conversión',
+    'Netos', 'Objetivo', '% cumplimiento', 'Categoría', 'VM netos']]);
+  sh.getRange('C5:K5').setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+    .setHorizontalAlignment('center')
+    .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('F4:F80').setBorder(null, null, null, true, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+
+  const f1 = 6;
   const filas = meses.map((mes, i) => {
-    const f = i + 4;
-    const A = `$A${f}`;
+    const f = f1 + i;
+    const A = `$B${f}`;
     return [
       mes,
       `=COUNTIFS(${r.Acto},${A})`,
-      `=COUNTIFS(${r.Acto},${A},${r.Modalidad},"Por licitación")`,
-      `=COUNTIFS(${r.Acto},${A},${r.Modalidad},"Por sorteo")`,
       `=COUNTIFS(${r.Acto},${A},${r.Pedido},"BAJA ADJ")`,
-      `=IF(B${f}=0,"",E${f}/B${f})`,
       `=COUNTIFS(${r.Acto},${A},${aprob})`,
-      `=IF(B${f}=0,"",G${f}/B${f})`,
-      `=B${f}-E${f}-G${f}`,
+      `=IF(N(C${f})=0,"",E${f}/C${f})`,
       `=COUNTIFS(${r['Mes cierre']},${A},${aprob})`,
-      `=COUNTIFS(${r.Acto},${A},${r['Mes cierre']},${A},${aprob})`,
-      `=J${f}-K${f}`,
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$B,2,FALSE),"")`,
-      `=IF(N(M${f})=0,"",J${f}/M${f})`,
+      `=IF(N(H${f})=0,"",G${f}/H${f})`,
+      `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
       `=ARRAYFORMULA(SUMPRODUCT((${r['Mes cierre']}=${A})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")*` +
         `SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${A},PRECIOS!$B:$B,${r['Modelo ahorro']})))`,
-      `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
     ];
   });
+  let fTotal = f1;
   if (filas.length) {
-    sh.getRange(4, 1, filas.length, enc.length).setFormulas(filas.map((f) => ['', ...f.slice(1)]));
-    sh.getRange(4, 1, filas.length, 1).setNumberFormat('@')
-      .setValues(filas.map((f) => [f[0]])).setFontWeight('bold');
-    ['F', 'H', 'N'].forEach((c) => sh.getRange(`${c}4:${c}${3 + filas.length}`).setNumberFormat('0%'));
-    sh.getRange(`O4:O${3 + filas.length}`).setNumberFormat('$ #,##0');
-  }
+    const ult = f1 + filas.length - 1;
+    sh.getRange(f1, 3, filas.length, 9).setFormulas(filas.map((f) => f.slice(1)));
+    sh.getRange(f1, 2, filas.length, 1).setNumberFormat('@').setValues(filas.map((f) => [f[0]]))
+      .setFontWeight('bold');
+    sh.getRange(f1, 2, filas.length, 10)
+      .setBorder(null, null, true, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+    fTotal = ult + 1;
+    sh.getRange(fTotal, 2, 1, 10).setValues([['TOTAL', `=SUM(C${f1}:C${ult})`, `=SUM(D${f1}:D${ult})`,
+      `=SUM(E${f1}:E${ult})`, `=IF(N(C${fTotal})=0,"",E${fTotal}/C${fTotal})`, `=SUM(G${f1}:G${ult})`,
+      `=SUM(H${f1}:H${ult})`, `=IF(N(H${fTotal})=0,"",G${fTotal}/H${fTotal})`, '', `=SUM(K${f1}:K${ult})`]])
+      .setFontWeight('bold').setBackground(FONDO_TOTAL);
+    sh.getRange(f1, 3, filas.length + 1, 9).setHorizontalAlignment('center');
+    sh.getRange(`F${f1}:F${fTotal}`).setNumberFormat('0%');
+    sh.getRange(`I${f1}:I${fTotal}`).setNumberFormat('0%');
+    sh.getRange(`K${f1}:K${fTotal}`).setNumberFormat('$ #,##0').setHorizontalAlignment('right');
 
-  // Por responsable, todos los actos.
-  const f0 = 6 + filas.length;
-  sh.getRange(f0, 1).setValue('Por responsable (todos los actos)').setFontWeight('bold').setFontSize(12);
-  const enc2 = ['Responsable', 'Asignados', 'Aprobados', 'Bajas', 'Sin cerrar', '% conversión'];
-  sh.getRange(f0 + 2, 1, 1, enc2.length).setValues([enc2])
-    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+    const cumpl = [sh.getRange(`I${f1}:I${fTotal}`)];
+    sh.setConditionalFormatRules([
+      SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(1)
+        .setFontColor('#38761d').setBold(true).setRanges(cumpl).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenNumberBetween(0.9, 0.9999)
+        .setFontColor('#b45f06').setBold(true).setRanges(cumpl).build(),
+      SpreadsheetApp.newConditionalFormatRule().whenNumberLessThan(0.9)
+        .setFontColor('#cc0000').setBold(true).setRanges(cumpl).build(),
+    ]);
+  }
+  sh.getRange('F4:F5').setBorder(null, null, null, true, null, null, 'white', SpreadsheetApp.BorderStyle.SOLID);
+
+  // Por responsable (todos los actos).
+  const f0 = fTotal + 3;
+  sh.getRange(f0, 2, 1, 6).merge().setValue('Por responsable (todos los actos)')
+    .setFontSize(12).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
+  const enc2 = ['Responsable', 'Asignados', 'Aprobados', 'Bajas', 'En curso', '% conversión'];
+  sh.getRange(f0 + 1, 2, 1, 6).setValues([enc2]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
+    .setFontColor('white').setHorizontalAlignment('center');
   const resp = valoresLista(ss, 'Responsable');
   const filas2 = resp.map((nombre, i) => {
-    const f = f0 + 3 + i;
-    const A = `$A${f}`;
+    const f = f0 + 2 + i;
+    const A = `$B${f}`;
     return [
       nombre,
       `=COUNTIFS(${r.Responsable},${A})`,
       `=COUNTIFS(${r.Responsable},${A},${aprob})`,
       `=COUNTIFS(${r.Responsable},${A},${r.Pedido},"BAJA ADJ")`,
-      `=B${f}-C${f}-D${f}`,
-      `=IF(B${f}=0,"",C${f}/B${f})`,
+      `=C${f}-D${f}-E${f}`,
+      `=IF(N(C${f})=0,"",D${f}/C${f})`,
     ];
   });
   if (filas2.length) {
-    sh.getRange(f0 + 3, 1, filas2.length, 1).setValues(filas2.map((f) => [f[0]])).setFontWeight('bold');
-    sh.getRange(f0 + 3, 2, filas2.length, 5).setFormulas(filas2.map((f) => f.slice(1)));
-    sh.getRange(f0 + 3, 6, filas2.length, 1).setNumberFormat('0%');
+    const p1 = f0 + 2;
+    const ult = p1 + filas2.length - 1;
+    sh.getRange(p1, 2, filas2.length, 1).setValues(filas2.map((f) => [f[0]])).setFontWeight('bold');
+    sh.getRange(p1, 3, filas2.length, 5).setFormulas(filas2.map((f) => f.slice(1)));
+    sh.getRange(p1, 2, filas2.length, 6)
+      .setBorder(null, null, true, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+    const t = ult + 1;
+    sh.getRange(t, 2, 1, 6).setValues([['TOTAL', `=SUM(C${p1}:C${ult})`, `=SUM(D${p1}:D${ult})`,
+      `=SUM(E${p1}:E${ult})`, `=SUM(F${p1}:F${ult})`, `=IF(N(C${t})=0,"",D${t}/C${t})`]])
+      .setFontWeight('bold').setBackground(FONDO_TOTAL);
+    sh.getRange(p1, 3, filas2.length + 1, 5).setHorizontalAlignment('center');
+    sh.getRange(p1, 7, filas2.length + 1, 1).setNumberFormat('0%');
   }
-
-  sh.setColumnWidth(1, 150);
-  sh.setFrozenColumns(1);
 
   // Si el RESUMEN no tiene mes elegido, poner el último acto.
   const resumen = ss.getSheetByName(HOJA_RESUMEN);
-  if (resumen && !textoMes(resumen.getRange('B1').getValue()) && meses.length) {
+  if (resumen && !textoMes(resumen.getRange(CELDA_MES_RESUMEN).getValue()) && meses.length) {
     const actos = valoresColumnaBase(ss, 'Acto');
     const ultimo = meses.filter((m) => actos.indexOf(m) >= 0).pop();
-    if (ultimo) resumen.getRange('B1').setValue(ultimo);
+    if (ultimo) resumen.getRange(CELDA_MES_RESUMEN).setValue(ultimo);
   }
 }
 
@@ -666,24 +812,7 @@ function agregarABase(ss, filas) {
   if (nuevas.length) {
     base.getRange(ultima + 1, 1, nuevas.length, COLUMNAS_BASE.length).setValues(nuevas);
   }
-  agregarVendedoresALista(ss, nuevas);
   return { agregadas: nuevas.length, repetidas: filas.length - nuevas.length };
-}
-
-/** Suma a LISTAS los vendedores (RESPONSABLE) que todavía no están. */
-function agregarVendedoresALista(ss, filas) {
-  const listas = ss.getSheetByName(HOJA_LISTAS);
-  const enc = listas.getRange(1, 1, 1, listas.getLastColumn()).getValues()[0];
-  const c = enc.indexOf('RESPONSABLE') + 1;
-  if (!c) return;
-  const actuales = valoresLista(ss, 'RESPONSABLE');
-  const iResp = colBase('RESPONSABLE') - 1;
-  const nuevos = [...new Set(filas.map((f) => f[iResp]).filter((v) => v && actuales.indexOf(v) < 0))].sort();
-  if (nuevos.length) {
-    const todos = actuales.concat(nuevos).sort();
-    listas.getRange(2, c, listas.getMaxRows() - 1, 1).clearContent();
-    listas.getRange(2, c, todos.length, 1).setValues(todos.map((v) => [v]));
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -691,15 +820,18 @@ function agregarVendedoresALista(ss, filas) {
 // ---------------------------------------------------------------------------
 
 /**
- * Fórmula del % de un bonus de INCENTIVOS para el mes de RESUMEN!B1 y la
- * categoría de K4 (A/B/C). Busca el concepto por texto ("CUMPLIMIENTO
+ * Fórmula del % de un bonus de INCENTIVOS para el mes de RESUMEN (H1) y la
+ * categoría del bloque INCENTIVO PEDIDOS (I21). Busca el concepto por texto ("CUMPLIMIENTO
  * PEDIDOS", "ADICIONALES") porque el nombre cambia un poco mes a mes.
  * Devuelve 0 si no se cumple la condición.
  */
 function bonusSegunCategoria(textoConcepto, condicionNoCumple) {
-  return `IF(OR($K$4="",${condicionNoCumple}),0,IFERROR(INDEX(FILTER(${HOJA_INCENTIVOS}!$C$2:$E,` +
-    `${HOJA_INCENTIVOS}!$A$2:$A=$B$1,REGEXMATCH(UPPER(${HOJA_INCENTIVOS}!$B$2:$B),"${textoConcepto}")),` +
-    `1,MATCH($K$4,{"A","B","C"},0)),0))`;
+  const abs = (celda) => `$${celda.replace(/(\d+)/, '$$$1')}`;
+  const mes = abs(CELDA_MES_RESUMEN);
+  const cat = abs(CELDA_CATEGORIA_RESUMEN);
+  return `IF(OR(${cat}="",${condicionNoCumple}),0,IFERROR(INDEX(FILTER(${HOJA_INCENTIVOS}!$C$2:$E,` +
+    `${HOJA_INCENTIVOS}!$A$2:$A=${mes},REGEXMATCH(UPPER(${HOJA_INCENTIVOS}!$B$2:$B),"${textoConcepto}")),` +
+    `1,MATCH(${cat},{"A","B","C"},0)),0))`;
 }
 
 /** Date que Sheets armó con "SEPTIEMBRE 26" (26/09) -> "SEPTIEMBRE 26"; texto -> en mayúsculas. */

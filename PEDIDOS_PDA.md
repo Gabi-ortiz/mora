@@ -101,6 +101,28 @@ incentivos.
 - Septiembre: 117 adjudicados, 71 por licitación, 25 bajas, 51 aprobados del
   acto; netos del mes = 59 (51 del acto + 8 arrastrados de agosto).
 
+## Rediseño RESUMEN / INFORME (v3)
+- **RESUMEN**: título + selector de mes en **H1** (lista "Meses con datos",
+  solo meses con acto o cierre, el más reciente primero). Fila de 4
+  tarjetas (adjudicados del acto, aprobados del acto con % conversión,
+  netos del mes con del acto / anteriores, cumplimiento con objetivo y
+  categoría, en semáforo verde ≥100% / naranja ≥90% / rojo). Debajo, 4
+  bloques del mismo ancho de a dos (Adjudicados / Estado del acto; Cierres
+  del mes / Incentivo pedidos) y la tabla POR MODELO con fila TOTAL fija
+  arriba y columna % conversión. Sin líneas de cuadrícula.
+- **INFORME**: "Evolución mensual" con encabezado en dos grupos (ACTO:
+  adjudicados, bajas, aprobados, % conversión; CIERRE DEL MES: netos,
+  objetivo, % cumplimiento, categoría, VM netos) y fila TOTAL. Se sacaron
+  licitación/sorteo, % bajas, sin cerrar y el desglose del acto/anteriores
+  (están en el RESUMEN). "Por responsable" con TOTAL.
+- **RESPONSABLE** = "Of. Cuenta" de SGA (coincide en 100 de 114
+  solicitudes de septiembre; el resto se cambió a mano, p. ej. ADM). Sin
+  desplegable; se puede editar.
+- **Acto** y **Mes cierre** sin desplegable, en gris: los completa el
+  script (Acto al importar, con aviso si se edita; Mes cierre al aprobar).
+  Si Mes cierre se escribe a mano, onEdit lo pasa a "MES AA" y avisa si no
+  es válido.
+
 ## Meses como texto (corregido)
 Sheets convierte "SEPTIEMBRE 26" en la fecha 26/09 si la celda no es texto,
 y entonces las fórmulas no encuentran el mes. Las columnas de mes (Acto, Mes
