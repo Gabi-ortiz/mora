@@ -32,6 +32,7 @@ const HOJA_PRECIOS = 'PRECIOS';
 const HOJA_OBJETIVOS = 'OBJETIVOS';
 const HOJA_LISTAS = 'LISTAS';
 const HOJA_INCENTIVOS = 'INCENTIVOS';
+const HOJA_AJUSTES = 'AJUSTES';
 
 // Archivo "Objetivos y señales comerciales - PDA" (objetivos, categoría e incentivos).
 const ID_ARCHIVO_OBJETIVOS = '1TDMqgJkbkP11dSlUhvJpD5NhKtkj0vvuiu-pPPQ5kYo';
@@ -79,7 +80,7 @@ const COLUMNAS_NUMERICAS = ['Solicitud', 'Grupo', 'Orden', 'Avance', 'Documento'
 const LISTAS = {
   Responsable: ['CLARISA', 'SERGIO', 'TP', 'CHEXA'],
   Pedido: ['APROBADO', 'PENDIENTE', 'SUSPENDIDO', 'BAJA ADJ'],
-  Carpeta: ['APROBADA', 'WEB', 'RECHAZADA'],
+  Carpeta: ['APROBADA', 'WEB', 'RECHAZADA', 'REINGRESADA'],
   Modalidad: ['Por licitación', 'Por sorteo'],
   'Llave x llave': ['SI'],
 };
@@ -94,6 +95,18 @@ const HISTORICOS = [
 ];
 
 // Semilla de PRECIOS (tomada de los RESUMEN de cada mes).
+// Cierres que no están en BASE, para que los meses de arranque den igual que sus
+// RESUMEN mensuales originales: [Mes, Modelo, Netos, VM netos, Nota].
+const AJUSTES_INICIALES = [
+  ...[['DP1', 7, 229740000.1], ['FO1', 1, 27459000], ['DT1', 2, 96220000], ['MB1', 4, 96384000],
+    ['NT3', 1, 42390000]].map(([m, n, vm]) => ['AGOSTO 26', m, n, vm,
+    'Cierres en agosto de actos anteriores (archivo de JULIO, no está en BASE). RESUMEN de AGOSTO 26, bloque NETOS ANTERIOR.']),
+  ['SEPTIEMBRE 26', 'NC1', 1, 37550000,
+    '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
+  ['SEPTIEMBRE 26', 'MB1', 1, 24096000,
+    '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
+];
+
 const PRECIOS_INICIALES = {
   'AGOSTO 26': {
     DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000,
@@ -178,6 +191,7 @@ function armarEstructura() {
   armarPrecios(ss);
   armarObjetivos(ss);
   armarIncentivos(ss);
+  armarAjustes(ss);
   armarResumen(ss, listas);
   actualizarInforme();
 
@@ -185,7 +199,8 @@ function armarEstructura() {
   const vacia = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1');
   if (vacia && vacia.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(vacia);
 
-  [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_OBJETIVOS, HOJA_INCENTIVOS, HOJA_LISTAS]
+  [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_AJUSTES, HOJA_OBJETIVOS,
+    HOJA_INCENTIVOS, HOJA_LISTAS]
     .forEach((nombre, i) => {
       ss.setActiveSheet(ss.getSheetByName(nombre));
       ss.moveActiveSheet(i + 1);
@@ -212,6 +227,12 @@ function armarListas(ss) {
       sh.getRange(2, i + 2, vals.length, 1).setValues(vals.map((v) => [v]));
     });
   }
+  // Valores nuevos de las listas fijas (p. ej. REINGRESADA) en una hoja ya creada.
+  nombres.forEach((nombre, i) => {
+    const actuales = sh.getRange(2, i + 2, sh.getMaxRows() - 1, 1).getValues().map((f) => f[0]).filter((v) => v !== '');
+    const faltan = LISTAS[nombre].filter((v) => actuales.indexOf(v) < 0);
+    if (faltan.length) sh.getRange(actuales.length + 2, i + 2, faltan.length, 1).setValues(faltan.map((v) => [v]));
+  });
   // Columnas de versiones anteriores que ya no se usan: vendedores (RESPONSABLE) y las
   // listas de meses calculadas que estaban después de las listas fijas.
   sh.getRange(1, nombres.length + 2, sh.getMaxRows(), Math.max(1, sh.getMaxColumns() - nombres.length - 1)).clear();
@@ -361,6 +382,24 @@ function armarIncentivos(ss) {
   sh.setFrozenRows(1);
 }
 
+/**
+ * AJUSTES: cierres que no están en BASE (p. ej. de actos anteriores al primer mes
+ * cargado). Suman a los netos y al VM del mes en RESUMEN e INFORME.
+ */
+function armarAjustes(ss) {
+  const { sh, nueva } = hoja(ss, HOJA_AJUSTES, 5);
+  if (nueva) {
+    sh.getRange('A:A').setNumberFormat('@');
+    sh.getRange(2, 1, AJUSTES_INICIALES.length, 5).setValues(AJUSTES_INICIALES);
+  }
+  mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
+  sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Modelo', 'Netos', 'VM netos', 'Nota']])
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.getRange('D:D').setNumberFormat('$ #,##0');
+  sh.setColumnWidth(5, 520);
+  sh.setFrozenRows(1);
+}
+
 // ---------------------------------------------------------------------------
 // RESUMEN (fórmulas vivas sobre BASE, el mes se elige en H1)
 // ---------------------------------------------------------------------------
@@ -432,11 +471,14 @@ function armarResumen(ss, listas) {
     ['Pendientes', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE")`],
     ['   con CC aprobada', `=COUNTIFS(${acto},${r.Pedido},"PENDIENTE",${r.Carpeta},"APROBADA")`, true],
     ['Bajas', `=COUNTIFS(${acto},${r.Pedido},"BAJA ADJ")`],
-    ['Sin estado', `=COUNTIFS(${acto},${r.Pedido},"")`],
-    ['Trabajados', '=E9-I11-I12-I14-I15'],
+    // Como el RESUMEN mensual original: (netos licitación + sorteo) - (susp/pend con CC + bajas).
+    ['Trabajados', '=E14+E15-I11-I12-I14-I15'],
+    ['Terminados', '=I9+I11+I12+I14'],
+    ['Sin terminar', '=E9-I16-I15'],
   ];
   const izq2 = [
-    ['Netos del mes (todos los actos)', `=COUNTIFS(${r['Mes cierre']},${M},${aprob})`],
+    ['Netos del mes (todos los actos)',
+      `=COUNTIFS(${r['Mes cierre']},${M},${aprob})+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
     ['   del acto del mes', `=COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`, true],
     ['   de actos anteriores', '=E21-E22', true],
     ['   TP', `=COUNTIFS(${r['Mes cierre']},${M},${aprob},${r.Responsable},"TP")`, true],
@@ -513,15 +555,20 @@ function armarResumen(ss, listas) {
   const mod = r['Modelo ahorro'];
   const lista = 'B34:B80';
   const mapa = (expr) => `=MAP(${lista},LAMBDA(m,IF(m="","",${expr})))`;
+  const aj = `${HOJA_AJUSTES}!`;
   sh.getRange('B34').setFormula(
-    `=IFERROR(SORT(UNIQUE(FILTER(${mod},${mod}<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})))),"")`);
+    `=IFERROR(LET(u,UNIQUE({IFERROR(FILTER(${mod},${mod}<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})),"");` +
+    `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M}),"")}),SORT(FILTER(u,u<>""))),"")`);
   sh.getRange('C34').setFormula(mapa(`COUNTIFS(${acto},${mod},m)`));
   sh.getRange('D34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${aprob})`));
   sh.getRange('E34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`));
   sh.getRange('F34').setFormula('=MAP(C34:C80,D34:D80,LAMBDA(a,b,IF(N(a)=0,"",b/a)))');
-  sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})`));
+  sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})+` +
+    `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
   sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
-  sh.getRange('I34').setFormula('=MAP(G34:G80,H34:H80,LAMBDA(n,p,IF(n="","",n*p)))');
+  // VM netos = netos de BASE × V.M del mes + VM de los AJUSTES (que traen su propio importe).
+  sh.getRange('I34').setFormula(`=MAP(B34:B80,G34:G80,H34:H80,LAMBDA(m,n,p,IF(m="","",` +
+    `(n-SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m))*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
   sh.getRange('C34:I80').setHorizontalAlignment('center');
   sh.getRange('B34:I80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
 
@@ -601,12 +648,13 @@ function actualizarInforme() {
       `=COUNTIFS(${r.Acto},${A},${r.Pedido},"BAJA ADJ")`,
       `=COUNTIFS(${r.Acto},${A},${aprob})`,
       `=IF(N(C${f})=0,"",E${f}/C${f})`,
-      `=COUNTIFS(${r['Mes cierre']},${A},${aprob})`,
+      `=COUNTIFS(${r['Mes cierre']},${A},${aprob})+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${A})`,
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$B,2,FALSE),"")`,
       `=IF(N(H${f})=0,"",G${f}/H${f})`,
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
       `=ARRAYFORMULA(SUMPRODUCT((${r['Mes cierre']}=${A})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")*` +
-        `SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${A},PRECIOS!$B:$B,${r['Modelo ahorro']})))`,
+        `SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${A},PRECIOS!$B:$B,${r['Modelo ahorro']})))` +
+        `+SUMIFS(${HOJA_AJUSTES}!$D:$D,${HOJA_AJUSTES}!$A:$A,${A})`,
     ];
   });
   let fTotal = f1;
@@ -623,6 +671,7 @@ function actualizarInforme() {
       `=SUM(H${f1}:H${ult})`, `=IF(N(H${fTotal})=0,"",G${fTotal}/H${fTotal})`, '', `=SUM(K${f1}:K${ult})`]])
       .setFontWeight('bold').setBackground(FONDO_TOTAL);
     sh.getRange(f1, 3, filas.length + 1, 9).setHorizontalAlignment('center');
+    ['C', 'D', 'E', 'G', 'H'].forEach((c) => sh.getRange(`${c}${f1}:${c}${fTotal}`).setNumberFormat('0'));
     sh.getRange(`F${f1}:F${fTotal}`).setNumberFormat('0%');
     sh.getRange(`I${f1}:I${fTotal}`).setNumberFormat('0%');
     sh.getRange(`K${f1}:K${fTotal}`).setNumberFormat('$ #,##0').setHorizontalAlignment('right');
@@ -671,6 +720,7 @@ function actualizarInforme() {
       `=SUM(E${p1}:E${ult})`, `=SUM(F${p1}:F${ult})`, `=IF(N(C${t})=0,"",D${t}/C${t})`]])
       .setFontWeight('bold').setBackground(FONDO_TOTAL);
     sh.getRange(p1, 3, filas2.length + 1, 5).setHorizontalAlignment('center');
+    sh.getRange(p1, 3, filas2.length + 1, 4).setNumberFormat('0');
     sh.getRange(p1, 7, filas2.length + 1, 1).setNumberFormat('0%');
   }
 

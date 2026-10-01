@@ -124,6 +124,29 @@ incentivos.
   Si Mes cierre se escribe a mano, onEdit lo pasa a "MES AA" y avisa si no
   es válido.
 
+## Control contra los archivos mensuales (01/10/2026)
+- BASE contra AGOSTO 26 y SEPTIEMBRE 26: están todas las solicitudes (111 y
+  117), ninguna de más, y todos los campos de trabajo coinciden. Única
+  diferencia: solicitud 9258140 (septiembre), Carpeta = REINGRESADA en el
+  archivo mensual (estado nuevo, agregado a la lista Carpeta).
+- **AJUSTES** (hoja nueva): cierres que no están en BASE, para que los meses
+  de arranque den igual que sus RESUMEN originales. Suman a netos y VM en
+  RESUMEN (netos del mes, de actos anteriores, tabla por modelo) e INFORME.
+  - Agosto: 15 netos / $ 492.193.000,1 de actos de julio (DP1 7, FO1 1,
+    DT1 2, MB1 4, NT3 1) → 57 netos / $ 1.965.767.000, igual al original.
+  - Septiembre: 2 netos / $ 61.646.000 = los "+1" cargados a mano en el
+    RESUMEN original (NC1 y MB1) → 62 netos / $ 2.405.834.000, igual al
+    original. Falta confirmar de qué solicitudes son.
+- **Trabajados** se calcula como en el RESUMEN original: (netos licitación +
+  sorteo) − (suspendidos/pendientes con CC + bajas). Se agregaron
+  **Terminados** (aprobados + susp/pend con CC) y **Sin terminar** (total −
+  trabajados − bajas). Septiembre da 82 / 53 / 10, igual al original.
+- Agosto mantiene dos diferencias en el RESUMEN que son del original, no de
+  la base: "Caídas" de licitación contaba solo las bajas con Observación =
+  "NO PAGO" (7; el resto de los meses cuenta todas: 15), y "Terminado" (48)
+  dejaba afuera los 2 FP3 aprobados porque el modelo no estaba en su tabla
+  (correcto: 50).
+
 ## Meses como texto (corregido)
 Sheets convierte "SEPTIEMBRE 26" en la fecha 26/09 si la celda no es texto,
 y entonces las fórmulas no encuentran el mes. Las columnas de mes (Acto, Mes
