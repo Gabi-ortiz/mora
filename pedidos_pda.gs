@@ -317,6 +317,10 @@ function armarBase(ss, listas) {
   sh.setColumnWidth(colBase('Observacion'), 320);
   sh.setColumnWidth(colBase('Apellido, Nombre'), 220);
 
+  // Cuadrícula marcada en toda la tabla (también en las filas vacías, para las que se agreguen).
+  sh.getRange(1, 1, sh.getMaxRows(), n)
+    .setBorder(true, true, true, true, true, true, '#b7b7b7', SpreadsheetApp.BorderStyle.SOLID);
+
   if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
 }
 
