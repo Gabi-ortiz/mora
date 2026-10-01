@@ -406,6 +406,10 @@ function armarAjustes(ss) {
 
 // Celdas del RESUMEN que usan otras fórmulas / el script.
 const CELDA_MES_RESUMEN = 'H1';
+// Celda oculta con el mes elegido normalizado a "MES AA": Sheets a veces guarda la
+// opción del desplegable como fecha (26/09/2026) y las fórmulas no la encontraban.
+// Todas las fórmulas del RESUMEN usan esta celda, no H1.
+const CELDA_MES_CALC = 'K1';
 const CELDA_CATEGORIA_RESUMEN = 'I21';
 
 // Paleta: el bordó del reporte de SGA + grises suaves.
@@ -427,7 +431,10 @@ function armarResumen(ss, listas) {
   sh.setHiddenGridlines(true);
 
   const r = rangosBase();
-  const M = `$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`; // $H$1
+  const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $K$1
+  if (sh.getMaxColumns() < 11) sh.insertColumnsAfter(sh.getMaxColumns(), 11 - sh.getMaxColumns());
+  sh.getRange(CELDA_MES_CALC).setFormula(formulaMesNormalizado(`$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`));
+  sh.hideColumns(sh.getRange(CELDA_MES_CALC).getColumn());
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
   const acto = `${r.Acto},${M}`;
 
@@ -866,11 +873,21 @@ function agregarABase(ss, filas) {
  */
 function bonusSegunCategoria(textoConcepto, condicionNoCumple) {
   const abs = (celda) => `$${celda.replace(/(\d+)/, '$$$1')}`;
-  const mes = abs(CELDA_MES_RESUMEN);
+  const mes = abs(CELDA_MES_CALC);
   const cat = abs(CELDA_CATEGORIA_RESUMEN);
   return `IF(OR(${cat}="",${condicionNoCumple}),0,IFERROR(INDEX(FILTER(${HOJA_INCENTIVOS}!$C$2:$E,` +
     `${HOJA_INCENTIVOS}!$A$2:$A=${mes},REGEXMATCH(UPPER(${HOJA_INCENTIVOS}!$B$2:$B),"${textoConcepto}")),` +
     `1,MATCH(${cat},{"A","B","C"},0)),0))`;
+}
+
+/**
+ * Fórmula que devuelve el mes de una celda como "MES AA", esté guardado como texto
+ * o como la fecha que arma Sheets (26/09/2026 -> "SEPTIEMBRE 26").
+ */
+function formulaMesNormalizado(celda) {
+  const nombres = MESES.map((m) => `"${m}"`).join(',');
+  return `=IF(${celda}="","",IF(ISNUMBER(${celda}),CHOOSE(MONTH(${celda}),${nombres})&" "&TEXT(DAY(${celda}),"00"),` +
+    `UPPER(TRIM(${celda}))))`;
 }
 
 /** Date que Sheets armó con "SEPTIEMBRE 26" (26/09) -> "SEPTIEMBRE 26"; texto -> en mayúsculas. */

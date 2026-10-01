@@ -169,6 +169,13 @@ function armarVistaMes(ss) {
   sh.getRange('B1').setDataValidation(SpreadsheetApp.newDataValidation()
     .requireValueInRange(ss.getSheetByName(HOJA_OBJ).getRange('A2:A'), true).setAllowInvalid(true).build());
 
+  // H1 (oculta): el mes de B1 normalizado a "MES AA". Sheets a veces guarda la opción
+  // del desplegable como fecha (26/09/2026); las fórmulas usan H1, no B1.
+  const nombresMes = MESES_SENAL.map((m) => `"${m}"`).join(',');
+  sh.getRange('H1').setFormula(`=IF($B$1="","",IF(ISNUMBER($B$1),CHOOSE(MONTH($B$1),${nombresMes})&" "&` +
+    'TEXT(DAY($B$1),"00"),UPPER(TRIM($B$1))))');
+  sh.hideColumns(8);
+
   const titulo = (celda, texto) => sh.getRange(celda).setValue(texto)
     .setFontWeight('bold').setBackground(COLOR_ENC).setFontColor('white');
 
@@ -176,21 +183,21 @@ function armarVistaMes(ss) {
   sh.getRange('A4:E4').setValues([['Indicador', 'Marca', 'Objetivo', 'Fecha flujo', '% flujo']]).setFontWeight('bold');
   sh.getRange('A5').setFormula(
     `=IFERROR(FILTER({${HOJA_OBJ}!D2:D,${HOJA_OBJ}!C2:C,${HOJA_OBJ}!E2:E,${HOJA_OBJ}!I2:I,${HOJA_OBJ}!J2:J},` +
-    `${HOJA_OBJ}!A2:A=$B$1),"Sin objetivos cargados para este mes")`);
+    `${HOJA_OBJ}!A2:A=$H$1),"Sin objetivos cargados para este mes")`);
   sh.getRange('D5:D12').setNumberFormat('dd/mm/yyyy');
   sh.getRange('E5:E12').setNumberFormat('0%');
 
   titulo('A14', 'CATEGORÍA');
   sh.getRange('A15:B15').setValues([['Categoría del mes (carta)', '']]);
   sh.getRange('B15').setFormula(
-    `=IFERROR(INDEX(FILTER(${HOJA_OBJ}!F2:F,${HOJA_OBJ}!A2:A=$B$1,${HOJA_OBJ}!F2:F<>""),1),"")`)
+    `=IFERROR(INDEX(FILTER(${HOJA_OBJ}!F2:F,${HOJA_OBJ}!A2:A=$H$1,${HOJA_OBJ}!F2:F<>""),1),"")`)
     .setFontWeight('bold').setFontSize(14);
 
   titulo('A17', 'INCENTIVOS DEL MES');
   sh.getRange('A18:F18').setValues([['Concepto', 'Condición', 'A', 'B', 'C', 'Nº señal']]).setFontWeight('bold');
   sh.getRange('A19').setFormula(
     `=IFERROR(FILTER({${HOJA_INC}!C2:C,${HOJA_INC}!D2:D,${HOJA_INC}!E2:E,${HOJA_INC}!F2:F,${HOJA_INC}!G2:G,${HOJA_INC}!I2:I},` +
-    `${HOJA_INC}!A2:A=$B$1),"Sin incentivos cargados para este mes")`);
+    `${HOJA_INC}!A2:A=$H$1),"Sin incentivos cargados para este mes")`);
   sh.getRange('C19:E40').setNumberFormat('0.00%');
 
   sh.setColumnWidth(1, 300);
