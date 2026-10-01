@@ -54,6 +54,12 @@ incentivos.
   modelo. Los "netos del mes" cuentan cierres de **cualquier** acto, y se
   separan en "del acto del mes" y "de actos anteriores" (lo que antes se
   traía con IMPORTRANGE).
+- **RESUMEN – bloque INCENTIVO PEDIDOS** (columnas J-K): categoría del mes,
+  % cumplimiento de pedidos, % del bonus de cumplimiento (si llega al 100%),
+  pedidos adicionales al objetivo y % del bonus por pedido adicional, según
+  la categoría. Los conceptos se buscan por texto ("CUMPLIMIENTO PEDIDOS",
+  "ADICIONALES") en INCENTIVOS. El bonus de cumplimiento exige además 100%
+  de suscripciones, que no se mide en este archivo.
 - **INFORME**: una fila por mes (desde el primer acto) con adjudicados,
   bajas, % bajas, aprobados del acto, % conversión, sin cerrar, netos del
   mes (del acto / arrastre), objetivo, % cumplimiento y VM netos. Abajo, por
@@ -61,8 +67,12 @@ incentivos.
 - **PRECIOS**: Mes | Modelo | V.M. Se carga una vez por mes. Sembrado con los
   precios de agosto y septiembre tomados de los RESUMEN mensuales (bloque
   "Enviados"/"Netos", que es el que tenía los precios actualizados).
-- **OBJETIVOS**: Mes | Objetivo | Circular. Sembrado: agosto 57,
-  septiembre 60.
+- **OBJETIVOS** (solo lectura): Mes | Objetivo | Categoría de PEDIDOS
+  TOTALES (Fiat), leído con IMPORTRANGE del archivo "Objetivos y señales
+  comerciales - PDA" (`ID_ARCHIVO_OBJETIVOS`). Se carga allá, no acá. La
+  primera vez: clic en OBJETIVOS!A2 > "Permitir acceso".
+- **INCENTIVOS** (solo lectura): Mes | Concepto | A | B | C (Fiat), del mismo
+  archivo.
 - **LISTAS**: valores de los desplegables. Para agregar un responsable, un
   estado o un vendedor, se agrega acá.
 
@@ -90,6 +100,12 @@ incentivos.
   sus 114 solicitudes ya estaban cargadas.
 - Septiembre: 117 adjudicados, 71 por licitación, 25 bajas, 51 aprobados del
   acto; netos del mes = 59 (51 del acto + 8 arrastrados de agosto).
+
+## Meses como texto (corregido)
+Sheets convierte "SEPTIEMBRE 26" en la fecha 26/09 si la celda no es texto,
+y entonces las fórmulas no encuentran el mes. Las columnas de mes (Acto, Mes
+cierre, LISTAS!A, PRECIOS!A, RESUMEN!B1, INFORME!A) quedan en formato texto
+y "Armar / reparar estructura" corrige las que ya se habían convertido.
 
 ## Pendiente / decisiones
 - "RESPONSABLE" (vendedor) y "Responsable" (CLARISA/SERGIO/TP/CHEXA) se

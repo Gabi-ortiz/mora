@@ -207,11 +207,13 @@ function leerPendientes(ss, sh, col) {
       if (!get('Marca') && carta.marca) set('Marca', carta.marca);
       set('Mes ref.', carta.mes);
       set('Afecta', 'Objetivos');
-      set('Extracto', carta.indicadores.map((x) => `${x.indicador} ${x.objetivo}`).join(' · ') +
+      set('Extracto', carta.indicadores.map((x) => `${x.indicador} ${x.objetivo === '' ? '¿?' : x.objetivo}`).join(' · ') +
         (carta.categoria ? ` · Categoría ${carta.categoria}` : '') +
         (carta.fechaFlujo ? ` · Flujo ${carta.fechaFlujo} al ${Math.round(carta.pctFlujo * 100)}%` : ''));
-      set('Estado', 'Cargada');
-      set('Notas', resumen);
+      set('Estado', carta.incompleta ? 'Pendiente' : 'Cargada');
+      set('Notas', carta.incompleta
+        ? `⚠ No se pudieron leer los números de la tabla: completar el objetivo en OBJETIVOS. ${resumen}`
+        : resumen);
       res.temas = ['Objetivos'];
       res.resumen = resumen;
     } else {
@@ -386,42 +388,68 @@ function interpretarCarta(texto) {
   const conc = (t.match(/Concesionario:?\s*\n?\s*([A-ZÁÉÍÓÚÑ0-9 .&]+?S\.?\s?A\.?)/i) || [])[1];
   const marca = /\bJEEP\b/.test(T) ? 'JEEP' : /\bRAM\b/.test(T) ? 'RAM' : /\bFIAT\b/.test(T) ? 'FIAT' : '';
 
-  // Bloque de objetivos: entre "objetivos definidos..." y "El flujo" (o el saludo).
+  // Zona de objetivos: desde "objetivos definidos para el mes de ..." hasta el final
+  // (el OCR a veces manda la tabla al final, después del saludo).
+  // Se trabaja con el texto ORIGINAL (no en mayúsculas): los indicadores vienen en
+  // mayúsculas en la carta y así no se confunden con firmas como "Carlos Blanco".
   const ini = T.search(/OBJETIVOS\s+DEFINIDOS/);
-  let fin = T.search(/EL\s+FLUJO/);
-  if (fin < 0) fin = T.search(/SALUDAMOS/);
-  const bloque = T.slice(ini < 0 ? 0 : ini, fin < 0 ? T.length : fin)
-    .replace(/^[^\n]*\n/, ''); // saca la línea "objetivos definidos para el mes de ..."
+  const zona = t.slice(ini < 0 ? 0 : ini).replace(/^[^\n]*\n/, ''); // saca la línea "objetivos definidos..."
+  const lineas = zona.split('\n').map((l) => l.trim()).filter(Boolean);
 
-  const categoria = (bloque.match(/CATEGOR[IÍ]A\s*:?\s*\n?\s*([ABC])\b/) || [])[1] || '';
-  const sinCategoria = bloque.replace(/CATEGOR[IÍ]A\s*:?\s*\n?\s*[ABC]\b/, '\n');
+  // Categoría: "CATEGORÍA A" en la misma línea, o una sola línea con A / B / C suelta.
+  let categoria = (zona.match(/CATEGOR[IÍ]A[ \t]*:?[ \t]*([ABC])\b/i) || [])[1] || '';
+  if (!categoria) {
+    const sueltas = lineas.filter((l) => /^[ABC]$/.test(l));
+    if (sueltas.length === 1) categoria = sueltas[0];
+  }
 
-  // 1) "SUSCRIPCIONES   146" en la misma línea.
-  const indicadores = [];
+  // 1) "SUSCRIPCIONES   146" en la misma línea (tabla bien leída).
+  let indicadores = [];
+  let incompleta = false;
   const reLinea = /^[ \t]*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}?)[ \t]*:?[ \t]+(\d{1,6})[ \t]*$/gm;
   let m;
-  while ((m = reLinea.exec(sinCategoria)) !== null) {
+  while ((m = reLinea.exec(zona)) !== null) {
+    if (/^CATEGOR/.test(m[1])) continue;
     indicadores.push({ indicador: normalizarIndicador(m[1]), objetivo: Number(m[2]) });
   }
-  // 2) Si el OCR separó la tabla: primero los nombres y después los números, en el mismo orden.
+  // 2) Nombres y números en líneas separadas: solo si hay la misma cantidad de cada uno.
   if (!indicadores.length) {
-    const lineas = sinCategoria.split('\n').map((l) => l.trim()).filter(Boolean);
-    const nombres = lineas.filter((l) => /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}$/.test(l));
+    const nombres = lineas.filter((l) => /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}$/.test(l) && !/^CATEGOR/.test(l));
     const numeros = lineas.filter((l) => /^\d{1,6}$/.test(l)).map(Number);
-    if (nombres.length && nombres.length === numeros.length) {
-      nombres.forEach((n, i) => indicadores.push({ indicador: normalizarIndicador(n), objetivo: numeros[i] }));
+    if (!nombres.length) return null;
+    if (nombres.length === numeros.length) {
+      indicadores = nombres.map((n, k) => ({ indicador: normalizarIndicador(n), objetivo: numeros[k] }));
+    } else {
+      // 3) El OCR desarmó la tabla (p. ej. "4360" = 43 y 60 pegados): se cargan los
+      //    indicadores sin número, para completar a mano. No se adivina.
+      indicadores = nombres.map((n) => ({ indicador: normalizarIndicador(n), objetivo: '' }));
+      incompleta = true;
     }
   }
   if (!indicadores.length) return null;
 
   return {
-    mes, marca, categoria, indicadores,
+    mes, marca, categoria, indicadores, incompleta,
     concesionario: conc ? conc.replace(/\s+/g, ' ').trim().toUpperCase() : '',
     nCarta: nCarta ? nCarta.replace(/\s/g, '') : '',
     fechaCarta,
     fechaFlujo: mFlujo ? mFlujo[1] : '',
     pctFlujo: mPct ? Number(mPct[1]) / 100 : '',
   };
+}
+
+/** Date que Sheets armó con "SEPTIEMBRE 26" (26/09) -> "SEPTIEMBRE 26"; texto -> en mayúsculas. */
+function textoMes(v) {
+  if (v instanceof Date) return `${MESES_SENAL[v.getMonth()]} ${String(v.getDate()).padStart(2, '0')}`;
+  return v === null || v === undefined ? '' : String(v).trim().toUpperCase();
+}
+
+/** Pasa un rango a formato texto y corrige los meses que Sheets había convertido en fecha. */
+function mesesComoTextoObj(rango) {
+  const vals = rango.getValues();
+  const hayFechas = vals.some((f) => f[0] instanceof Date);
+  rango.setNumberFormat('@');
+  if (hayFechas) rango.setValues(vals.map((f) => [f[0] instanceof Date ? textoMes(f[0]) : f[0]]));
 }
 
 function normalizarIndicador(nombre) {
@@ -451,6 +479,8 @@ function hojaSenales(ss) {
     sh.setColumnWidth(ENCABEZADOS.indexOf('Título') + 1, 420);
     sh.hideColumns(ENCABEZADOS.indexOf('ID') + 1);
   }
+  // "Mes ref." como texto: si no, Sheets toma "SEPTIEMBRE 26" como la fecha 26/09.
+  mesesComoTextoObj(sh.getRange(2, ENCABEZADOS.indexOf('Mes ref.') + 1, sh.getMaxRows() - 1, 1));
   // Encabezados siempre al día (agrega Afecta / Extracto en hojas creadas con la versión anterior).
   if (sh.getMaxColumns() < ENCABEZADOS.length) {
     sh.insertColumnsAfter(sh.getMaxColumns(), ENCABEZADOS.length - sh.getMaxColumns());
@@ -520,7 +550,9 @@ function avisarPorMail(ss, sh, col, idsNuevos, leidos, primeraVez) {
     const l = porId[f[col.ID - 1]];
     const link = `<a href="${f[col.Link - 1]}">${esc(f[col.Título - 1])}</a>`;
     if (l && l.carta) {
-      cartas.push(`<li>${link}<br><b>${esc(l.carta.mes)}</b>: ${esc(f[col.Extracto - 1])}<br><i>${esc(l.resumen)}</i></li>`);
+      const aviso = l.carta.incompleta
+        ? '<br><b>⚠ No se pudieron leer los números de la tabla: completalos a mano en OBJETIVOS.</b>' : '';
+      cartas.push(`<li>${link}<br><b>${esc(l.carta.mes)}</b>: ${esc(f[col.Extracto - 1])}${aviso}<br><i>${esc(l.resumen)}</i></li>`);
     } else if (f[col.Afecta - 1] && f[col.Afecta - 1] !== '-') {
       relevantes.push(`<li>${link}<br><b>Afecta: ${esc(f[col.Afecta - 1])}</b><br>${esc(f[col.Extracto - 1])}</li>`);
     } else {

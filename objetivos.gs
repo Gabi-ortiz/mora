@@ -85,6 +85,10 @@ function armarObjetivos() {
   const cat = tabla(ss, HOJA_CAT, ENC_CAT, SEMILLA_CAT);
   const inc = tabla(ss, HOJA_INC, ENC_INC, SEMILLA_INC);
 
+  // Meses como texto ("SEPTIEMBRE 26"), corrigiendo los que Sheets convirtió en fecha.
+  mesesComoTextoObj(obj.getRange(2, 1, obj.getMaxRows() - 1, 1));
+  mesesComoTextoObj(inc.getRange(2, 1, inc.getMaxRows() - 1, 1));
+
   desplegableObj(obj, ENC_OBJ.indexOf('Indicador') + 1, listas.Indicador, false);
   desplegableObj(obj, ENC_OBJ.indexOf('Marca') + 1, listas.Marca, true);
   desplegableObj(obj, ENC_OBJ.indexOf('Categoría') + 1, listas['Categoría'], true);
@@ -120,6 +124,7 @@ function tabla(ss, nombre, encabezados, semilla) {
   let sh = ss.getSheetByName(nombre);
   if (!sh) {
     sh = ss.insertSheet(nombre);
+    sh.getRange('A:A').setNumberFormat('@'); // Mes / Trimestre como texto
     if (semilla.length) sh.getRange(2, 1, semilla.length, encabezados.length).setValues(semilla);
   }
   sh.getRange(1, 1, 1, encabezados.length).setValues([encabezados])
@@ -154,8 +159,9 @@ function desplegableObj(sh, col, rango, estricto) {
 function armarVistaMes(ss) {
   let sh = ss.getSheetByName(HOJA_MES);
   if (!sh) sh = ss.insertSheet(HOJA_MES, 0);
-  const elegido = sh.getRange('B1').getValue() || 'SEPTIEMBRE 26';
+  const elegido = textoMes(sh.getRange('B1').getValue()) || 'SEPTIEMBRE 26';
   sh.clear();
+  sh.getRange('B1').setNumberFormat('@');
   sh.getRange('A1:B1').setValues([['Mes:', elegido]]);
   sh.getRange('A1').setFontWeight('bold');
   sh.getRange('B1').setFontWeight('bold').setBackground('#fff2cc')
@@ -215,21 +221,28 @@ function cargarCartaObjetivos(ss, carta, link) {
   const nuevas = [];
   const cambios = [];
   const iguales = [];
+  const faltan = [];
   carta.indicadores.forEach((x) => {
     const flujo = x.indicador === conFlujo;
+    const sinNumero = x.objetivo === '';
     const fila = [carta.mes, conc, carta.marca, x.indicador, x.objetivo, carta.categoria, nCarta,
       aFecha(carta.fechaCarta), flujo ? aFecha(carta.fechaFlujo) : '', flujo ? carta.pctFlujo : '',
-      link, `Cargado automáticamente de la carta ${carta.nCarta}`.trim()];
-    const i = datos.findIndex((d) => d[c('Mes')] === carta.mes && d[c('Concesionario')] === conc &&
+      link, sinNumero ? `⚠ Completar objetivo (no se pudo leer del PDF de la carta ${carta.nCarta})`
+        : `Cargado automáticamente de la carta ${carta.nCarta}`.trim()];
+    const i = datos.findIndex((d) => textoMes(d[c('Mes')]) === carta.mes && d[c('Concesionario')] === conc &&
       (d[c('Marca')] === carta.marca || d[c('Marca')] === '') && d[c('Indicador')] === x.indicador);
     if (i < 0) {
       nuevas.push(fila);
+      if (sinNumero) faltan.push(x.indicador);
       return;
     }
     const actual = datos[i];
     const antes = actual[c('Objetivo')];
     const combinada = actual.map((v, j) => (v === '' || v === null ? fila[j] : v));
-    if (Number(antes) !== x.objetivo) {
+    combinada[c('Mes')] = carta.mes;
+    if (sinNumero) {
+      faltan.push(x.indicador);
+    } else if (Number(antes) !== x.objetivo) {
       combinada[c('Objetivo')] = x.objetivo;
       combinada[c('Nº carta')] = nCarta || combinada[c('Nº carta')];
       combinada[c('Link')] = link;
@@ -240,6 +253,7 @@ function cargarCartaObjetivos(ss, carta, link) {
     }
     sh.getRange(i + 2, 1, 1, ENC_OBJ.length).setValues([combinada]);
   });
+  sh.getRange('A:A').setNumberFormat('@');
   if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, ENC_OBJ.length).setValues(nuevas);
 
   agregarAListaObj(ss, 'Indicador', carta.indicadores.map((x) => x.indicador));
@@ -249,6 +263,7 @@ function cargarCartaObjetivos(ss, carta, link) {
   if (nuevas.length) partes.push(`${nuevas.length} objetivo(s) nuevo(s)`);
   if (cambios.length) partes.push(`cambiaron: ${cambios.join(', ')}`);
   if (iguales.length) partes.push(`sin cambios: ${iguales.join(', ')}`);
+  if (faltan.length) partes.push(`sin número en el PDF (completar si falta): ${faltan.join(', ')}`);
   return `${carta.mes}: ${partes.join('; ')}`;
 }
 

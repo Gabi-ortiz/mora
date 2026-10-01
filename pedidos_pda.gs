@@ -13,7 +13,11 @@
  * - RESUMEN: el tablero del mes, con el mes elegido en B1.
  * - INFORME: evolución mes a mes (acto y cierres) y por responsable.
  * - PRECIOS: V.M por mes y modelo (se carga una vez por mes).
- * - OBJETIVOS: objetivo del mes (llega por circular).
+ * - OBJETIVOS / INCENTIVOS: se leen (IMPORTRANGE) del archivo "Objetivos y
+ *   señales comerciales - PDA"; no se cargan acá.
+ *
+ * Los meses ("SEPTIEMBRE 26") se guardan como TEXTO: si no, Sheets los toma
+ * como la fecha 26/09 y las fórmulas no los encuentran.
  * - LISTAS: valores de los desplegables.
  *
  * Instalación: ver PEDIDOS_PDA.md.
@@ -27,6 +31,10 @@ const HOJA_INFORME = 'INFORME';
 const HOJA_PRECIOS = 'PRECIOS';
 const HOJA_OBJETIVOS = 'OBJETIVOS';
 const HOJA_LISTAS = 'LISTAS';
+const HOJA_INCENTIVOS = 'INCENTIVOS';
+
+// Archivo "Objetivos y señales comerciales - PDA" (objetivos, categoría e incentivos).
+const ID_ARCHIVO_OBJETIVOS = '1TDMqgJkbkP11dSlUhvJpD5NhKtkj0vvuiu-pPPQ5kYo';
 
 const FILAS_BASE = 5000;
 
@@ -85,7 +93,7 @@ const HISTORICOS = [
   { id: '1_5SnWB3QvWHHkV2nNZ0kH3ZVhNBNJX0W4ipnlBrvaOI', hoja: 'SEPTIEMBRE', acto: 'SEPTIEMBRE 26' },
 ];
 
-// Semillas de PRECIOS y OBJETIVOS (tomadas de los RESUMEN de cada mes).
+// Semilla de PRECIOS (tomada de los RESUMEN de cada mes).
 const PRECIOS_INICIALES = {
   'AGOSTO 26': {
     DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000,
@@ -100,7 +108,6 @@ const PRECIOS_INICIALES = {
     NT3: 42390000,
   },
 };
-const OBJETIVOS_INICIALES = [['AGOSTO 26', 57], ['SEPTIEMBRE 26', 60]];
 
 const MESES = ['ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO', 'JULIO',
   'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'];
@@ -156,6 +163,7 @@ function armarEstructura() {
   armarPegar(ss);
   armarPrecios(ss);
   armarObjetivos(ss);
+  armarIncentivos(ss);
   armarResumen(ss, listas);
   actualizarInforme();
 
@@ -163,7 +171,7 @@ function armarEstructura() {
   const vacia = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1');
   if (vacia && vacia.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(vacia);
 
-  [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_OBJETIVOS, HOJA_LISTAS]
+  [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_OBJETIVOS, HOJA_INCENTIVOS, HOJA_LISTAS]
     .forEach((nombre, i) => {
       ss.setActiveSheet(ss.getSheetByName(nombre));
       ss.moveActiveSheet(i + 1);
@@ -186,7 +194,8 @@ function armarListas(ss) {
   for (let a = ANIO_DESDE; a <= ANIO_HASTA; a++) {
     for (let m = 0; m < 12; m++) meses.push(etiquetaMes(m, a));
   }
-  // Meses se reescribe siempre (orden cronológico, lo usa el INFORME).
+  // Meses se reescribe siempre (orden cronológico, lo usa el INFORME), como texto.
+  sh.getRange('A:A').setNumberFormat('@');
   sh.getRange(1, 1, 1, 1).setValue('Meses');
   sh.getRange(2, 1, meses.length, 1).setValues(meses.map((m) => [m]));
 
@@ -226,6 +235,8 @@ function armarBase(ss, listas) {
   COLUMNAS_BASE.forEach((c, i) => {
     if (c.oculta) sh.hideColumns(i + 1); else sh.showColumns(i + 1);
   });
+  mesesComoTexto(sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1));
+  mesesComoTexto(sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1));
 
   // Desplegables.
   const filas = sh.getMaxRows() - 1;
@@ -284,21 +295,46 @@ function armarPrecios(ss) {
         filas.push([mes, modelo, PRECIOS_INICIALES[mes][modelo]]);
       });
     });
+    sh.getRange('A:A').setNumberFormat('@');
     sh.getRange(1, 1, 1, 3).setValues([['Mes', 'Modelo', 'V.M']]);
     sh.getRange(2, 1, filas.length, 3).setValues(filas);
   }
+  mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
   sh.getRange('C:C').setNumberFormat('$ #,##0');
   sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   sh.setFrozenRows(1);
 }
 
+/**
+ * OBJETIVOS: Mes | Objetivo | Categoría de PEDIDOS TOTALES (Fiat), leídos del
+ * archivo de objetivos. La primera vez hay que hacer clic en A2 > "Permitir acceso".
+ */
 function armarObjetivos(ss) {
-  const { sh, nueva } = hoja(ss, HOJA_OBJETIVOS, 5);
-  if (nueva) {
-    sh.getRange(1, 1, 1, 3).setValues([['Mes', 'Objetivo', 'Circular / nota']]);
-    sh.getRange(2, 1, OBJETIVOS_INICIALES.length, 2).setValues(OBJETIVOS_INICIALES);
-  }
-  sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  const { sh } = hoja(ss, HOJA_OBJETIVOS, 5);
+  sh.clear();
+  sh.getRange(1, 1, 1, 3).setValues([['Mes', 'Objetivo', 'Categoría']])
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.getRange('A2').setFormula(
+    `=IFERROR(QUERY(IMPORTRANGE("${ID_ARCHIVO_OBJETIVOS}","OBJETIVOS!A2:F"),` +
+    `"select Col1, Col5, Col6 where Col4 = 'PEDIDOS TOTALES' and Col3 = 'FIAT'",0),` +
+    `"Hacer clic acá y elegir Permitir acceso al archivo de objetivos")`);
+  sh.getRange('E1').setValue('Se cargan en el archivo "Objetivos y señales comerciales - PDA" (no editar acá).')
+    .setFontStyle('italic');
+  sh.setFrozenRows(1);
+}
+
+/** INCENTIVOS: Mes | Concepto | A | B | C (Fiat), leídos del archivo de objetivos. */
+function armarIncentivos(ss) {
+  const { sh } = hoja(ss, HOJA_INCENTIVOS, 6);
+  sh.clear();
+  sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Concepto', 'A', 'B', 'C']])
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.getRange('A2').setFormula(
+    `=IFERROR(QUERY(IMPORTRANGE("${ID_ARCHIVO_OBJETIVOS}","INCENTIVOS!A2:G"),` +
+    `"select Col1, Col3, Col5, Col6, Col7 where Col2 = 'FIAT'",0),"")`);
+  sh.getRange('C:E').setNumberFormat('0.00%');
+  sh.getRange('G1').setValue('Se cargan en el archivo "Objetivos y señales comerciales - PDA" (no editar acá).')
+    .setFontStyle('italic');
   sh.setFrozenRows(1);
 }
 
@@ -308,9 +344,10 @@ function armarObjetivos(ss) {
 
 function armarResumen(ss, listas) {
   const { sh } = hoja(ss, HOJA_RESUMEN, 2);
-  const mesElegido = sh.getRange('B1').getValue();
+  const mesElegido = textoMes(sh.getRange('B1').getValue());
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
+  sh.getRange('B1').setNumberFormat('@');
   sh.getRange('A1:B1').setValues([['Mes:', mesElegido || '']]);
   sh.getRange('B1').setDataValidation(
     SpreadsheetApp.newDataValidation().requireValueInRange(listas.Meses, true).build())
@@ -366,6 +403,16 @@ function armarResumen(ss, listas) {
         ['VM netos del mes', '=SUM(G16:G)'],
       ],
     },
+    {
+      col: 10, titulo: 'INCENTIVO PEDIDOS',
+      filas: [
+        ['Categoría del mes', '=IFERROR(VLOOKUP($B$1,OBJETIVOS!$A:$C,3,FALSE),"")'],
+        ['% cumplimiento pedidos', '=H11'],
+        ['Bonus cumplimiento pedidos totales', `=${bonusSegunCategoria('CUMPLIMIENTO PEDIDOS', 'N(H11)<1')}`],
+        ['Pedidos adicionales al objetivo', '=IF(N(H8)=0,"",MAX(0,H4-H8))'],
+        ['Bonus por pedido adicional', `=${bonusSegunCategoria('ADICIONALES', 'N(K7)=0')}`],
+      ],
+    },
   ];
 
   bloques.forEach((b) => {
@@ -377,6 +424,15 @@ function armarResumen(ss, listas) {
   });
   sh.getRange('H11').setNumberFormat('0%');
   sh.getRange('H12').setNumberFormat('$ #,##0');
+  sh.getRange('K5').setNumberFormat('0%');
+  sh.getRange('K6').setNumberFormat('0.00%');
+  sh.getRange('K8').setNumberFormat('0.00%');
+  sh.getRange('J9').setValue('El bonus de cumplimiento exige además el 100% del objetivo de suscripciones ' +
+    '(no se mide en este archivo). % según categoría, de la hoja INCENTIVOS.')
+    .setFontStyle('italic').setWrap(true);
+  sh.getRange('J9:K9').merge();
+  sh.setRowHeight(9, 48);
+  sh.setColumnWidth(10, 230);
 
   // Por modelo: lista dinámica con los modelos que tienen movimiento en el mes.
   const enc = ['Modelo', 'Adjudicados (acto)', 'Susp. c/CC aprobada', 'Aprobados (acto)',
@@ -418,7 +474,8 @@ function actualizarInforme() {
   sh.getRange('A1').setValue('Evolución por mes').setFontWeight('bold').setFontSize(12);
   const enc = ['Mes', 'Adjudicados (acto)', 'Por licitación', 'Por sorteo', 'Bajas', '% bajas',
     'Aprobados del acto', '% conversión acto', 'Sin cerrar', 'Netos cerrados en el mes',
-    '   del acto del mes', '   de actos anteriores', 'Objetivo', '% cumplimiento', 'VM netos del mes'];
+    '   del acto del mes', '   de actos anteriores', 'Objetivo', '% cumplimiento', 'VM netos del mes',
+    'Categoría'];
   sh.getRange(3, 1, 1, enc.length).setValues([enc])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white').setWrap(true);
 
@@ -442,11 +499,13 @@ function actualizarInforme() {
       `=IF(N(M${f})=0,"",J${f}/M${f})`,
       `=ARRAYFORMULA(SUMPRODUCT((${r['Mes cierre']}=${A})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")*` +
         `SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${A},PRECIOS!$B:$B,${r['Modelo ahorro']})))`,
+      `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
     ];
   });
   if (filas.length) {
     sh.getRange(4, 1, filas.length, enc.length).setFormulas(filas.map((f) => ['', ...f.slice(1)]));
-    sh.getRange(4, 1, filas.length, 1).setValues(filas.map((f) => [f[0]])).setFontWeight('bold');
+    sh.getRange(4, 1, filas.length, 1).setNumberFormat('@')
+      .setValues(filas.map((f) => [f[0]])).setFontWeight('bold');
     ['F', 'H', 'N'].forEach((c) => sh.getRange(`${c}4:${c}${3 + filas.length}`).setNumberFormat('0%'));
     sh.getRange(`O4:O${3 + filas.length}`).setNumberFormat('$ #,##0');
   }
@@ -481,7 +540,7 @@ function actualizarInforme() {
 
   // Si el RESUMEN no tiene mes elegido, poner el último acto.
   const resumen = ss.getSheetByName(HOJA_RESUMEN);
-  if (resumen && !resumen.getRange('B1').getValue() && meses.length) {
+  if (resumen && !textoMes(resumen.getRange('B1').getValue()) && meses.length) {
     const actos = valoresColumnaBase(ss, 'Acto');
     const ultimo = meses.filter((m) => actos.indexOf(m) >= 0).pop();
     if (ultimo) resumen.getRange('B1').setValue(ultimo);
@@ -590,7 +649,7 @@ function agregarABase(ss, filas) {
   const base = ss.getSheetByName(HOJA_BASE);
   const cActo = colBase('Acto') - 1;
   const cSol = colBase('Solicitud') - 1;
-  const clave = (f) => `${f[cActo]}|${f[cSol]}`;
+  const clave = (f) => `${textoMes(f[cActo])}|${f[cSol]}`;
   const existentes = new Set();
   const ultima = ultimaFilaBase(base);
   if (ultima > 1) {
@@ -630,6 +689,32 @@ function agregarVendedoresALista(ss, filas) {
 // Utilidades
 // ---------------------------------------------------------------------------
 
+/**
+ * Fórmula del % de un bonus de INCENTIVOS para el mes de RESUMEN!B1 y la
+ * categoría de K4 (A/B/C). Busca el concepto por texto ("CUMPLIMIENTO
+ * PEDIDOS", "ADICIONALES") porque el nombre cambia un poco mes a mes.
+ * Devuelve 0 si no se cumple la condición.
+ */
+function bonusSegunCategoria(textoConcepto, condicionNoCumple) {
+  return `IF(OR($K$4="",${condicionNoCumple}),0,IFERROR(INDEX(FILTER(${HOJA_INCENTIVOS}!$C$2:$E,` +
+    `${HOJA_INCENTIVOS}!$A$2:$A=$B$1,REGEXMATCH(UPPER(${HOJA_INCENTIVOS}!$B$2:$B),"${textoConcepto}")),` +
+    `1,MATCH($K$4,{"A","B","C"},0)),0))`;
+}
+
+/** Date que Sheets armó con "SEPTIEMBRE 26" (26/09) -> "SEPTIEMBRE 26"; texto -> en mayúsculas. */
+function textoMes(v) {
+  if (v instanceof Date) return etiquetaMes(v.getMonth(), v.getDate());
+  return v === null || v === undefined ? '' : String(v).trim().toUpperCase();
+}
+
+/** Pasa un rango a formato texto y corrige los meses que Sheets había convertido en fecha. */
+function mesesComoTexto(rango) {
+  const vals = rango.getValues();
+  const hayFechas = vals.some((f) => f[0] instanceof Date);
+  rango.setNumberFormat('@');
+  if (hayFechas) rango.setValues(vals.map((f) => [f[0] instanceof Date ? textoMes(f[0]) : f[0]]));
+}
+
 function colBase(nombre) {
   const i = COLUMNAS_BASE.findIndex((c) => c.h === nombre);
   if (i < 0) throw new Error(`Columna inexistente en BASE: ${nombre}`);
@@ -667,6 +752,7 @@ function esMesValido(texto) {
 
 /** "SEPTIEMBRE" en el archivo de AGOSTO 26 -> "SEPTIEMBRE 26" (o año siguiente si el mes es anterior al acto). */
 function mesCierreDesdeTexto(valor, acto) {
+  if (valor instanceof Date) return textoMes(valor);
   const texto = String(valor).trim().toUpperCase();
   if (!texto) return '';
   if (esMesValido(texto)) return texto;
@@ -707,8 +793,8 @@ function valoresColumnaBase(ss, nombre) {
   const base = ss.getSheetByName(HOJA_BASE);
   const ultima = ultimaFilaBase(base);
   if (ultima < 2) return [];
-  return base.getRange(2, colBase(nombre), ultima - 1, 1).getValues()
-    .map((f) => f[0]).filter((v) => v !== '');
+  const vals = base.getRange(2, colBase(nombre), ultima - 1, 1).getValues().map((f) => f[0]);
+  return (nombre === 'Acto' || nombre === 'Mes cierre' ? vals.map(textoMes) : vals).filter((v) => v !== '');
 }
 
 function valoresLista(ss, encabezado) {

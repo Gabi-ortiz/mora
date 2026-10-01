@@ -44,6 +44,12 @@ opcionales y listas de cambio de modelo no se leen.
   las cartas) con este formato. Los % de incentivo se cargan a mano en INCENTIVOS
   (cada señal tiene otro formato y un número mal leído afecta la
   liquidación).
+- **Tabla desarmada por el OCR**: en la carta 09/2026 real, Google devuelve
+  los nombres de los indicadores al final y pega 43 y 60 en "4360". En ese
+  caso el lector reconoce la carta (mes, categoría, flujo, Nº, indicadores)
+  pero NO adivina números: deja el objetivo vacío con "⚠ Completar
+  objetivo", la carta queda "Pendiente" y el mail lo avisa. Si el mes ya
+  tenía los objetivos cargados, no los toca.
 - Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
   los 33 ya registrados se van leyendo en las próximas corridas automáticas
   o con "Leer contenido de señales ya registradas".
