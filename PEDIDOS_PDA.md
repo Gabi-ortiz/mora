@@ -177,6 +177,12 @@ de nuevo no duplica):
 - Objetivo de julio (54, del RESUMEN de JULIO 26) va en el archivo de
   objetivos.
 
+## Modelos sin precio (PRECIOS!G:H)
+Lista calculada (no se edita): modelo y período de los netos (BASE aprobados
+por Mes cierre, y netos de AJUSTES) que no tienen V.M en PRECIOS para ese
+mes. Sin ese precio su VM da 0. Cada par desaparece al cargar el precio en
+A:C. Ordenada por período (cronológico) y modelo.
+
 ## Orden de BASE
 BASE se ordena por Acto en orden cronológico (más viejo arriba); dentro de
 cada acto se respeta el orden que ya tenían las filas y las notas viajan con

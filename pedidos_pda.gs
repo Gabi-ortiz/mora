@@ -378,6 +378,34 @@ function armarPrecios(ss) {
   // Hoja ya creada: los precios (valores y formato) no se tocan. Solo se corrige un mes
   // que Sheets haya convertido en fecha (26/09/2026 -> "SEPTIEMBRE 26"); el resto queda igual.
   mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
+  armarFaltanPrecios(sh);
+}
+
+/**
+ * PRECIOS!G:H (calculado, no se edita): modelos con netos en un mes (BASE aprobados por Mes
+ * cierre, o AJUSTES) que no tienen V.M cargado para ese mes. Sin ese precio, su VM da 0.
+ * Desaparecen solos al cargar el precio en A:C.
+ */
+function armarFaltanPrecios(sh) {
+  if (sh.getMaxColumns() < 8) sh.insertColumnsAfter(sh.getMaxColumns(), 8 - sh.getMaxColumns());
+  sh.getRange('G:H').clearContent();
+  sh.getRange('G1:H1').setValues([['Falta precio: Modelo', 'Período']])
+    .setFontWeight('bold').setBackground('#b45f06').setFontColor('white');
+  const mod = colBase('Modelo ahorro');
+  const cierre = colBase('Mes cierre');
+  const col = (c) => `${HOJA_BASE}!${letra(c)}2:${letra(c)}`;
+  const nombres = MESES.map((m) => `"${m}"`).join(',');
+  sh.getRange('G2').setFormula(
+    `=LET(b,IFERROR(FILTER({${col(mod)},${col(cierre)}},${col(colBase('Pedido'))}="APROBADO",` +
+    `${col(colBase('Carpeta'))}="APROBADA",${col(cierre)}<>""),{"",""}),` +
+    `a,IFERROR(FILTER({${HOJA_AJUSTES}!B2:B,${HOJA_AJUSTES}!A2:A},${HOJA_AJUSTES}!C2:C<>"",${HOJA_AJUSTES}!C2:C<>0),{"",""}),` +
+    `t,{b;a},u,UNIQUE(FILTER(t,INDEX(t,,1)<>"",INDEX(t,,2)<>"")),` +
+    `f,MAP(INDEX(u,,1),INDEX(u,,2),LAMBDA(mo,me,COUNTIFS($B$2:$B,mo,$A$2:$A,me)=0)),` +
+    `x,FILTER(u,f),p,INDEX(x,,2),` +
+    `IFERROR(SORT(x,ARRAYFORMULA(IFERROR(DATE(2000+VALUE(RIGHT(p,2)),MATCH(LEFT(p,LEN(p)-3),{${nombres}},0),1),0)),TRUE,INDEX(x,,1),TRUE),` +
+    `"Todos los modelos con netos tienen precio"))`);
+  sh.getRange('G2:H').setFontColor('#b45f06');
+  sh.setColumnWidth(7, 170);
 }
 
 /**
