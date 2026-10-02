@@ -393,7 +393,13 @@ function armarObjetivos(ss) {
     `=IFERROR(QUERY(IMPORTRANGE("${ID_ARCHIVO_OBJETIVOS}","OBJETIVOS!A2:F"),` +
     `"select Col1, Col5, Col6 where Col4 = 'PEDIDOS TOTALES' and Col3 = 'FIAT'",0),` +
     `"Hacer clic acá y elegir Permitir acceso al archivo de objetivos")`);
-  sh.getRange('E1').setValue('Se cargan en el archivo "Objetivos y señales comerciales - PDA" (no editar acá).')
+  // Objetivos de pedidos por modelo (p. ej. PEDIDOS CRONOS 27 y PEDIDOS TITANO 4 dentro de los 54).
+  sh.getRange(1, 5, 1, 3).setValues([['Mes', 'Indicador', 'Objetivo']])
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.getRange('E2').setFormula(
+    `=IFERROR(QUERY(IMPORTRANGE("${ID_ARCHIVO_OBJETIVOS}","OBJETIVOS!A2:F"),` +
+    `"select Col1, Col4, Col5 where Col4 starts with 'PEDIDOS ' and Col4 <> 'PEDIDOS TOTALES' and Col3 = 'FIAT'",0),"")`);
+  sh.getRange('I1').setValue('Se cargan en el archivo "Objetivos y señales comerciales - PDA" (no editar acá).')
     .setFontStyle('italic');
   sh.setFrozenRows(1);
 }
@@ -540,6 +546,16 @@ function armarResumen(ss, listas) {
   bloqueResumen(sh, 8, 6, 'ESTADO DEL ACTO', der1);
   bloqueResumen(sh, 20, 2, 'CIERRES DEL MES', izq2);
   bloqueResumen(sh, 20, 6, 'INCENTIVO PEDIDOS', der2);
+  // Objetivos de pedidos por modelo dentro del total: "Cronos 20/27 · Titano 1/4" (netos del mes
+  // cuya descripción de producto contiene CRONOS / TITANO, contra su objetivo).
+  const desc = r['Descripción de producto'];
+  sh.getRange('F26:H26').merge().setValue('   de los cuales, por modelo').setFontColor(GRIS_TEXTO);
+  sh.getRange('I26').setFormula(
+    `=IFERROR(TEXTJOIN("  ·  ",TRUE,MAP(FILTER(OBJETIVOS!$F$2:$F,OBJETIVOS!$E$2:$E=${M}),` +
+    `FILTER(OBJETIVOS!$G$2:$G,OBJETIVOS!$E$2:$E=${M}),LAMBDA(ind,obj,LET(mod,TRIM(SUBSTITUTE(ind,"PEDIDOS ","")),` +
+    `PROPER(mod)&" "&COUNTIFS(${r['Mes cierre']},${M},${aprob},${desc},"*"&mod&"*")&"/"&obj)))),"—")`)
+    .setHorizontalAlignment('center').setFontColor(GRIS_TEXTO);
+  sh.getRange('F26:I26').setBorder(null, null, true, null, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange('F27:I29').merge().setWrap(true).setVerticalAlignment('top')
     .setValue('El bonus de cumplimiento exige además el 100% del objetivo de suscripciones (no se mide en ' +
       'este archivo). Los % salen de la hoja INCENTIVOS según la categoría.')

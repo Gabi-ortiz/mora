@@ -59,6 +59,15 @@ opcionales y listas de cambio de modelo no se leen.
   justo debajo, también seguidos. Si el OCR los mezcló, no se asigna nada
   (con el texto real de la carta 09/2026, mezclar el orden daba
   suscripciones = 43).
+- **Números pegados por el OCR** ("4360" = 43 y 60; "2727454" = 27, 27, 4 y
+  54): `deducirNumeros` prueba todas las formas de repartirlos entre los
+  indicadores y se queda con las que cumplen: cada objetivo entre 1 y 999,
+  ninguno mayor que SUSCRIPCIONES y PEDIDOS TOTALES ≥ suma de los PEDIDOS
+  por modelo (Cronos y Titano son parte del total). Si queda una sola, se
+  usa; si quedan varias, se elige la más parecida a los objetivos del mes
+  cargado más cercano, solo si se diferencia claramente. Lo deducido queda
+  "⚠ Verificar" (Estado Pendiente). Probado: carta 09/2026 → 146/43/60;
+  carta 07/2026 → 127/27/27/4/54.
 - Lee hasta 12 archivos por corrida (límite de 6 minutos de Apps Script);
   los 33 ya registrados se van leyendo en las próximas corridas automáticas
   o con `leerSenalesRegistradas` desde el editor.

@@ -230,13 +230,15 @@ function cargarCartaObjetivos(ss, carta, link) {
   const cambios = [];
   const iguales = [];
   const faltan = [];
+  const completados = [];
   carta.indicadores.forEach((x) => {
     const flujo = x.indicador === conFlujo;
     const sinNumero = x.objetivo === '';
     const fila = [carta.mes, conc, carta.marca, x.indicador, x.objetivo, carta.categoria, nCarta,
       aFecha(carta.fechaCarta), flujo ? aFecha(carta.fechaFlujo) : '', flujo ? carta.pctFlujo : '',
       link, sinNumero ? `⚠ Completar objetivo (no se pudo leer del PDF de la carta ${carta.nCarta})`
-        : `Cargado automáticamente de la carta ${carta.nCarta}`.trim()];
+        : carta.deducida ? `⚠ Verificar: deducido del PDF de la carta ${carta.nCarta} (el OCR pegó los números)`
+          : `Cargado automáticamente de la carta ${carta.nCarta}`.trim()];
     const i = datos.findIndex((d) => textoMes(d[c('Mes')]) === carta.mes && d[c('Concesionario')] === conc &&
       (d[c('Marca')] === carta.marca || d[c('Marca')] === '') && d[c('Indicador')] === x.indicador);
     if (i < 0) {
@@ -250,6 +252,12 @@ function cargarCartaObjetivos(ss, carta, link) {
     combinada[c('Mes')] = carta.mes;
     if (sinNumero) {
       faltan.push(x.indicador);
+    } else if (antes === '' || antes === null) {
+      // Fila que había quedado sin número en una lectura anterior: se completa.
+      combinada[c('Objetivo')] = x.objetivo;
+      combinada[c('Link')] = link;
+      combinada[c('Notas')] = fila[c('Notas')];
+      completados.push(`${x.indicador} ${x.objetivo}`);
     } else if (Number(antes) !== x.objetivo) {
       combinada[c('Objetivo')] = x.objetivo;
       combinada[c('Nº carta')] = nCarta || combinada[c('Nº carta')];
@@ -269,6 +277,7 @@ function cargarCartaObjetivos(ss, carta, link) {
 
   const partes = [];
   if (nuevas.length) partes.push(`${nuevas.length} objetivo(s) nuevo(s)`);
+  if (completados.length) partes.push(`completados: ${completados.join(', ')}`);
   if (cambios.length) partes.push(`cambiaron: ${cambios.join(', ')}`);
   if (iguales.length) partes.push(`sin cambios: ${iguales.join(', ')}`);
   if (faltan.length) partes.push(`sin número en el PDF (completar si falta): ${faltan.join(', ')}`);

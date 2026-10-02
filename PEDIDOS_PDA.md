@@ -73,6 +73,11 @@ incentivos.
   primera vez: clic en OBJETIVOS!A2 > "Permitir acceso".
 - **INCENTIVOS** (solo lectura): Mes | Concepto | A | B | C (Fiat), del mismo
   archivo.
+- **Objetivos de pedidos por modelo** (OBJETIVOS!E:G, solo lectura): p. ej.
+  julio 26 pide 54 pedidos totales, de los cuales 27 Cronos y 4 Titano. En
+  RESUMEN (fila 26, bloque INCENTIVO PEDIDOS) se ve "Cronos 20/27 · Titano
+  1/4": netos del mes cuya Descripción de producto contiene CRONOS / TITANO
+  contra su objetivo (no cuenta los netos de AJUSTES).
 - **LISTAS**: valores de los desplegables. Para agregar un responsable, un
   estado o un vendedor, se agrega acá.
 

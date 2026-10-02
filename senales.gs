@@ -199,7 +199,7 @@ function leerPendientes(ss, sh, col) {
       return;
     }
 
-    const carta = interpretarCarta(texto, indicadoresConocidos(ss));
+    const carta = interpretarCarta(texto, indicadoresConocidos(ss), historialObjetivos(ss));
     if (carta) {
       res.carta = carta;
       const resumen = cargarCartaObjetivos(ss, carta, res.link);
@@ -210,10 +210,10 @@ function leerPendientes(ss, sh, col) {
       set('Extracto', carta.indicadores.map((x) => `${x.indicador} ${x.objetivo === '' ? '¿?' : x.objetivo}`).join(' · ') +
         (carta.categoria ? ` · Categoría ${carta.categoria}` : '') +
         (carta.fechaFlujo ? ` · Flujo ${carta.fechaFlujo} al ${Math.round(carta.pctFlujo * 100)}%` : ''));
-      set('Estado', carta.incompleta ? 'Pendiente' : 'Cargada');
-      set('Notas', carta.incompleta
-        ? `⚠ Revisar: el PDF no dejó leer los números. ${resumen}`
-        : resumen);
+      set('Estado', carta.incompleta || carta.deducida ? 'Pendiente' : 'Cargada');
+      set('Notas', carta.incompleta ? `⚠ Revisar: el PDF no dejó leer los números. ${resumen}`
+        : carta.deducida ? `⚠ Verificar con el PDF: números deducidos (el OCR los pegó). ${resumen}`
+          : resumen);
       res.temas = ['Objetivos'];
       res.resumen = resumen;
     } else {
@@ -399,7 +399,86 @@ function separarIndicadores(nombre, conocidos) {
   return encontrados.length >= 2 ? encontrados : [n];
 }
 
-function interpretarCarta(texto, conocidos) {
+/** {mes: {indicador: objetivo}} de la hoja OBJETIVOS, para desempatar números pegados por el OCR. */
+function historialObjetivos(ss) {
+  const sh = ss.getSheetByName('OBJETIVOS');
+  const h = {};
+  if (!sh || sh.getLastRow() < 2) return h;
+  sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().forEach((f) => {
+    const mes = textoMes(f[0]);
+    if (mes && f[3] && typeof f[4] === 'number') (h[mes] = h[mes] || {})[String(f[3]).toUpperCase()] = f[4];
+  });
+  return h;
+}
+
+/**
+ * El OCR suele pegar los números de la tabla ("2727454" = 27, 27, 4 y 54). Busca todas las
+ * formas de repartir los números leídos entre los indicadores (en el orden de la carta) que
+ * cumplan con: cada objetivo entre 1 y 999, ninguno mayor que SUSCRIPCIONES, y PEDIDOS
+ * TOTALES >= la suma de los PEDIDOS por modelo. Si queda una sola, la devuelve; si quedan
+ * varias, elige la más parecida a los objetivos del último mes cargado, solo si se
+ * diferencia claramente de la segunda. Si no, devuelve null (no se adivina).
+ */
+function deducirNumeros(nombres, tokens, historial, mes) {
+  const m = nombres.length;
+  if (!tokens.length || tokens.length > 4 || m > 8) return null;
+  const partir = (str, k) => {
+    if (k === 1) return /^0\d/.test(str) || Number(str) < 1 || Number(str) > 999 ? [] : [[Number(str)]];
+    const out = [];
+    for (let i = 1; i <= Math.min(3, str.length - k + 1); i++) {
+      const a = str.slice(0, i);
+      if (/^0/.test(a)) continue;
+      partir(str.slice(i), k - 1).forEach((r) => out.push([Number(a)].concat(r)));
+    }
+    return out;
+  };
+  const permutar = (arr) => (arr.length <= 1 ? [arr] : arr.reduce((acc, x, i) =>
+    acc.concat(permutar(arr.slice(0, i).concat(arr.slice(i + 1))).map((p) => [x].concat(p))), []));
+  const grupos = (n, k) => { // tamaños de k grupos seguidos que suman n
+    if (k === 1) return n >= 1 ? [[n]] : [];
+    const out = [];
+    for (let a = 1; a <= n - k + 1; a++) grupos(n - a, k - 1).forEach((r) => out.push([a].concat(r)));
+    return out;
+  };
+  const ok = (vals) => {
+    const d = {};
+    nombres.forEach((n, i) => { d[n] = vals[i]; });
+    if ('SUSCRIPCIONES' in d && vals.some((v, i) => nombres[i] !== 'SUSCRIPCIONES' && v > d.SUSCRIPCIONES)) return false;
+    const porModelo = nombres.filter((n) => /^PEDIDOS /.test(n) && n !== 'PEDIDOS TOTALES').map((n) => d[n]);
+    if ('PEDIDOS TOTALES' in d && porModelo.length && d['PEDIDOS TOTALES'] < porModelo.reduce((a, b) => a + b, 0)) return false;
+    return true;
+  };
+  const vistos = new Set();
+  const candidatos = [];
+  permutar(tokens).forEach((perm) => grupos(m, perm.length).forEach((tam) => {
+    let parciales = [[]];
+    perm.forEach((tok, j) => {
+      const opciones = partir(tok, tam[j]);
+      parciales = parciales.reduce((acc, p) => acc.concat(opciones.map((o) => p.concat(o))), []);
+    });
+    parciales.filter(ok).forEach((v) => {
+      const k = v.join(',');
+      if (!vistos.has(k)) { vistos.add(k); candidatos.push(v); }
+    });
+  }));
+  if (candidatos.length === 1) return candidatos[0];
+  if (!candidatos.length) return null;
+
+  // Desempate con los meses que tengan objetivos cargados, del más cercano al más lejano
+  // (anteriores o posteriores: al cargar un mes viejo, los cercanos son los siguientes).
+  const orden = (x) => { const mm = String(x).match(/^([A-Z]+) (\d{2})$/); return mm ? Number(mm[2]) * 12 + MESES_SENAL.indexOf(mm[1]) : -1; };
+  const previos = Object.keys(historial || {}).filter((x) => orden(x) >= 0 && x !== mes)
+    .sort((a, b) => Math.abs(orden(a) - orden(mes)) - Math.abs(orden(b) - orden(mes)));
+  const ref = {};
+  previos.forEach((x) => Object.keys(historial[x]).forEach((ind) => { if (!(ind in ref)) ref[ind] = historial[x][ind]; }));
+  const conRef = nombres.map((n, i) => [n, i]).filter(([n]) => ref[n]);
+  if (!conRef.length) return null;
+  const puntaje = (v) => conRef.reduce((a, [n, i]) => a + Math.abs(v[i] - ref[n]) / ref[n], 0) / conRef.length;
+  const ordenados = candidatos.map((v) => [v, puntaje(v)]).sort((a, b) => a[1] - b[1]);
+  return ordenados[0][1] < 0.5 && ordenados[0][1] * 2 < ordenados[1][1] ? ordenados[0][0] : null;
+}
+
+function interpretarCarta(texto, conocidos, historial) {
   const t = texto.replace(/\r/g, '');
   const T = t.toUpperCase();
   if (!/CARTA\s+DE\s+OBJETIVOS/.test(T)) return null;
@@ -434,6 +513,7 @@ function interpretarCarta(texto, conocidos) {
   // 1) "SUSCRIPCIONES   146" en la misma línea (tabla bien leída).
   let indicadores = [];
   let incompleta = false;
+  let deducida = false;
   const reLinea = /^[ \t]*([A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}?)[ \t]*:?[ \t]+(\d{1,6})[ \t]*$/gm;
   let m;
   while ((m = reLinea.exec(zona)) !== null) {
@@ -445,7 +525,7 @@ function interpretarCarta(texto, conocidos) {
   //    cantidad de números también seguidos. Si el OCR los mezcló, no se adivina.
   if (!indicadores.length) {
     const esNombre = (l) => /^[A-ZÁÉÍÓÚÑ][A-ZÁÉÍÓÚÑ .]{3,}$/.test(l) && !/^CATEGOR/.test(l);
-    const esNumero = (l) => /^\d{1,6}$/.test(l);
+    const esNumero = (l) => /^\d{1,12}$/.test(l);
     const iNombres = [];
     const iNumeros = [];
     lineas.forEach((l, k) => {
@@ -454,12 +534,18 @@ function interpretarCarta(texto, conocidos) {
     });
     const nombres = iNombres.reduce((acc, k) => acc.concat(separarIndicadores(lineas[k], conocidos)), []);
     const numeros = iNumeros.map((k) => Number(lineas[k]));
+    const tokens = iNumeros.map((k) => lineas[k]);
     if (!nombres.length) return null;
     const seguidos = (idx) => idx.every((k, n) => n === 0 || k === idx[n - 1] + 1);
     const tablaLimpia = nombres.length === numeros.length && seguidos(iNombres) && seguidos(iNumeros) &&
       iNumeros[0] === iNombres[iNombres.length - 1] + 1;
+    const deducidos = tablaLimpia ? null : deducirNumeros(nombres.map(normalizarIndicador), tokens, historial, mes);
     if (tablaLimpia) {
       indicadores = nombres.map((n, k) => ({ indicador: normalizarIndicador(n), objetivo: numeros[k] }));
+    } else if (deducidos) {
+      // 2b) Números pegados por el OCR, repartidos de la única forma que cierra (ver deducirNumeros).
+      indicadores = nombres.map((n, k) => ({ indicador: normalizarIndicador(n), objetivo: deducidos[k] }));
+      deducida = true;
     } else {
       // 3) Tabla desarmada (p. ej. "4360" = 43 y 60 pegados, o números en otro orden):
       //    se cargan los indicadores sin número, para completar a mano.
@@ -470,7 +556,7 @@ function interpretarCarta(texto, conocidos) {
   if (!indicadores.length) return null;
 
   return {
-    mes, marca, categoria, indicadores, incompleta,
+    mes, marca, categoria, indicadores, incompleta, deducida,
     concesionario: conc ? conc.replace(/\s+/g, ' ').trim().toUpperCase() : '',
     nCarta: nCarta ? nCarta.replace(/\s/g, '') : '',
     fechaCarta,
