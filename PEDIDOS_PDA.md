@@ -147,6 +147,26 @@ incentivos.
   dejaba afuera los 2 FP3 aprobados porque el modelo no estaba en su tabla
   (correcto: 50).
 
+## Julio 2026 (incorporado el 02/10/2026)
+Archivo "JULIO 26" (hoja JULIO, 89 adjudicados, mismas columnas). Se suma con
+`incorporarJulio()` desde el editor de Apps Script (una sola vez; si se corre
+de nuevo no duplica):
+- BASE: 89 filas con Acto = JULIO 26 (CLARI/SERGY normalizados).
+- PRECIOS: los de julio (bloque "Enviados JULIO" de su RESUMEN), solo los
+  que falten.
+- AJUSTES: el acto de julio trae los 15 cierres de agosto que estaban como
+  ajuste (DP1 7, MB1 4, DT1 2, FO1 1, NT3 1) y el "+1" MB1 de septiembre
+  (una solicitud de julio cerrada en septiembre): esas filas se sacan. Se
+  agrega la diferencia de precio con que el RESUMEN de agosto valuaba los
+  cierres de julio (DP1 −38.849.999,93; FO1 −1.851.000; solo VM) y el FS1
+  de julio (único cierre de junio cargado a mano en su RESUMEN; el resto
+  del bloque daba #ERROR por el link roto al archivo de JUNIO).
+- Resultado: julio 26 netos / $ 909.084.000; agosto sigue en 57 /
+  $ 1.965.767.000 y septiembre en 62 netos. Queda pendiente el "+1" NC1 de
+  septiembre (¿acto de junio?).
+- Objetivo de julio (54, del RESUMEN de JULIO 26) va en el archivo de
+  objetivos.
+
 ## Qué hace "Armar / reparar estructura" con lo cargado a mano
 - **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;
   después no se tocan (PRECIOS tampoco el formato). Solo se corrigen meses

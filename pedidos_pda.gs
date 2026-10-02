@@ -90,6 +90,7 @@ const NORMALIZAR_RESPONSABLE = { CLARI: 'CLARISA', SERGY: 'SERGIO' };
 
 // Archivos mensuales que se importaron una sola vez con importarHistorico() (ya hecho).
 const HISTORICOS = [
+  { id: '1dcy1DYrZi8-eihD3GP4LNYLa2zXXm3O5rfY-Ymz27Qw', hoja: 'JULIO', acto: 'JULIO 26' },
   { id: '16IQ8wKAHrRA2Oy2pntrB9ZeZxjTZkdjPj-7kZPYuREY', hoja: 'AGOSTO', acto: 'AGOSTO 26' },
   { id: '1_5SnWB3QvWHHkV2nNZ0kH3ZVhNBNJX0W4ipnlBrvaOI', hoja: 'SEPTIEMBRE', acto: 'SEPTIEMBRE 26' },
 ];
@@ -97,15 +98,23 @@ const HISTORICOS = [
 // Semilla de PRECIOS (tomada de los RESUMEN de cada mes).
 // Cierres que no están en BASE, para que los meses de arranque den igual que sus
 // RESUMEN mensuales originales: [Mes, Modelo, Netos, VM netos, Nota].
+const NOTA_PRECIO_VIEJO = 'Diferencia de precio: el RESUMEN de AGOSTO 26 valuaba los cierres del acto de ' +
+  'julio con la lista anterior (DP1 32.820.000; FO1 27.459.000). Solo VM, sin netos.';
 const AJUSTES_INICIALES = [
-  ...[['DP1', 7, 229740000.1], ['FO1', 1, 27459000], ['DT1', 2, 96220000], ['MB1', 4, 96384000],
-    ['NT3', 1, 42390000]].map(([m, n, vm]) => ['AGOSTO 26', m, n, vm,
-    'Cierres en agosto de actos anteriores (archivo de JULIO, no está en BASE). RESUMEN de AGOSTO 26, bloque NETOS ANTERIOR.']),
+  ['JULIO 26', 'FS1', 1, 33660000,
+    'Cierre de un acto anterior (junio) cargado a mano en el RESUMEN de JULIO 26 (NETOS ANTERIOR; el resto del bloque da #ERROR).'],
+  ['AGOSTO 26', 'DP1', 0, -38849999.93, NOTA_PRECIO_VIEJO],
+  ['AGOSTO 26', 'FO1', 0, -1851000, NOTA_PRECIO_VIEJO],
   ['SEPTIEMBRE 26', 'NC1', 1, 37550000,
     '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
-  ['SEPTIEMBRE 26', 'MB1', 1, 24096000,
-    '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
 ];
+
+// Precios de julio (RESUMEN de JULIO 26, bloque "Enviados JULIO").
+const PRECIOS_JULIO = {
+  DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000, TN5: 47250000.01,
+  CD7: 38370000, TV6: 51846000, LI1: 31600000, DT1: 48110000, PC5: 38000000.01, CA6: 39180000,
+  FP1: 32833000, MB1: 24096000, TI1: 48964000, NT3: 42390000,
+};
 
 const PRECIOS_INICIALES = {
   'AGOSTO 26': {
@@ -839,26 +848,75 @@ function agregarActoPegado() {
 /** Copia una sola vez los archivos mensuales viejos (ver HISTORICOS). */
 function importarHistorico() {
   const ss = SpreadsheetApp.getActive();
-  const resumen = [];
-  HISTORICOS.forEach((h) => {
-    const origen = SpreadsheetApp.openById(h.id).getSheetByName(h.hoja);
-    const datos = origen.getDataRange().getValues();
-    const enc = datos[0].map((v) => String(v).trim());
-    const iSolicitud = enc.indexOf('Solicitud');
-    const filas = datos.slice(1)
-      .filter((f) => String(f[iSolicitud]).trim() !== '')
-      .map((f) => COLUMNAS_BASE.map((c) => {
-        if (c.h === 'Acto') return h.acto;
-        const i = enc.indexOf(c.h === 'Mes cierre' ? 'Mes' : c.h);
-        if (i < 0) return '';
-        if (c.h === 'Mes cierre') return mesCierreDesdeTexto(f[i], h.acto);
-        return limpiar(c.h, f[i]);
-      }));
-    const { agregadas, repetidas } = agregarABase(ss, filas);
-    resumen.push(`${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : ''));
-  });
+  const resumen = HISTORICOS.map((h) => importarArchivoMensual(ss, h));
   actualizarInforme();
   SpreadsheetApp.getUi().alert(resumen.join('\n'));
+}
+
+/** Copia a BASE la hoja de un archivo mensual viejo ({id, hoja, acto}). No duplica. */
+function importarArchivoMensual(ss, h) {
+  const origen = SpreadsheetApp.openById(h.id).getSheetByName(h.hoja);
+  const datos = origen.getDataRange().getValues();
+  const enc = datos[0].map((v) => String(v).trim());
+  const iSolicitud = enc.indexOf('Solicitud');
+  const filas = datos.slice(1)
+    .filter((f) => String(f[iSolicitud]).trim() !== '')
+    .map((f) => COLUMNAS_BASE.map((c) => {
+      if (c.h === 'Acto') return h.acto;
+      const i = enc.indexOf(c.h === 'Mes cierre' ? 'Mes' : c.h);
+      if (i < 0) return '';
+      if (c.h === 'Mes cierre') return mesCierreDesdeTexto(f[i], h.acto);
+      return limpiar(c.h, f[i]);
+    }));
+  const { agregadas, repetidas } = agregarABase(ss, filas);
+  return `${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : '');
+}
+
+/**
+ * UNA SOLA VEZ (desde el editor de Apps Script): suma el acto de JULIO 26.
+ * - Copia la hoja JULIO del archivo "JULIO 26" a BASE (no duplica si se corre de nuevo).
+ * - PRECIOS: agrega los de julio que falten (no toca los existentes).
+ * - AJUSTES: saca lo que ahora está en BASE (los 15 cierres de agosto del acto de julio y el
+ *   "+1" MB1 de septiembre, que era una solicitud de julio) y agrega la diferencia de precio de
+ *   agosto y el FS1 de julio. Así agosto y septiembre siguen dando igual que sus RESUMEN.
+ */
+function incorporarJulio() {
+  const ss = SpreadsheetApp.getActive();
+  const props = PropertiesService.getDocumentProperties();
+  const msj = [importarArchivoMensual(ss, HISTORICOS[0])];
+
+  const precios = ss.getSheetByName(HOJA_PRECIOS);
+  const ya = new Set(precios.getRange(2, 1, Math.max(1, precios.getLastRow() - 1), 2).getValues()
+    .map((f) => `${textoMes(f[0])}|${f[1]}`));
+  const nuevos = Object.keys(PRECIOS_JULIO).filter((m) => !ya.has(`JULIO 26|${m}`))
+    .map((m) => ['JULIO 26', m, PRECIOS_JULIO[m]]);
+  if (nuevos.length) {
+    const f0 = precios.getLastRow() + 1;
+    precios.getRange(f0, 1, nuevos.length, 1).setNumberFormat('@');
+    precios.getRange(f0, 1, nuevos.length, 3).setValues(nuevos);
+    precios.getRange(f0, 3, nuevos.length, 1).setNumberFormat('$ #,##0');
+  }
+  msj.push(`PRECIOS: ${nuevos.length} de julio agregados`);
+
+  if (!props.getProperty('JULIO_INCORPORADO')) {
+    const aj = ss.getSheetByName(HOJA_AJUSTES);
+    for (let r = aj.getLastRow(); r >= 2; r--) {
+      const [mes, modelo, , , nota] = aj.getRange(r, 1, 1, 5).getValues()[0];
+      const m = textoMes(mes);
+      const esJulioEnAgosto = m === 'AGOSTO 26' && /archivo de JULIO/i.test(nota);
+      const esMB1Sept = m === 'SEPTIEMBRE 26' && modelo === 'MB1' && /\+1/.test(nota);
+      if (esJulioEnAgosto || esMB1Sept) aj.deleteRow(r);
+    }
+    const agregar = AJUSTES_INICIALES.filter((f) => f[0] !== 'SEPTIEMBRE 26');
+    aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 1).setNumberFormat('@');
+    aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 5).setValues(agregar);
+    props.setProperty('JULIO_INCORPORADO', 'si');
+    msj.push('AJUSTES: actualizados (agosto y septiembre siguen cuadrando con sus RESUMEN)');
+  } else {
+    msj.push('AJUSTES: ya estaban actualizados');
+  }
+  actualizarInforme();
+  SpreadsheetApp.getUi().alert(msj.join('\n'));
 }
 
 /** Agrega filas a BASE salteando las que ya existen (mismo Acto + Solicitud). */
