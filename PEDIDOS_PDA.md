@@ -167,6 +167,17 @@ de nuevo no duplica):
 - Objetivo de julio (54, del RESUMEN de JULIO 26) va en el archivo de
   objetivos.
 
+## Recarga del mismo acto (operaciones sumadas a mitad de mes)
+Volver a pegar el reporte de SGA del mismo acto y correr "Agregar acto pegado
+a BASE": la clave es Acto + Solicitud, así que solo se agregan las
+solicitudes que no estaban. Las ya cargadas no se modifican (aunque en SGA
+haya cambiado el avance u otro dato) y lo trabajado (Pedido, Carpeta,
+Observación, etc.) queda igual. En una recarga, las filas nuevas quedan con
+una nota en la celda Solicitud ("Agregada en la recarga del acto ... del
+dd/mm/aaaa") y el aviso lista cuáles se agregaron. Probado: carga de 111
+operaciones y recarga del reporte completo de 114 → agrega 3, no toca las
+111.
+
 ## Qué hace "Armar / reparar estructura" con lo cargado a mano
 - **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;
   después no se tocan (PRECIOS tampoco el formato). Solo se corrigen meses

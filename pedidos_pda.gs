@@ -838,11 +838,28 @@ function agregarActoPegado() {
     const i = enc.indexOf(c.sga);
     return i >= 0 ? limpiar(c.h, f[i]) : '';
   }));
-  const { agregadas, repetidas } = agregarABase(ss, filas);
-  if (agregadas) pegar.clear();
+  // Recarga del mismo acto (p. ej. operaciones sumadas a mitad de mes): solo se agregan las
+  // solicitudes que no estaban; las ya cargadas no se tocan aunque en SGA hayan cambiado.
+  const recarga = valoresColumnaBase(ss, 'Acto').indexOf(acto) >= 0;
+  const { agregadas, repetidas, nuevas, fila0 } = agregarABase(ss, filas);
+  if (recarga && agregadas) {
+    const hoy = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy');
+    SpreadsheetApp.getActive().getSheetByName(HOJA_BASE)
+      .getRange(fila0, colBase('Solicitud'), agregadas, 1)
+      .setNotes(nuevas.map(() => [`Agregada en la recarga del acto ${acto} del ${hoy}`]));
+  }
+  pegar.clear();
   actualizarInforme();
-  ui.alert(`Acto ${acto}: ${agregadas} filas agregadas a BASE` +
-    (repetidas ? `, ${repetidas} ya estaban cargadas (no se duplicaron).` : '.'));
+
+  const iSol = colBase('Solicitud') - 1;
+  const iNom = colBase('Apellido, Nombre') - 1;
+  const lista = nuevas.slice(0, 15).map((f) => `• ${f[iSol]} - ${f[iNom]}`).join('\n') +
+    (nuevas.length > 15 ? `\n… y ${nuevas.length - 15} más` : '');
+  ui.alert(recarga
+    ? `Recarga del acto ${acto}: ${agregadas} operación(es) nueva(s) agregada(s); ` +
+      `${repetidas} ya estaban y no se modificaron.` + (agregadas ? `\n\n${lista}` : '')
+    : `Acto ${acto}: ${agregadas} filas agregadas a BASE` +
+      (repetidas ? `, ${repetidas} ya estaban cargadas (no se duplicaron).` : '.'));
 }
 
 /** Copia una sola vez los archivos mensuales viejos (ver HISTORICOS). */
@@ -940,7 +957,7 @@ function agregarABase(ss, filas) {
   if (nuevas.length) {
     base.getRange(ultima + 1, 1, nuevas.length, COLUMNAS_BASE.length).setValues(nuevas);
   }
-  return { agregadas: nuevas.length, repetidas: filas.length - nuevas.length };
+  return { agregadas: nuevas.length, repetidas: filas.length - nuevas.length, nuevas, fila0: ultima + 1 };
 }
 
 // ---------------------------------------------------------------------------
