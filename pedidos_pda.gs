@@ -101,9 +101,11 @@ const HISTORICOS = [
 // Cierres que no están en BASE, para que los meses den igual que sus RESUMEN mensuales:
 // [Mes, Modelo, Netos, VM extra, Nota]. Los netos se valúan con el V.M del mes de cierre
 // (PRECIOS), como cualquier cierre; "VM extra" queda solo para correcciones de importe.
+const NOTA_JUNIO = 'Cierres en julio del acto de junio (archivo JUNIO 26.xlsx; junio no está en BASE).';
+const AJUSTES_JUNIO_EN_JULIO = [['DP1', 14], ['MB1', 6], ['AR2', 4], ['FO1', 2], ['FT3', 1], ['FP3', 1]]
+  .map(([m, n]) => ['JULIO 26', m, n, '', NOTA_JUNIO]);
 const AJUSTES_INICIALES = [
-  ['JULIO 26', 'FS1', 1, '',
-    'Cierre de un acto anterior (junio) cargado a mano en el RESUMEN de JULIO 26 (NETOS ANTERIOR; el resto del bloque da #ERROR).'],
+  ...AJUSTES_JUNIO_EN_JULIO,
   ['SEPTIEMBRE 26', 'NC1', 1, '',
     '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
 ];
@@ -113,6 +115,8 @@ const PRECIOS_JULIO = {
   DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000, TN5: 47250000.01,
   CD7: 38370000, TV6: 51846000, LI1: 31600000, DT1: 48110000, PC5: 38000000.01, CA6: 39180000,
   FP1: 32833000, MB1: 24096000, TI1: 48964000, NT3: 42390000,
+  // El RESUMEN de julio no trae FP3 (sí "FP1" con el mismo valor que FP3 en agosto).
+  FP3: 32833000,
 };
 
 const PRECIOS_INICIALES = {
@@ -937,6 +941,43 @@ function importarArchivoMensual(ss, h) {
   const { agregadas, repetidas } = agregarABase(ss, filas);
   if (agregadas) ordenarBase(true);
   return `${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : '');
+}
+
+/**
+ * UNA SOLA VEZ (desde el editor de Apps Script): ajusta los netos de JULIO 26 con los cierres
+ * del acto de junio (archivo JUNIO 26.xlsx, 28 operaciones con Mes = JULIO), sin sumar junio a
+ * BASE. Reemplaza los ajustes de julio que hubiera (el FS1 que venía del RESUMEN de julio).
+ * Se puede correr de nuevo: no duplica.
+ */
+function ajustarJulioConJunio() {
+  const ss = SpreadsheetApp.getActive();
+  const aj = ss.getSheetByName(HOJA_AJUSTES);
+  let borradas = 0;
+  for (let r = aj.getLastRow(); r >= 2; r--) {
+    if (textoMes(aj.getRange(r, 1).getValue()) === 'JULIO 26') {
+      aj.deleteRow(r);
+      borradas++;
+    }
+  }
+  const f0 = aj.getLastRow() + 1;
+  aj.getRange(f0, 1, AJUSTES_JUNIO_EN_JULIO.length, 1).setNumberFormat('@');
+  aj.getRange(f0, 1, AJUSTES_JUNIO_EN_JULIO.length, 5).setValues(AJUSTES_JUNIO_EN_JULIO);
+
+  // FP3 de julio: si no tiene precio, se agrega (si ya lo cargaste, no se toca).
+  const precios = ss.getSheetByName(HOJA_PRECIOS);
+  const hay = precios.getRange(2, 1, Math.max(1, precios.getLastRow() - 1), 2).getValues()
+    .some((f) => textoMes(f[0]) === 'JULIO 26' && f[1] === 'FP3');
+  if (!hay) {
+    const p0 = precios.getLastRow() + 1;
+    precios.getRange(p0, 1).setNumberFormat('@');
+    precios.getRange(p0, 1, 1, 3).setValues([['JULIO 26', 'FP3', PRECIOS_JULIO.FP3]]);
+    precios.getRange(p0, 3).setNumberFormat('$ #,##0');
+  }
+  actualizarInforme();
+  SpreadsheetApp.getUi().alert(`AJUSTES de JULIO 26: ${borradas} fila(s) anteriores reemplazadas por ` +
+    `${AJUSTES_JUNIO_EN_JULIO.length} filas = 28 netos del acto de junio cerrados en julio ` +
+    '(DP1 14, MB1 6, AR2 4, FO1 2, FT3 1, FP3 1).' +
+    (hay ? '' : '\nPRECIOS: agregado FP3 de julio ($ 32.833.000, mismo valor que FP3 en agosto).'));
 }
 
 /**

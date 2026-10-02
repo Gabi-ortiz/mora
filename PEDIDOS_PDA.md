@@ -200,6 +200,17 @@ dd/mm/aaaa") y el aviso lista cuáles se agregaron. Probado: carga de 111
 operaciones y recarga del reporte completo de 114 → agrega 3, no toca las
 111.
 
+## Julio ajustado con el archivo de junio (02/10/2026)
+"JUNIO 26.xlsx" (Drive, hoja JUNIO, 123 adjudicados) NO se suma a BASE: solo
+se usa para ajustar julio. Tiene 28 operaciones del acto de junio con Mes =
+JULIO (DP1 14, MB1 6, AR2 4, FO1 2, FT3 1, FP3 1); ninguna cerró en agosto
+ni septiembre (el "+1" NC1 de septiembre sigue sin explicar). Se aplica con
+`ajustarJulioConJunio()` desde el editor: reemplaza los ajustes de JULIO 26
+(el FS1 que venía del RESUMEN de julio) por esas 6 filas, y agrega el V.M
+de FP3 de julio si falta ($ 32.833.000: el RESUMEN de julio lo trae como
+"FP1"; es el valor de FP3 en agosto). Julio queda en 53 netos (25 del acto
++ 28 de junio) / $ 1.816.743.000.
+
 ## Qué hace "Armar / reparar estructura" con lo cargado a mano
 - **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;
   después no se tocan (PRECIOS tampoco el formato). Solo se corrigen meses
