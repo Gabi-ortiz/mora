@@ -142,6 +142,7 @@ function onOpen() {
     .createMenu('Pedidos')
     .addItem('Agregar acto pegado a BASE', 'agregarActoPegado')
     .addItem('Actualizar informe', 'actualizarInforme')
+    .addItem('Ordenar BASE por acto', 'ordenarBase')
     .addSeparator()
     .addItem('Armar / reparar estructura', 'armarEstructura')
     .addToUi();
@@ -852,6 +853,7 @@ function agregarActoPegado() {
       .setNotes(nuevas.map(() => [`Agregada en la recarga del acto ${acto} del ${hoy}`]));
   }
   pegar.clear();
+  ordenarBase(true);
   actualizarInforme();
 
   const iSol = colBase('Solicitud') - 1;
@@ -889,6 +891,7 @@ function importarArchivoMensual(ss, h) {
       return limpiar(c.h, f[i]);
     }));
   const { agregadas, repetidas } = agregarABase(ss, filas);
+  if (agregadas) ordenarBase(true);
   return `${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : '');
 }
 
@@ -966,6 +969,36 @@ function agregarABase(ss, filas) {
     base.getRange(ultima + 1, 1, nuevas.length, COLUMNAS_BASE.length).setValues(nuevas);
   }
   return { agregadas: nuevas.length, repetidas: filas.length - nuevas.length, nuevas, fila0: ultima + 1 };
+}
+
+/**
+ * Ordena BASE por Acto en orden cronológico (JULIO 26, AGOSTO 26, SEPTIEMBRE 26...). Dentro de
+ * cada acto mantiene el orden que ya tenían las filas. Mueve también las notas (p. ej. las de
+ * las recargas). Se corre sola al agregar un acto o una recarga; también está en el menú.
+ */
+function ordenarBase(silencioso) {
+  const ss = SpreadsheetApp.getActive();
+  const base = ss.getSheetByName(HOJA_BASE);
+  const ultima = ultimaFilaBase(base);
+  if (ultima < 3) return;
+  const rango = base.getRange(2, 1, ultima - 1, COLUMNAS_BASE.length);
+  const valores = rango.getValues();
+  const notas = rango.getNotes();
+  const cActo = colBase('Acto') - 1;
+  const orden = (v) => {
+    const m = textoMes(v).match(/^([A-Z]+) (\d{2})$/);
+    const i = m ? MESES.indexOf(m[1]) : -1;
+    return i < 0 ? Number.MAX_SAFE_INTEGER : Number(m[2]) * 12 + i;
+  };
+  const idx = valores.map((f, i) => i);
+  idx.sort((a, b) => (orden(valores[a][cActo]) - orden(valores[b][cActo])) || (a - b));
+  if (idx.every((v, i) => v === i)) {
+    if (!silencioso) SpreadsheetApp.getUi().alert('BASE ya estaba ordenada por acto.');
+    return;
+  }
+  rango.setValues(idx.map((i) => valores[i]));
+  rango.setNotes(idx.map((i) => notas[i]));
+  if (!silencioso) SpreadsheetApp.getUi().alert('BASE ordenada por acto (del más viejo al más nuevo).');
 }
 
 // ---------------------------------------------------------------------------

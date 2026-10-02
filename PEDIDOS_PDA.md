@@ -172,6 +172,12 @@ de nuevo no duplica):
 - Objetivo de julio (54, del RESUMEN de JULIO 26) va en el archivo de
   objetivos.
 
+## Orden de BASE
+BASE se ordena por Acto en orden cronológico (más viejo arriba); dentro de
+cada acto se respeta el orden que ya tenían las filas y las notas viajan con
+su fila. Se ordena sola al agregar un acto, una recarga o un archivo mensual;
+también en el menú: Pedidos > Ordenar BASE por acto.
+
 ## Recarga del mismo acto (operaciones sumadas a mitad de mes)
 Volver a pegar el reporte de SGA del mismo acto y correr "Agregar acto pegado
 a BASE": la clave es Acto + Solicitud, así que solo se agregan las
