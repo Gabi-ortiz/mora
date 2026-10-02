@@ -388,6 +388,11 @@ function indicadoresConocidos(ss) {
  */
 function separarIndicadores(nombre, conocidos) {
   const n = normalizarIndicador(nombre);
+  // Primero, corte genérico: cada indicador de la carta empieza con SUSCRIPCIONES,
+  // PATENTAMIENTOS o PEDIDOS ("PATENTAMIENTOS PEDIDOS CRONOS PEDIDOS TITANO PEDIDOS TOTALES"
+  // -> 4 indicadores), aunque alguno (CRONOS, TITANO) todavía no esté en la lista.
+  const partes = n.split(/\s+(?=(?:SUSCRIPCIONES|PATENTAMIENTOS|PEDIDOS)\b)/);
+  if (partes.length >= 2) return partes;
   if (!conocidos || !conocidos.length || conocidos.indexOf(n) >= 0) return [n];
   const encontrados = conocidos
     .map((k) => ({ k, i: n.indexOf(k) }))

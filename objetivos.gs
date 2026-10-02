@@ -306,8 +306,8 @@ function aFecha(texto) {
 
 /**
  * Borra lo que dejó una carta leída antes de que el lector separara indicadores
- * pegados por el OCR: filas de OBJETIVOS sin número cuyo indicador son dos conocidos
- * juntos (p. ej. "PATENTAMIENTOS PEDIDOS TOTALES"), y ese valor en LISTAS_OBJ.
+ * pegados por el OCR: filas de OBJETIVOS cuyo indicador son varios juntos (p. ej.
+ * "PATENTAMIENTOS PEDIDOS TOTALES"), y ese valor en LISTAS_OBJ.
  */
 function limpiarIndicadoresPegados(ss, obj) {
   const listas = ss.getSheetByName(HOJA_LISTAS_OBJ);
@@ -317,6 +317,7 @@ function limpiarIndicadoresPegados(ss, obj) {
   const rInd = listas.getRange(2, cInd, listas.getMaxRows() - 1, 1);
   const valores = rInd.getValues().map((f) => String(f[0]).trim()).filter((v) => v !== '');
   const pegado = (v) => separarIndicadores(v, valores.filter((x) => x !== v)).length >= 2;
+  // (también detecta "PATENTAMIENTOS PEDIDOS CRONOS PEDIDOS TITANO PEDIDOS TOTALES")
   const malos = valores.filter(pegado);
   if (!malos.length) return;
 
@@ -324,7 +325,8 @@ function limpiarIndicadoresPegados(ss, obj) {
   const iObj = ENC_OBJ.indexOf('Objetivo');
   for (let r = obj.getLastRow(); r >= 2; r--) {
     const fila = obj.getRange(r, 1, 1, ENC_OBJ.length).getValues()[0];
-    if (malos.indexOf(String(fila[iInd]).trim()) >= 0 && fila[iObj] === '') obj.deleteRow(r);
+    // Indicador "pegado" = nombre inválido (el número, si tiene, quedó mal asignado): se borra.
+    if (malos.indexOf(String(fila[iInd]).trim()) >= 0) obj.deleteRow(r);
   }
   const quedan = valores.filter((v) => malos.indexOf(v) < 0);
   rInd.clearContent();
