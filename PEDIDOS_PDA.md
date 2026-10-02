@@ -211,6 +211,24 @@ de FP3 de julio si falta ($ 32.833.000: el RESUMEN de julio lo trae como
 "FP1"; es el valor de FP3 en agosto). Julio queda en 53 netos (25 del acto
 + 28 de junio) / $ 1.816.743.000.
 
+## Cambios del equipo que se respetan (03/10/2026)
+En el archivo se cambió: "Llave x llave" renombrada a LLXLL y pasada a
+casillas; columnas ocultas distintas (se mostraron Concepto de venta,
+Teléfono, etc.); HECHO y ENVIADO en la lista de Pedido; un ajuste de julio
+del acto de mayo (DP1 1). Desde esta versión:
+- "Armar / reparar estructura" ya NO reformatea una BASE existente
+  (encabezados, columnas ocultas, anchos, casillas/desplegables, colores,
+  bordes): eso se aplica solo al crear la hoja. En una BASE existente solo
+  corrige meses convertidos en fecha y avisa si las columnas clave cambiaron
+  de lugar (renombrar no rompe nada; insertar/mover columnas sí, porque el
+  script ubica las columnas por posición).
+- Ordenar BASE usa Range.sort con una columna auxiliar temporal: se mueven
+  las filas enteras (valores, casillas, colores y notas).
+- AJUSTES: encabezado y formato solo al crear (o la migración vieja "VM
+  netos"); las filas cargadas a mano no se tocan.
+- El orden de las pestañas solo se acomoda si se creó una hoja nueva.
+- `incorporarJulio` y `ajustarJulioConJunio` se sacaron (ya aplicadas).
+
 ## Qué hace "Armar / reparar estructura" con lo cargado a mano
 - **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;
   después no se tocan (PRECIOS tampoco el formato). Solo se corrigen meses
@@ -219,8 +237,8 @@ de FP3 de julio si falta ($ 32.833.000: el RESUMEN de julio lo trae como
   script se agrega una sola vez (si se borra, no vuelve); columnas nuevas
   agregadas a la derecha se respetan. La columna A (Meses con datos) es
   calculada y se rehace.
-- **BASE**: los datos no se tocan; se rehacen formato, desplegables, bordes y
-  filtro.
+- **BASE**: los datos y el formato no se tocan (ver "Cambios del equipo que
+  se respetan").
 - **RESUMEN / INFORME / OBJETIVOS / INCENTIVOS**: se rehacen enteras (son
   fórmulas / datos leídos de otro archivo).
 

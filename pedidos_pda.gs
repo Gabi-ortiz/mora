@@ -106,18 +106,10 @@ const AJUSTES_JUNIO_EN_JULIO = [['DP1', 14], ['MB1', 6], ['AR2', 4], ['FO1', 2],
   .map(([m, n]) => ['JULIO 26', m, n, '', NOTA_JUNIO]);
 const AJUSTES_INICIALES = [
   ...AJUSTES_JUNIO_EN_JULIO,
+  ['JULIO 26', 'DP1', 1, '', 'Cierres en julio del acto de Mayo (archivo MAYO 26.xlsx).'],
   ['SEPTIEMBRE 26', 'NC1', 1, '',
     '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
 ];
-
-// Precios de julio (RESUMEN de JULIO 26, bloque "Enviados JULIO").
-const PRECIOS_JULIO = {
-  DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000, TN5: 47250000.01,
-  CD7: 38370000, TV6: 51846000, LI1: 31600000, DT1: 48110000, PC5: 38000000.01, CA6: 39180000,
-  FP1: 32833000, MB1: 24096000, TI1: 48964000, NT3: 42390000,
-  // El RESUMEN de julio no trae FP3 (sí "FP1" con el mismo valor que FP3 en agosto).
-  FP3: 32833000,
-};
 
 const PRECIOS_INICIALES = {
   'AGOSTO 26': {
@@ -212,21 +204,29 @@ function armarEstructura() {
   const vacia = ss.getSheetByName('Hoja 1') || ss.getSheetByName('Sheet1');
   if (vacia && vacia.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(vacia);
 
-  [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_AJUSTES, HOJA_OBJETIVOS,
-    HOJA_INCENTIVOS, HOJA_LISTAS]
-    .forEach((nombre, i) => {
-      ss.setActiveSheet(ss.getSheetByName(nombre));
-      ss.moveActiveSheet(i + 1);
-    });
+  // El orden de las pestañas solo se acomoda si se creó alguna hoja nueva (si el equipo
+  // las reordenó, se respeta).
+  if (hojasCreadas) {
+    [HOJA_BASE, HOJA_PEGAR, HOJA_RESUMEN, HOJA_INFORME, HOJA_PRECIOS, HOJA_AJUSTES, HOJA_OBJETIVOS,
+      HOJA_INCENTIVOS, HOJA_LISTAS]
+      .forEach((nombre, i) => {
+        ss.setActiveSheet(ss.getSheetByName(nombre));
+        ss.moveActiveSheet(i + 1);
+      });
+  }
 
   ss.setActiveSheet(ss.getSheetByName(HOJA_BASE));
   SpreadsheetApp.getUi().alert('Estructura lista.');
 }
 
+let hojasCreadas = 0;
 function hoja(ss, nombre, posicion) {
   let sh = ss.getSheetByName(nombre);
   const nueva = !sh;
-  if (nueva) sh = ss.insertSheet(nombre, Math.min(posicion, ss.getSheets().length));
+  if (nueva) {
+    sh = ss.insertSheet(nombre, Math.min(posicion, ss.getSheets().length));
+    hojasCreadas++;
+  }
   return { sh, nueva };
 }
 
@@ -289,21 +289,31 @@ function armarListas(ss) {
 }
 
 function armarBase(ss, listas) {
-  const { sh } = hoja(ss, HOJA_BASE, 0);
+  const { sh, nueva } = hoja(ss, HOJA_BASE, 0);
   const n = COLUMNAS_BASE.length;
   if (sh.getMaxRows() < FILAS_BASE) sh.insertRowsAfter(sh.getMaxRows(), FILAS_BASE - sh.getMaxRows());
   if (sh.getMaxColumns() < n) sh.insertColumnsAfter(sh.getMaxColumns(), n - sh.getMaxColumns());
+
+  if (!nueva) {
+    // BASE ya armada: NO se toca nada de lo que el equipo cambió (nombres de columnas, columnas
+    // ocultas, anchos, casillas / desplegables, colores, bordes). Solo se corrigen los meses que
+    // Sheets haya convertido en fecha y se avisa si las columnas cambiaron de lugar.
+    mesesComoTexto(sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1));
+    mesesComoTexto(sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1));
+    avisarColumnasMovidas(sh);
+    if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
+    return;
+  }
 
   sh.getRange(1, 1, 1, n).setValues([COLUMNAS_BASE.map((c) => c.h)])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white')
     .setWrap(true).setVerticalAlignment('middle');
   sh.setFrozenRows(1);
-
   COLUMNAS_BASE.forEach((c, i) => {
     if (c.oculta) sh.hideColumns(i + 1); else sh.showColumns(i + 1);
   });
-  mesesComoTexto(sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1));
-  mesesComoTexto(sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1));
+  sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1).setNumberFormat('@');
+  sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1).setNumberFormat('@');
 
   // Desplegables.
   const filas = sh.getMaxRows() - 1;
@@ -318,39 +328,48 @@ function armarBase(ss, listas) {
   // gris. Acto avisa si se edita; Mes cierre se puede corregir a mano (onEdit lo normaliza).
   const rActo = sh.getRange(2, colBase('Acto'), filas, 1);
   const rCierre = sh.getRange(2, colBase('Mes cierre'), filas, 1);
-  [rActo, rCierre].forEach((rg) => rg.clearDataValidations().setBackground('#f3f3f3').setFontColor(GRIS_TEXTO));
-  sh.getProtections(SpreadsheetApp.ProtectionType.RANGE)
-    .filter((pr) => pr.getDescription() === 'Acto (viene de SGA)').forEach((pr) => pr.remove());
+  [rActo, rCierre].forEach((rg) => rg.setBackground('#f3f3f3').setFontColor(GRIS_TEXTO));
   rActo.protect().setDescription('Acto (viene de SGA)').setWarningOnly(true);
   desplegable('Responsable', listas.Responsable, true);
   desplegable('Pedido', listas.Pedido, true);
   desplegable('Carpeta', listas.Carpeta, true);
   desplegable('Modalidad', listas.Modalidad, true);
-  desplegable('Llave x llave', listas['Llave x llave'], true);
-  sh.getRange(2, colBase('RESPONSABLE'), filas, 1).clearDataValidations();
+  sh.getRange(2, colBase('Llave x llave'), filas, 1).insertCheckboxes();
 
   // Colores de Pedido.
   const rPedido = sh.getRange(2, colBase('Pedido'), filas, 1);
   const color = (texto, fondo) => SpreadsheetApp.newConditionalFormatRule()
     .whenTextEqualTo(texto).setBackground(fondo).setRanges([rPedido]).build();
-  const otras = sh.getConditionalFormatRules().filter((r) =>
-    !r.getRanges().some((g) => g.getColumn() === colBase('Pedido')));
-  sh.setConditionalFormatRules(otras.concat([
+  sh.setConditionalFormatRules([
     color('APROBADO', '#d9ead3'),
     color('PENDIENTE', '#fff2cc'),
     color('SUSPENDIDO', '#fce5cd'),
     color('BAJA ADJ', '#f4cccc'),
-  ]));
+  ]);
 
   sh.getRange(2, colBase('Observacion'), filas, 1).setWrap(false);
   sh.setColumnWidth(colBase('Observacion'), 320);
   sh.setColumnWidth(colBase('Apellido, Nombre'), 220);
-
-  // Cuadrícula marcada en toda la tabla (también en las filas vacías, para las que se agreguen).
   sh.getRange(1, 1, sh.getMaxRows(), n)
     .setBorder(true, true, true, true, true, true, '#b7b7b7', SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
+}
 
-  if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
+/**
+ * El script ubica las columnas por POSICIÓN (A = Acto, D = Modelo, F = Mes cierre, U = Pedido...).
+ * Renombrar una columna no rompe nada (p. ej. "Llave x llave" -> "LLXLL"), pero insertar,
+ * borrar o mover columnas sí. Si los encabezados no se parecen a lo esperado, avisa.
+ */
+function avisarColumnasMovidas(sh) {
+  const enc = sh.getRange(1, 1, 1, COLUMNAS_BASE.length).getValues()[0].map((v) => String(v).trim());
+  const clave = ['Acto', 'Modelo ahorro', 'Mes cierre', 'Solicitud', 'Responsable', 'Modalidad', 'Pedido',
+    'Carpeta', 'RESPONSABLE'];
+  const movidas = clave.filter((h) => enc[colBase(h) - 1] !== h);
+  if (movidas.length) {
+    SpreadsheetApp.getUi().alert('Atención: en BASE estas columnas no están donde las espera el script ' +
+      `(¿se insertó, borró o movió alguna columna?): ${movidas.join(', ')}.\n` +
+      'Las fórmulas del RESUMEN y del INFORME pueden dar mal. Renombrar columnas no es problema; moverlas sí.');
+  }
 }
 
 function armarPegar(ss) {
@@ -462,6 +481,7 @@ function armarAjustes(ss) {
     sh.getRange(2, 1, AJUSTES_INICIALES.length, 5).setValues(AJUSTES_INICIALES);
   }
   mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
+  if (sh.getRange('D1').getValue() !== 'VM netos' && !nueva) return; // ya armada: no se toca
   sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Modelo', 'Netos', 'VM extra (opcional)', 'Nota']])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   sh.getRange('C1').setNote('Netos que no están en BASE. Se valúan con el V.M del mes de PRECIOS ' +
@@ -943,95 +963,6 @@ function importarArchivoMensual(ss, h) {
   return `${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : '');
 }
 
-/**
- * UNA SOLA VEZ (desde el editor de Apps Script): ajusta los netos de JULIO 26 con los cierres
- * del acto de junio (archivo JUNIO 26.xlsx, 28 operaciones con Mes = JULIO), sin sumar junio a
- * BASE. Reemplaza los ajustes de julio que hubiera (el FS1 que venía del RESUMEN de julio).
- * Se puede correr de nuevo: no duplica.
- */
-function ajustarJulioConJunio() {
-  const ss = SpreadsheetApp.getActive();
-  const aj = ss.getSheetByName(HOJA_AJUSTES);
-  let borradas = 0;
-  for (let r = aj.getLastRow(); r >= 2; r--) {
-    if (textoMes(aj.getRange(r, 1).getValue()) === 'JULIO 26') {
-      aj.deleteRow(r);
-      borradas++;
-    }
-  }
-  const f0 = aj.getLastRow() + 1;
-  aj.getRange(f0, 1, AJUSTES_JUNIO_EN_JULIO.length, 1).setNumberFormat('@');
-  aj.getRange(f0, 1, AJUSTES_JUNIO_EN_JULIO.length, 5).setValues(AJUSTES_JUNIO_EN_JULIO);
-
-  // FP3 de julio: si no tiene precio, se agrega (si ya lo cargaste, no se toca).
-  const precios = ss.getSheetByName(HOJA_PRECIOS);
-  const hay = precios.getRange(2, 1, Math.max(1, precios.getLastRow() - 1), 2).getValues()
-    .some((f) => textoMes(f[0]) === 'JULIO 26' && f[1] === 'FP3');
-  if (!hay) {
-    const p0 = precios.getLastRow() + 1;
-    precios.getRange(p0, 1).setNumberFormat('@');
-    precios.getRange(p0, 1, 1, 3).setValues([['JULIO 26', 'FP3', PRECIOS_JULIO.FP3]]);
-    precios.getRange(p0, 3).setNumberFormat('$ #,##0');
-  }
-  actualizarInforme();
-  SpreadsheetApp.getUi().alert(`AJUSTES de JULIO 26: ${borradas} fila(s) anteriores reemplazadas por ` +
-    `${AJUSTES_JUNIO_EN_JULIO.length} filas = 28 netos del acto de junio cerrados en julio ` +
-    '(DP1 14, MB1 6, AR2 4, FO1 2, FT3 1, FP3 1).' +
-    (hay ? '' : '\nPRECIOS: agregado FP3 de julio ($ 32.833.000, mismo valor que FP3 en agosto).'));
-}
-
-/**
- * UNA SOLA VEZ (desde el editor de Apps Script): suma el acto de JULIO 26.
- * - Copia la hoja JULIO del archivo "JULIO 26" a BASE (no duplica si se corre de nuevo).
- * - PRECIOS: agrega los de julio que falten (no toca los existentes).
- * - AJUSTES: saca lo que ahora está en BASE (los 15 cierres de agosto del acto de julio y el
- *   "+1" MB1 de septiembre, que era una solicitud de julio) y agrega el FS1 de julio. Los
- *   netos de AJUSTES quedan sin VM fijo: se valúan con el precio del mes en que se liquidan.
- */
-function incorporarJulio() {
-  const ss = SpreadsheetApp.getActive();
-  const props = PropertiesService.getDocumentProperties();
-  const msj = [importarArchivoMensual(ss, HISTORICOS[0])];
-
-  const precios = ss.getSheetByName(HOJA_PRECIOS);
-  const ya = new Set(precios.getRange(2, 1, Math.max(1, precios.getLastRow() - 1), 2).getValues()
-    .map((f) => `${textoMes(f[0])}|${f[1]}`));
-  const nuevos = Object.keys(PRECIOS_JULIO).filter((m) => !ya.has(`JULIO 26|${m}`))
-    .map((m) => ['JULIO 26', m, PRECIOS_JULIO[m]]);
-  if (nuevos.length) {
-    const f0 = precios.getLastRow() + 1;
-    precios.getRange(f0, 1, nuevos.length, 1).setNumberFormat('@');
-    precios.getRange(f0, 1, nuevos.length, 3).setValues(nuevos);
-    precios.getRange(f0, 3, nuevos.length, 1).setNumberFormat('$ #,##0');
-  }
-  msj.push(`PRECIOS: ${nuevos.length} de julio agregados`);
-
-  if (!props.getProperty('JULIO_INCORPORADO')) {
-    const aj = ss.getSheetByName(HOJA_AJUSTES);
-    for (let r = aj.getLastRow(); r >= 2; r--) {
-      const [mes, modelo, , , nota] = aj.getRange(r, 1, 1, 5).getValues()[0];
-      const m = textoMes(mes);
-      const esJulioEnAgosto = m === 'AGOSTO 26' && /archivo de JULIO/i.test(nota);
-      const esMB1Sept = m === 'SEPTIEMBRE 26' && modelo === 'MB1' && /\+1/.test(nota);
-      if (esJulioEnAgosto || esMB1Sept) aj.deleteRow(r);
-    }
-    // Los ajustes de netos que quedan se valúan con PRECIOS (precio del mes en que se liquida):
-    // se borra el VM fijo que tenían.
-    for (let r = 2; r <= aj.getLastRow(); r++) {
-      if (Number(aj.getRange(r, 3).getValue()) !== 0) aj.getRange(r, 4).setValue('');
-    }
-    const agregar = AJUSTES_INICIALES.filter((f) => f[0] !== 'SEPTIEMBRE 26');
-    aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 1).setNumberFormat('@');
-    aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 5).setValues(agregar);
-    props.setProperty('JULIO_INCORPORADO', 'si');
-    msj.push('AJUSTES: actualizados (cierres de julio pasan a BASE; netos valuados con el precio del mes)');
-  } else {
-    msj.push('AJUSTES: ya estaban actualizados');
-  }
-  actualizarInforme();
-  SpreadsheetApp.getUi().alert(msj.join('\n'));
-}
-
 /** Agrega filas a BASE salteando las que ya existen (mismo Acto + Solicitud). */
 function agregarABase(ss, filas) {
   const base = ss.getSheetByName(HOJA_BASE);
@@ -1066,23 +997,26 @@ function ordenarBase(silencioso) {
   const base = ss.getSheetByName(HOJA_BASE);
   const ultima = ultimaFilaBase(base);
   if (ultima < 3) return;
-  const rango = base.getRange(2, 1, ultima - 1, COLUMNAS_BASE.length);
-  const valores = rango.getValues();
-  const notas = rango.getNotes();
-  const cActo = colBase('Acto') - 1;
+  const nFilas = ultima - 1;
+  const actos = base.getRange(2, colBase('Acto'), nFilas, 1).getValues();
   const orden = (v) => {
     const m = textoMes(v).match(/^([A-Z]+) (\d{2})$/);
     const i = m ? MESES.indexOf(m[1]) : -1;
-    return i < 0 ? Number.MAX_SAFE_INTEGER : Number(m[2]) * 12 + i;
+    return i < 0 ? 99999 : Number(m[2]) * 12 + i;
   };
-  const idx = valores.map((f, i) => i);
-  idx.sort((a, b) => (orden(valores[a][cActo]) - orden(valores[b][cActo])) || (a - b));
-  if (idx.every((v, i) => v === i)) {
+  // Clave: acto cronológico y, dentro del acto, el orden que ya tenían las filas.
+  const claves = actos.map((f, i) => [orden(f[0]) * 100000 + i]);
+  if (claves.every((k, i) => i === 0 || k[0] > claves[i - 1][0])) {
     if (!silencioso) SpreadsheetApp.getUi().alert('BASE ya estaba ordenada por acto.');
     return;
   }
-  rango.setValues(idx.map((i) => valores[i]));
-  rango.setNotes(idx.map((i) => notas[i]));
+  // Se ordena con Range.sort usando una columna auxiliar temporal: así se mueven las filas
+  // enteras (valores, casillas, colores, notas) y no se pierde nada de lo que cargó el equipo.
+  const colAux = base.getMaxColumns() + 1;
+  base.insertColumnAfter(base.getMaxColumns());
+  base.getRange(2, colAux, nFilas, 1).setValues(claves);
+  base.getRange(2, 1, nFilas, colAux).sort({ column: colAux, ascending: true });
+  base.deleteColumn(colAux);
   if (!silencioso) SpreadsheetApp.getUi().alert('BASE ordenada por acto (del más viejo al más nuevo).');
 }
 
@@ -1190,7 +1124,7 @@ function limpiar(columna, valor) {
     return NORMALIZAR_RESPONSABLE[v] || v;
   }
   if (columna === 'Pedido' || columna === 'Carpeta') return String(v).toUpperCase();
-  if (columna === 'Llave x llave') return 'SI'; // en los archivos viejos aparece "x", "1" o "SI"
+  if (columna === 'Llave x llave') return true; // casilla; en los archivos viejos aparece "x", "1" o "SI"
   return v;
 }
 
