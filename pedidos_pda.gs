@@ -98,14 +98,13 @@ const HISTORICOS = [
 // Semilla de PRECIOS (tomada de los RESUMEN de cada mes).
 // Cierres que no están en BASE, para que los meses de arranque den igual que sus
 // RESUMEN mensuales originales: [Mes, Modelo, Netos, VM netos, Nota].
-const NOTA_PRECIO_VIEJO = 'Diferencia de precio: el RESUMEN de AGOSTO 26 valuaba los cierres del acto de ' +
-  'julio con la lista anterior (DP1 32.820.000; FO1 27.459.000). Solo VM, sin netos.';
+// Cierres que no están en BASE, para que los meses den igual que sus RESUMEN mensuales:
+// [Mes, Modelo, Netos, VM extra, Nota]. Los netos se valúan con el V.M del mes de cierre
+// (PRECIOS), como cualquier cierre; "VM extra" queda solo para correcciones de importe.
 const AJUSTES_INICIALES = [
-  ['JULIO 26', 'FS1', 1, 33660000,
+  ['JULIO 26', 'FS1', 1, '',
     'Cierre de un acto anterior (junio) cargado a mano en el RESUMEN de JULIO 26 (NETOS ANTERIOR; el resto del bloque da #ERROR).'],
-  ['AGOSTO 26', 'DP1', 0, -38849999.93, NOTA_PRECIO_VIEJO],
-  ['AGOSTO 26', 'FO1', 0, -1851000, NOTA_PRECIO_VIEJO],
-  ['SEPTIEMBRE 26', 'NC1', 1, 37550000,
+  ['SEPTIEMBRE 26', 'NC1', 1, '',
     '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
 ];
 
@@ -424,8 +423,11 @@ function armarAjustes(ss) {
     sh.getRange(2, 1, AJUSTES_INICIALES.length, 5).setValues(AJUSTES_INICIALES);
   }
   mesesComoTexto(sh.getRange(2, 1, sh.getMaxRows() - 1, 1));
-  sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Modelo', 'Netos', 'VM netos', 'Nota']])
+  sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Modelo', 'Netos', 'VM extra (opcional)', 'Nota']])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.getRange('C1').setNote('Netos que no están en BASE. Se valúan con el V.M del mes de PRECIOS ' +
+    '(como todo cierre: vale el precio del mes en que se liquida).');
+  sh.getRange('D1').setNote('Solo para corregir importes. Vacío en los ajustes de netos: el VM sale de PRECIOS.');
   sh.getRange('D:D').setNumberFormat('$ #,##0');
   sh.setColumnWidth(5, 520);
   sh.setFrozenRows(1);
@@ -604,9 +606,9 @@ function armarResumen(ss, listas) {
   sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})+` +
     `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
   sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
-  // VM netos = netos de BASE × V.M del mes + VM de los AJUSTES (que traen su propio importe).
+  // VM netos = netos del mes (BASE + AJUSTES) × V.M del mes en que se liquidan + VM extra de AJUSTES.
   sh.getRange('I34').setFormula(`=MAP(B34:B80,G34:G80,H34:H80,LAMBDA(m,n,p,IF(m="","",` +
-    `(n-SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m))*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
+    `n*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
   sh.getRange('C34:I80').setHorizontalAlignment('center');
   sh.getRange('B34:I80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
 
@@ -693,7 +695,8 @@ function actualizarInforme() {
       // VM netos: por cada modelo con precio en el mes, V.M × netos de ese modelo (+ AJUSTES).
       // (Un SUMIFS con criterio de matriz dentro de SUMPRODUCT usaba un solo precio para todo.)
       `=IFERROR(LET(p,FILTER(PRECIOS!$B$2:$C,PRECIOS!$A$2:$A=${A}),SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
-        `LAMBDA(m,pr,pr*COUNTIFS(${r['Mes cierre']},${A},${r['Modelo ahorro']},m,${aprob}))))),0)` +
+        `LAMBDA(m,pr,pr*(COUNTIFS(${r['Mes cierre']},${A},${r['Modelo ahorro']},m,${aprob})+` +
+        `SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${A},${HOJA_AJUSTES}!$B:$B,m)))))),0)` +
         `+SUMIFS(${HOJA_AJUSTES}!$D:$D,${HOJA_AJUSTES}!$A:$A,${A})`,
     ];
   });
@@ -894,8 +897,8 @@ function importarArchivoMensual(ss, h) {
  * - Copia la hoja JULIO del archivo "JULIO 26" a BASE (no duplica si se corre de nuevo).
  * - PRECIOS: agrega los de julio que falten (no toca los existentes).
  * - AJUSTES: saca lo que ahora está en BASE (los 15 cierres de agosto del acto de julio y el
- *   "+1" MB1 de septiembre, que era una solicitud de julio) y agrega la diferencia de precio de
- *   agosto y el FS1 de julio. Así agosto y septiembre siguen dando igual que sus RESUMEN.
+ *   "+1" MB1 de septiembre, que era una solicitud de julio) y agrega el FS1 de julio. Los
+ *   netos de AJUSTES quedan sin VM fijo: se valúan con el precio del mes en que se liquidan.
  */
 function incorporarJulio() {
   const ss = SpreadsheetApp.getActive();
@@ -924,11 +927,16 @@ function incorporarJulio() {
       const esMB1Sept = m === 'SEPTIEMBRE 26' && modelo === 'MB1' && /\+1/.test(nota);
       if (esJulioEnAgosto || esMB1Sept) aj.deleteRow(r);
     }
+    // Los ajustes de netos que quedan se valúan con PRECIOS (precio del mes en que se liquida):
+    // se borra el VM fijo que tenían.
+    for (let r = 2; r <= aj.getLastRow(); r++) {
+      if (Number(aj.getRange(r, 3).getValue()) !== 0) aj.getRange(r, 4).setValue('');
+    }
     const agregar = AJUSTES_INICIALES.filter((f) => f[0] !== 'SEPTIEMBRE 26');
     aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 1).setNumberFormat('@');
     aj.getRange(aj.getLastRow() + 1, 1, agregar.length, 5).setValues(agregar);
     props.setProperty('JULIO_INCORPORADO', 'si');
-    msj.push('AJUSTES: actualizados (agosto y septiembre siguen cuadrando con sus RESUMEN)');
+    msj.push('AJUSTES: actualizados (cierres de julio pasan a BASE; netos valuados con el precio del mes)');
   } else {
     msj.push('AJUSTES: ya estaban actualizados');
   }

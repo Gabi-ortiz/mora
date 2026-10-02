@@ -157,13 +157,18 @@ de nuevo no duplica):
 - AJUSTES: el acto de julio trae los 15 cierres de agosto que estaban como
   ajuste (DP1 7, MB1 4, DT1 2, FO1 1, NT3 1) y el "+1" MB1 de septiembre
   (una solicitud de julio cerrada en septiembre): esas filas se sacan. Se
-  agrega la diferencia de precio con que el RESUMEN de agosto valuaba los
-  cierres de julio (DP1 −38.849.999,93; FO1 −1.851.000; solo VM) y el FS1
-  de julio (único cierre de junio cargado a mano en su RESUMEN; el resto
-  del bloque daba #ERROR por el link roto al archivo de JUNIO).
-- Resultado: julio 26 netos / $ 909.084.000; agosto sigue en 57 /
-  $ 1.965.767.000 y septiembre en 62 netos. Queda pendiente el "+1" NC1 de
-  septiembre (¿acto de junio?).
+  agrega el FS1 de julio (único cierre de junio cargado a mano en su
+  RESUMEN; el resto del bloque daba #ERROR porque venía de un Excel local
+  "JUNIO 26.xlsx" que no está en Drive).
+- **Regla de valuación** (confirmada): un cierre vale el V.M del mes en que
+  se liquida, aunque sea de un acto anterior (uno de julio liquidado en
+  agosto vale el precio de agosto). Por eso los netos de AJUSTES no llevan
+  importe fijo: se valúan con PRECIOS del mes. La columna "VM extra" de
+  AJUSTES queda solo para correcciones de importe.
+- Resultado: julio 26 netos / $ 913.724.000; agosto 57 netos /
+  $ 2.006.468.000 (el RESUMEN original daba $ 1.965.767.000 porque valuaba
+  los cierres de julio con la lista vieja); septiembre 62 netos. Queda
+  pendiente el "+1" NC1 de septiembre (¿acto de junio?).
 - Objetivo de julio (54, del RESUMEN de JULIO 26) va en el archivo de
   objetivos.
 
