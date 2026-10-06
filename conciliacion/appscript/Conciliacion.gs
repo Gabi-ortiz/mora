@@ -182,6 +182,7 @@ function crearParametros_(ss) {
     ['Cuenta bancaria', 'Banco Macro'],
     ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
     ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
+    ['Sin cuenta O', 'Si la empresa tiene la confirmación de valores al día (ej. Chexa), poné NO en "Cuenta O": se concilia solo la cuenta E.'],
     ['Saldos iniciales', 'Con la hoja "Base": saldo final de E y de O de la conciliación anterior. Al cerrar el mes se completan solos.'],
   ];
   let sh = ss.getSheetByName(HOJA.parametros);
@@ -1812,12 +1813,17 @@ function conciliarTodo_(entrada, redondoUnico) {
   const param = nombre => { const f = (entrada.parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0]))); return f ? f[1] : null; };
   let e, o;
   if (entrada.base) {
-    const b = leerBase_(entrada.base, param('^cuenta e') || 1103013, param('^cuenta o') || 1103012);
-    const siE = parseNum_(param('^saldo inicial cuenta e')), siO = parseNum_(param('^saldo inicial cuenta o'));
+    // "Cuenta O" en NO (o vacía): la empresa tiene la confirmación de valores al día y solo se concilia la cuenta E
+    const pO = param('^cuenta o');
+    const sinO = pO !== null && (String(pO).trim() === '' || /^no$/i.test(String(pO).trim()));
+    const cuentaO = sinO ? '__sin_cuenta_O__' : (pO || 1103012);
+    const b = leerBase_(entrada.base, param('^cuenta e') || 1103013, cuentaO);
+    const siE = parseNum_(param('^saldo inicial cuenta e'));
+    const siO = sinO ? 0 : parseNum_(param('^saldo inicial cuenta o'));
     const mk = (lista, si, n) => ({ asientos: lista, avisos: [], info: { cuenta: n, saldoInicial: si || 0,
       saldoFinal: redondear_((si || 0) + lista.reduce((x, a) => x + a.debe - a.haber, 0)) } });
     e = mk(b.E, siE, 'E (' + (param('^cuenta e') || 1103013) + ')');
-    o = mk(b.O, siO, 'O (' + (param('^cuenta o') || 1103012) + ')');
+    o = mk(b.O, siO, sinO ? 'O (no se usa)' : 'O (' + cuentaO + ')');
     if (siE === null || siO === null) {
       // sin saldos iniciales: se deducen de la conciliación anterior (saldo inicial del banco - pendientes anteriores)
       const antes = leerAnteriores_(entrada.anteriores || [], new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1));
