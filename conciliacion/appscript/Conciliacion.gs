@@ -2,9 +2,9 @@
  * CONCILIACIÓN BANCARIA — Banco Macro vs. FBS (cuentas E + O)
  *
  * Hojas de ENTRADA (se pegan los archivos tal cual, desde A1):
- *   - "Extracto"               : extracto de Macro (Excel "Últimos Movimientos" o CSV "Resumen").
- *   - "Mayor E" / "Mayor O"    : exportación a Excel del mayor de FBS de cada cuenta.
- *   - "Pendientes anteriores"  : partidas pendientes del cierre anterior (Sector, Fecha, Concepto, Importe).
+ *   - "E. bancario"            : extracto de Macro (Excel "Últimos Movimientos" o CSV "Resumen").
+ *   - "Base"                   : reporte de FBS con las cuentas E y O (DETPLAN, DETComenta, DETComentaAux, ...).
+ *   - "Pend mes anterior"      : partidas pendientes del cierre anterior (Sector, Fecha, Concepto, Importe).
  *   - "Reglas"                 : catálogo de conceptos del banco (código causal -> categoría). Editable.
  *   - "Empresas grupo"         : CUIT de las empresas del grupo (sus movimientos son internos).
  *
@@ -231,18 +231,17 @@ function crearHojasEntrada() {
     }
     return sh;
   };
-  // solo crea lo que falta: si ya hay hoja "Base" no hacen falta los mayores; se respetan "E. bancario" y "Pend mes anterior"
-  if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extracto, [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
-  if (!ss.getSheetByName(HOJA.base)) {
-    crear(HOJA.mayorE, [['Pegar acá la exportación del mayor de FBS de la cuenta E desde A1 (o usar la hoja "Base")']]);
-    crear(HOJA.mayorO, [['Pegar acá la exportación del mayor de FBS de la cuenta O desde A1 (o usar la hoja "Base")']]);
+  // solo crea lo que falta. FBS se carga siempre en la hoja "Base" (los mayores E y O ya no se usan)
+  if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
+  if (!ss.getSheetByName(HOJA.base) && !ss.getSheetByName(HOJA.mayorE)) {
+    crear(HOJA.base, [['Pegar acá el reporte de FBS (DETPLAN, DETMOVNRO, DETFECHA, DETDEBE, DETHABER, DETComenta, DETComentaAux, …) desde A1']]);
   }
-  if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anteriores, [['Sector', 'Fecha', 'Concepto', 'Importe']]);
+  if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [['Sector', 'Fecha', 'Concepto', 'Importe']]);
   limpiarHojasSobrantes_(ss);
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
   crearParametros_(ss);
-  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Completá el extracto, la base (o los mayores E y O), los pendientes anteriores ' +
+  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Completá "' + HOJA.base + '", el extracto, los pendientes anteriores ' +
     'y los saldos iniciales en "' + HOJA.parametros + '", y corré "2. Procesar conciliación".');
 }
 
