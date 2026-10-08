@@ -219,15 +219,33 @@ del acto de mayo (DP1 1). Desde esta versión:
 - "Armar / reparar estructura" ya NO reformatea una BASE existente
   (encabezados, columnas ocultas, anchos, casillas/desplegables, colores,
   bordes): eso se aplica solo al crear la hoja. En una BASE existente solo
-  corrige meses convertidos en fecha y avisa si las columnas clave cambiaron
-  de lugar (renombrar no rompe nada; insertar/mover columnas sí, porque el
-  script ubica las columnas por posición).
+  corrige meses convertidos en fecha (las columnas se buscan por nombre,
+  ver abajo).
 - Ordenar BASE usa Range.sort con una columna auxiliar temporal: se mueven
   las filas enteras (valores, casillas, colores y notas).
 - AJUSTES: encabezado y formato solo al crear (o la migración vieja "VM
   netos"); las filas cargadas a mano no se tocan.
 - El orden de las pestañas solo se acomoda si se creó una hoja nueva.
 - `incorporarJulio` y `ajustarJulioConJunio` se sacaron (ya aplicadas).
+
+## Columnas de BASE por nombre (08/10/2026)
+El equipo agregó **Modelo PEDIDO** (columna E, carga manual), lo que corrió
+Mes cierre a G, Pedido a V, etc. Desde esta versión el script busca cada
+columna de BASE **por el nombre del encabezado** (`mapaBase`), no por su
+posición:
+- Se pueden agregar, mover o insertar columnas sin romper nada. Las
+  columnas que no son del script (Modelo PEDIDO u otras) no se tocan nunca:
+  al agregar un acto se escribe solo en las columnas del script.
+- Renombres conocidos: "Llave x llave" = LLXLL / "Llave por llave"
+  (`ALIAS_BASE`); además se acepta el nombre sin distinguir mayúsculas ni
+  acentos, salvo Responsable / RESPONSABLE, que son dos columnas distintas.
+- Si falta una columna del script (se borró o se renombró a otra cosa),
+  "Armar / reparar estructura" avisa cuál y no arma nada.
+- Las fórmulas de RESUMEN, INFORME, LISTAS ("Meses con datos") y PRECIOS
+  ("Falta precio") se generan con las letras reales de cada columna.
+- "Modelo PEDIDO" había heredado el gris y el texto gris de Mes cierre
+  (que indica "lo completa el script"); se dejó en blanco. Todavía no lo usa
+  ningún cálculo.
 
 ## Qué hace "Armar / reparar estructura" con lo cargado a mano
 - **PRECIOS** y **AJUSTES**: los valores solo se escriben al crear la hoja;

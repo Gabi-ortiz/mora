@@ -39,7 +39,8 @@ const ID_ARCHIVO_OBJETIVOS = '1TDMqgJkbkP11dSlUhvJpD5NhKtkj0vvuiu-pPPQ5kYo';
 
 const FILAS_BASE = 5000;
 
-// Columnas de BASE, en orden. sga = nombre de la columna en el reporte de SGA
+// Columnas de BASE. El script las busca por el nombre del encabezado (ver mapaBase): este orden
+// solo se usa al crear BASE. sga = nombre de la columna en el reporte de SGA
 // (null = se completa a mano o la pone el script).
 const COLUMNAS_BASE = [
   { h: 'Acto', oculta: false, sga: null },
@@ -72,6 +73,10 @@ const COLUMNAS_BASE = [
   { h: 'Mail', oculta: true, sga: 'Mail' },
   { h: 'Dirección', oculta: true, sga: 'Dirección' },
 ];
+
+// Otros nombres con los que el equipo renombró columnas de BASE.
+const ALIAS_BASE = { 'Llave x llave': ['LLXLL', 'Llave por llave'] };
+let MAPA_BASE = null; // encabezados de BASE leídos en esta ejecución (ver mapaBase)
 
 const COLUMNAS_NUMERICAS = ['Solicitud', 'Grupo', 'Orden', 'Avance', 'Documento', 'CP', 'Monto licitado'];
 
@@ -176,7 +181,7 @@ function onEdit(e) {
   // Al marcar Pedido = APROBADO y Carpeta = APROBADA, completa Mes cierre con el mes actual si está vacío.
   if (c1 < Math.min(cPedido, cCarpeta) || c0 > Math.max(cPedido, cCarpeta)) return;
   const mesActual = etiquetaMes(new Date().getMonth(), new Date().getFullYear() % 100);
-  const datos = sh.getRange(fila0, 1, n, COLUMNAS_BASE.length).getValues();
+  const datos = sh.getRange(fila0, 1, n, sh.getLastColumn()).getValues();
   datos.forEach((fila, i) => {
     if (fila[cPedido - 1] === 'APROBADO' && fila[cCarpeta - 1] === 'APROBADA' && fila[cMes - 1] === '') {
       sh.getRange(fila0 + i, cMes).setValue(mesActual);
@@ -190,6 +195,7 @@ function onEdit(e) {
 
 function armarEstructura() {
   const ss = SpreadsheetApp.getActive();
+  if (!verificarColumnasBase()) return;
   const listas = armarListas(ss);
   armarBase(ss, listas);
   armarPegar(ss);
@@ -271,8 +277,10 @@ function armarListas(ss) {
   const nombresMes = MESES.map((m) => `"${m}"`).join(',');
   sh.getRange('A:A').clear().setNumberFormat('@');
   sh.getRange('A1').setValue('Meses con datos');
+  const lActo = letra(colBase('Acto'));
+  const lCierre = letra(colBase('Mes cierre'));
   sh.getRange('A2').setFormula(
-    `=IFERROR(LET(v,{${HOJA_BASE}!A2:A;${HOJA_BASE}!F2:F},` +
+    `=IFERROR(LET(v,{${HOJA_BASE}!${lActo}2:${lActo};${HOJA_BASE}!${lCierre}2:${lCierre}},` +
     'u,UNIQUE(FILTER(v,REGEXMATCH(v&"","^[A-Z]+ [0-9]{2}$"))),' +
     `SORT(u,ARRAYFORMULA(DATE(2000+VALUE(RIGHT(u,2)),MATCH(LEFT(u,LEN(u)-3),{${nombresMes}},0),1)),FALSE)),"")`);
   sh.getRange(1, 1, 1, nombres.length + 1)
@@ -297,17 +305,18 @@ function armarBase(ss, listas) {
   if (!nueva) {
     // BASE ya armada: NO se toca nada de lo que el equipo cambió (nombres de columnas, columnas
     // ocultas, anchos, casillas / desplegables, colores, bordes). Solo se corrigen los meses que
-    // Sheets haya convertido en fecha y se avisa si las columnas cambiaron de lugar.
+    // Sheets haya convertido en fecha. Las columnas se buscan por nombre (ver mapaBase), así que
+    // se pueden agregar o mover columnas (p. ej. "Modelo PEDIDO") sin romper nada.
     mesesComoTexto(sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1));
     mesesComoTexto(sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1));
-    avisarColumnasMovidas(sh);
-    if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
+    if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), sh.getLastColumn()).createFilter();
     return;
   }
 
   sh.getRange(1, 1, 1, n).setValues([COLUMNAS_BASE.map((c) => c.h)])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white')
     .setWrap(true).setVerticalAlignment('middle');
+  MAPA_BASE = null; // recién escritos los encabezados
   sh.setFrozenRows(1);
   COLUMNAS_BASE.forEach((c, i) => {
     if (c.oculta) sh.hideColumns(i + 1); else sh.showColumns(i + 1);
@@ -356,20 +365,17 @@ function armarBase(ss, listas) {
 }
 
 /**
- * El script ubica las columnas por POSICIÓN (A = Acto, D = Modelo, F = Mes cierre, U = Pedido...).
- * Renombrar una columna no rompe nada (p. ej. "Llave x llave" -> "LLXLL"), pero insertar,
- * borrar o mover columnas sí. Si los encabezados no se parecen a lo esperado, avisa.
+ * Las columnas de BASE se buscan por el nombre del encabezado. Si falta alguna (se borró o se
+ * renombró), avisa cuál y devuelve false para no armar fórmulas con columnas equivocadas.
  */
-function avisarColumnasMovidas(sh) {
-  const enc = sh.getRange(1, 1, 1, COLUMNAS_BASE.length).getValues()[0].map((v) => String(v).trim());
-  const clave = ['Acto', 'Modelo ahorro', 'Mes cierre', 'Solicitud', 'Responsable', 'Modalidad', 'Pedido',
-    'Carpeta', 'RESPONSABLE'];
-  const movidas = clave.filter((h) => enc[colBase(h) - 1] !== h);
-  if (movidas.length) {
-    SpreadsheetApp.getUi().alert('Atención: en BASE estas columnas no están donde las espera el script ' +
-      `(¿se insertó, borró o movió alguna columna?): ${movidas.join(', ')}.\n` +
-      'Las fórmulas del RESUMEN y del INFORME pueden dar mal. Renombrar columnas no es problema; moverlas sí.');
-  }
+function verificarColumnasBase() {
+  MAPA_BASE = null;
+  const faltan = mapaBase().faltan;
+  if (!faltan.length) return true;
+  SpreadsheetApp.getUi().alert('En BASE no encuentro estas columnas: ' + faltan.join(', ') + '.\n' +
+    '¿Se borraron o se les cambió el nombre? Volvé a ponerles ese nombre en la fila 1 ' +
+    '(el orden no importa y se pueden agregar columnas nuevas).');
+  return false;
 }
 
 function armarPegar(ss) {
@@ -924,8 +930,8 @@ function agregarActoPegado() {
   ordenarBase(true);
   actualizarInforme();
 
-  const iSol = colBase('Solicitud') - 1;
-  const iNom = colBase('Apellido, Nombre') - 1;
+  const iSol = iConfig('Solicitud');
+  const iNom = iConfig('Apellido, Nombre');
   const lista = nuevas.slice(0, 15).map((f) => `• ${f[iSol]} - ${f[iNom]}`).join('\n') +
     (nuevas.length > 15 ? `\n… y ${nuevas.length - 15} más` : '');
   ui.alert(recarga
@@ -963,28 +969,44 @@ function importarArchivoMensual(ss, h) {
   return `${h.acto}: ${agregadas} agregadas` + (repetidas ? `, ${repetidas} ya estaban` : '');
 }
 
-/** Agrega filas a BASE salteando las que ya existen (mismo Acto + Solicitud). */
+/**
+ * Agrega filas a BASE salteando las que ya existen (mismo Acto + Solicitud). Las filas vienen en
+ * el orden de COLUMNAS_BASE y se escriben en la columna que tenga cada nombre en BASE; las
+ * columnas que agregó el equipo (p. ej. "Modelo PEDIDO") no se tocan.
+ */
 function agregarABase(ss, filas) {
   const base = ss.getSheetByName(HOJA_BASE);
-  const cActo = colBase('Acto') - 1;
-  const cSol = colBase('Solicitud') - 1;
-  const clave = (f) => `${textoMes(f[cActo])}|${f[cSol]}`;
+  const clave = (acto, sol) => `${textoMes(acto)}|${sol}`;
   const existentes = new Set();
   const ultima = ultimaFilaBase(base);
   if (ultima > 1) {
-    base.getRange(2, 1, ultima - 1, COLUMNAS_BASE.length).getValues()
-      .forEach((f) => existentes.add(clave(f)));
+    const actos = base.getRange(2, colBase('Acto'), ultima - 1, 1).getValues();
+    const sols = base.getRange(2, colBase('Solicitud'), ultima - 1, 1).getValues();
+    actos.forEach((f, i) => existentes.add(clave(f[0], sols[i][0])));
   }
+  const iActo = iConfig('Acto');
+  const iSol = iConfig('Solicitud');
   const nuevas = filas.filter((f) => {
-    const k = clave(f);
+    const k = clave(f[iActo], f[iSol]);
     if (existentes.has(k)) return false;
     existentes.add(k);
     return true;
   });
-  if (nuevas.length) {
-    base.getRange(ultima + 1, 1, nuevas.length, COLUMNAS_BASE.length).setValues(nuevas);
-  }
+  if (nuevas.length) escribirFilasBase(base, ultima + 1, nuevas);
   return { agregadas: nuevas.length, repetidas: filas.length - nuevas.length, nuevas, fila0: ultima + 1 };
+}
+
+/** Escribe filas (orden de COLUMNAS_BASE) en BASE, por tramos de columnas seguidas. */
+function escribirFilasBase(base, fila0, filas) {
+  const cols = COLUMNAS_BASE.map((c, i) => ({ col: colBase(c.h), i })).sort((a, b) => a.col - b.col);
+  for (let k = 0; k < cols.length;) {
+    let j = k;
+    while (j + 1 < cols.length && cols[j + 1].col === cols[j].col + 1) j++;
+    const tramo = cols.slice(k, j + 1);
+    base.getRange(fila0, tramo[0].col, filas.length, tramo.length)
+      .setValues(filas.map((f) => tramo.map((t) => f[t.i])));
+    k = j + 1;
+  }
 }
 
 /**
@@ -1063,10 +1085,57 @@ function mesesComoTexto(rango) {
   if (hayFechas) rango.setValues(vals.map((f) => [f[0] instanceof Date ? textoMes(f[0]) : f[0]]));
 }
 
+/**
+ * Número de columna de BASE según el nombre del encabezado (fila 1), no según la posición: el
+ * equipo puede agregar, mover o renombrar columnas (ALIAS_BASE) sin romper el script.
+ */
 function colBase(nombre) {
-  const i = COLUMNAS_BASE.findIndex((c) => c.h === nombre);
-  if (i < 0) throw new Error(`Columna inexistente en BASE: ${nombre}`);
-  return i + 1;
+  if (iConfig(nombre) < 0) throw new Error(`Columna inexistente en BASE: ${nombre}`);
+  const c = mapaBase().col[nombre];
+  if (!c) {
+    throw new Error(`En BASE no encuentro la columna "${nombre}" (¿se borró o se renombró?). ` +
+      'Volvé a ponerle ese nombre en la fila 1.');
+  }
+  return c;
+}
+
+/** Posición de la columna en COLUMNAS_BASE (para las filas que arma el script). */
+function iConfig(nombre) {
+  return COLUMNAS_BASE.findIndex((c) => c.h === nombre);
+}
+
+/**
+ * Lee los encabezados de BASE una vez por ejecución. Busca cada columna por su nombre, por
+ * sus alias y, si no, sin distinguir mayúsculas ni acentos (solo si no es el nombre exacto de
+ * otra columna: "Responsable" y "RESPONSABLE" son distintas). Si BASE todavía no existe o no
+ * tiene encabezados, usa el orden de COLUMNAS_BASE.
+ */
+function mapaBase() {
+  if (MAPA_BASE) return MAPA_BASE;
+  const sh = SpreadsheetApp.getActive().getSheetByName(HOJA_BASE);
+  const enc = sh && sh.getLastColumn() > 0
+    ? sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map((v) => String(v).trim())
+    : [];
+  const col = {};
+  if (!enc.some((h) => h !== '')) {
+    COLUMNAS_BASE.forEach((c, i) => { col[c.h] = i + 1; });
+    MAPA_BASE = { col, faltan: [] };
+    return MAPA_BASE;
+  }
+  const usadas = new Set();
+  COLUMNAS_BASE.forEach((c) => {
+    const i = [c.h].concat(ALIAS_BASE[c.h] || []).map((n) => enc.indexOf(n)).find((x) => x >= 0);
+    if (i !== undefined) { col[c.h] = i + 1; usadas.add(i); }
+  });
+  const simple = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  COLUMNAS_BASE.forEach((c) => {
+    if (col[c.h]) return;
+    const i = enc.findIndex((h, k) => !usadas.has(k) && h && simple(h) === simple(c.h) &&
+      iConfig(h) < 0);
+    if (i >= 0) { col[c.h] = i + 1; usadas.add(i); }
+  });
+  MAPA_BASE = { col, faltan: COLUMNAS_BASE.filter((c) => !col[c.h]).map((c) => c.h) };
+  return MAPA_BASE;
 }
 
 function letra(n) {
@@ -1082,8 +1151,8 @@ function letra(n) {
 /** Rangos abiertos de BASE para usar en fórmulas: r['Pedido'] = BASE!$U$2:$U */
 function rangosBase() {
   const r = {};
-  COLUMNAS_BASE.forEach((c, i) => {
-    const l = letra(i + 1);
+  COLUMNAS_BASE.forEach((c) => {
+    const l = letra(colBase(c.h));
     r[c.h] = `${HOJA_BASE}!$${l}$2:$${l}`;
   });
   return r;
