@@ -839,7 +839,7 @@ function tabHistorial(d, el) {
   var p = d.plan, h = '';
   h += '<h4>Gestiones en el CRM (' + d.gestiones.length + ')</h4>' + (d.gestiones.length ? '<div class="tl">' + d.gestiones.map(eventoGestion).join('') + '</div>' : '<p class="muted">Todavía no hay gestiones registradas en el CRM.</p>');
   if (p.notasBase.length) {
-    h += '<h4 style="margin-top:22px">Seguimiento anterior de la planilla (' + p.notasBase.length + ')</h4><div class="tl">' + p.notasBase.map(function (n) {
+    h += '<h4 style="margin-top:22px">Seguimiento anterior de la planilla (' + p.notasBase.length + ')</h4><div class="tl">' + p.notasBase.slice().reverse().map(function (n) {
       return '<div class="ev vieja"><div class="t">📄 ' + esc(n.columna) + '</div><div class="x">' + esc(n.valor) + '</div></div>';
     }).join('') + '</div>';
   }
