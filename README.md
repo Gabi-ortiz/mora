@@ -245,11 +245,13 @@ seguimiento. Lo mismo **AO (ESTADO AGOSTO) y AP (AGOSTO)**
 falta).
 
 De **AH en adelante** está el seguimiento viejo en texto libre. Menú
-"Mora" > "CRM: importar notas viejas de BASE" lo copia una vez a
-CRM_Gestiones (canal "Importado de planilla", sin fecha, así que no suma
-en las gestiones del mes). Se puede volver a correr: saltea los planes ya
-importados. Después de importar, esas columnas se pueden borrar de BASE
-y la ficha sigue mostrando el historial.
+"Mora" > "CRM: traer notas nuevas de BASE" lo copia a CRM_Gestiones
+(canal "Importado de planilla", sin fecha, así que no suma en las
+gestiones del mes). Se puede correr las veces que haga falta: agrega las
+celdas nuevas, actualiza en su lugar las que cambiaron (sin duplicar) y no
+toca las que siguen igual. Mientras tanto, la ficha ya muestra lo que hoy
+tiene BASE. Después de traerlas, esas columnas se pueden borrar de BASE y
+la ficha sigue mostrando el historial.
 
 ### Tablero supervisor: situación por avance
 Mismo formato que la hoja "Tablero Medición FIAT" (sin % incentivo), pero

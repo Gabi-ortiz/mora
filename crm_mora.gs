@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-09-30.2';
+const CRM_VERSION = '2026-10-09.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -230,50 +230,70 @@ function crmMoverHojasViejas_(ssDatos) {
 }
 
 /**
- * Copia UNA vez el seguimiento viejo en texto libre de BASE (columnas AH en
- * adelante) a CRM_Gestiones, una fila por celda con contenido, con canal
- * CRM_CANAL_IMPORTADO. Salta los planes que ya tienen notas importadas, así
- * que se puede volver a correr (por ejemplo, para planes nuevos) sin
- * duplicar. Después de importar, esas columnas de BASE se pueden borrar:
- * la ficha muestra lo importado.
+ * Trae a CRM_Gestiones el seguimiento en texto libre de BASE (columnas AH en
+ * adelante, más las de licitación), una fila por celda con contenido y canal
+ * CRM_CANAL_IMPORTADO. Se puede correr las veces que haga falta:
+ *  - una celda que todavía no está en el CRM se agrega (planes nuevos,
+ *    comentarios nuevos en cualquier mes);
+ *  - una celda que cambió (por ejemplo, le agregaron texto) se actualiza en
+ *    la misma fila, sin duplicar;
+ *  - lo que ya está igual no se toca.
+ * Una vez copiado, esas columnas de BASE se pueden borrar: la ficha muestra lo
+ * del CRM.
  */
 function crmImportarNotasBase() {
+  const r = crmSincronizarNotasBase_();
+  SpreadsheetApp.getUi().alert('Notas de BASE al día.\n\n' +
+    'Nuevas: ' + r.nuevas + '\nActualizadas (la celda cambió): ' + r.actualizadas +
+    '\nPlanes con cambios: ' + r.planes + '\nSin cambios: ' + r.iguales + ' notas.');
+}
+
+function crmSincronizarNotasBase_() {
   const ss = crmDatos_();
-  const yaImportados = {};
-  crmLeerObjetos_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES, 5).forEach(function (g) {
-    if (g.Canal === CRM_CANAL_IMPORTADO) yaImportados[String(g.Solicitud)] = true;
+  const hoja = crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
+  const ultima = hoja.getLastRow();
+  const colNota = CRM_ENC_GESTIONES.indexOf('Nota') + 1;
+  // Lo ya importado: solicitud|columna → posición en la columna Nota.
+  const datos = ultima > 1 ? hoja.getRange(2, 1, ultima - 1, colNota).getValues() : [];
+  const notas = datos.map(function (f) { return [f[colNota - 1]]; });
+  const yaEsta = {};
+  datos.forEach(function (f, i) {
+    if (f[CRM_ENC_GESTIONES.indexOf('Canal')] !== CRM_CANAL_IMPORTADO) return;
+    const m = String(f[colNota - 1]).match(/^\[(.*?)\] ([\s\S]*)$/);
+    if (!m) return;
+    yaEsta[String(f[CRM_ENC_GESTIONES.indexOf('Solicitud')]) + '|' + m[1]] = { i: i, valor: m[2] };
   });
 
   // Acá sí se lee BASE completa (todas las columnas de notas).
   const valores = crmHojaBase_().getDataRange().getValues();
   const encabezados = valores[0];
-  const filas = [];
-  let planes = 0;
+  const nuevas = [], planes = {};
+  let actualizadas = 0, iguales = 0;
   for (let i = 1; i < valores.length; i++) {
     const f = valores[i];
     const solicitud = String(f[CRM_COL_SOLICITUD - 1] || '').trim();
     const situacion = solicitud ? crmSituacion(f) : null;
-    if (!situacion || yaImportados[solicitud]) continue;
+    if (!situacion) continue;
     // También las de licitación (AO/AP): así no se pierden si se borran esas
     // columnas de BASE; la ficha las muestra aparte, no como seguimiento.
-    const notas = crmNotasBase_(encabezados, f).concat(crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION));
-    if (!notas.length) continue;
-    planes++;
-    notas.forEach(function (n) {
-      filas.push(['', '', 'Planilla BASE', solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
-        '[' + n.columna + '] ' + n.valor, f[COL_AVANCE - 1], situacion.codigo]);
+    crmNotasBase_(encabezados, f).concat(crmColumnasBase_(encabezados, f, CRM_COLS_LICITACION)).forEach(function (n) {
+      const previa = yaEsta[solicitud + '|' + n.columna];
+      const texto = '[' + n.columna + '] ' + n.valor;
+      if (previa && previa.valor === n.valor) { iguales++; return; }
+      planes[solicitud] = true;
+      if (previa) { notas[previa.i][0] = texto; previa.valor = n.valor; actualizadas++; return; }
+      nuevas.push(['', '', 'Planilla BASE', solicitud, CRM_CANAL_IMPORTADO, '', '', '', '', '', '',
+        texto, f[COL_AVANCE - 1], situacion.codigo]);
+      yaEsta[solicitud + '|' + n.columna] = { i: -1, valor: n.valor };
     });
   }
 
-  if (filas.length) {
-    const hoja = crmHoja_(ss, CRM_HOJA_GESTIONES, CRM_ENC_GESTIONES);
-    hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, CRM_ENC_GESTIONES.length).setValues(filas);
-  }
-  crmAuditar_(ss, Session.getEffectiveUser().getEmail(), 'Importar notas de BASE',
-    filas.length + ' notas de ' + planes + ' planes');
-  SpreadsheetApp.getUi().alert('Importación lista: ' + filas.length + ' notas de ' + planes + ' planes.' +
-    (Object.keys(yaImportados).length ? '\n(' + Object.keys(yaImportados).length + ' planes ya estaban importados y se saltearon.)' : '') +
-    '\n\nRevisá algunas fichas en el CRM antes de borrar las columnas AH en adelante de BASE (la AG, Scoring, se queda).');
+  if (actualizadas) hoja.getRange(2, colNota, notas.length, 1).setValues(notas);
+  if (nuevas.length) hoja.getRange(hoja.getLastRow() + 1, 1, nuevas.length, CRM_ENC_GESTIONES.length).setValues(nuevas);
+  const r = { nuevas: nuevas.length, actualizadas: actualizadas, iguales: iguales, planes: Object.keys(planes).length };
+  crmAuditar_(ss, Session.getEffectiveUser().getEmail(), 'Sincronizar notas de BASE',
+    r.nuevas + ' nuevas, ' + r.actualizadas + ' actualizadas, ' + r.planes + ' planes');
+  return r;
 }
 
 /**
@@ -489,6 +509,13 @@ function crmArmarFicha_(ctx, p) {
     const notas = importadas.map(function (g) {
       const m = String(g.Nota).match(/^\[(.*?)\] ([\s\S]*)$/);
       return m ? { columna: m[1], valor: m[2] } : { columna: '', valor: String(g.Nota) };
+    });
+    // Lo que se escribió en BASE después de importar (celda nueva o con más
+    // texto) se ve igual, aunque todavía no se haya sincronizado.
+    const enCrm = {};
+    notas.forEach(function (n, k) { enCrm[n.columna] = k; });
+    p.notasBase.forEach(function (n) {
+      if (enCrm[n.columna] === undefined) notas.push(n); else notas[enCrm[n.columna]] = n;
     });
     // Las columnas de licitación (si se importaron con una versión anterior)
     // no son seguimiento: van al bloque de licitación, solo si BASE ya no las tiene.
