@@ -252,7 +252,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-10-09.2';
+var VERSION = '2026-10-09.3';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -273,7 +273,21 @@ function esc(v) {
 function cada(sel, raiz, fn) { Array.prototype.forEach.call((raiz || document).querySelectorAll(sel), fn); }
 function toast(msg) {
   var t = $('toast'); t.textContent = msg; t.hidden = false;
-  clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, 3500);
+  clearTimeout(toast._t); toast._t = setTimeout(function () { t.hidden = true; }, msg.length > 60 ? 6000 : 3500);
+}
+// Copia al portapapeles; si el navegador no deja usar la API nueva (la web app corre en un iframe), usa execCommand.
+function copiarNumero(num) {
+  var aviso = function () { toast('📋 ' + num + ' copiado. Si Zoiper no se abrió, pegalo ahí con Ctrl+V y Enter.'); };
+  var viejo = function () {
+    var t = document.createElement('textarea'); t.value = num; t.setAttribute('readonly', ''); t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.appendChild(t); t.select();
+    var ok = false; try { ok = document.execCommand('copy'); } catch (x) {}
+    document.body.removeChild(t);
+    if (ok) aviso(); else toast('Número para marcar: ' + num);
+  };
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(num).then(aviso, viejo); else viejo();
+  } catch (x) { viejo(); }
 }
 function error(e) { if (!e || !e.sesion) toast('⚠️ ' + (e && e.message ? e.message : e)); }
 function pad2(n) { return ('0' + n).slice(-2); }
@@ -688,9 +702,9 @@ function renderFicha(d) {
     (S.ini.esSupervisor && p.situacion.medidoPorFiat ? ' · <span class="fiat">FIAT</span> mide la cuota ' + esc(p.avance) + ' el mes próximo' : '') + '</div>' +
     '<div class="row" style="margin-top:12px">' +
     (p.tituloPropio ? (p.telefono || p.telefonoAlt ? '<button class="btn" disabled title="Título propio: no se llama">📞 ' + esc([p.telefono, p.telefonoAlt].filter(String).join(' · ')) + '</button><button class="btn" disabled title="Título propio: no se contacta">WhatsApp</button>' : '') :
-    (tel ? '<a class="btn pri" href="tel:' + pre + tel + '" target="_blank" title="Marca ' + pre + tel + '">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>'
+    (tel ? '<a class="btn pri llamar" href="tel:' + pre + tel + '" data-num="' + pre + tel + '" target="_blank" title="Marca ' + pre + tel + ' (también lo copia para pegar en Zoiper)">📞 ' + esc(p.telefono) + '</a><a class="btn wa" href="https://wa.me/549' + tel + '" target="_blank">WhatsApp</a>'
       : p.telefono ? revisar(p.telefono) : '<span class="muted">Sin teléfono cargado</span>') +
-    (tel2 ? '<a class="btn" href="tel:' + pre + tel2 + '" target="_blank" title="Marca ' + pre + tel2 + '">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : p.telefonoAlt ? revisar(p.telefonoAlt) : '')) +
+    (tel2 ? '<a class="btn llamar" href="tel:' + pre + tel2 + '" data-num="' + pre + tel2 + '" target="_blank" title="Marca ' + pre + tel2 + ' (también lo copia para pegar en Zoiper)">📞 Alt. ' + esc(p.telefonoAlt) + '</a>' : p.telefonoAlt ? revisar(p.telefonoAlt) : '')) +
     '<button class="btn ghost sm" id="corregir" title="Corregir teléfono o mail">✎ Corregir datos</button>' +
     (p.contactoCorregido ? '<span class="pill caso" title="Corregido en el CRM">✔ corregido</span>' : '') + '</div></div>' +
     '<div class="dr-tabs">' + [['gestionar', 'Gestionar'], ['datos', 'Datos del plan'], ['historial', 'Historial (' + (d.gestiones.length + p.notasBase.length) + ')']].map(function (t) {
@@ -698,6 +712,8 @@ function renderFicha(d) {
     }).join('') + '</div><div class="dr-b" id="drb"></div>';
   $('dr').innerHTML = h;
   $('cerrar').onclick = cerrarFicha;
+  // Llamar: además de abrir Zoiper (tel:), copia el número por si la PC no tiene Zoiper asociado.
+  cada('a.llamar', $('dr'), function (a) { a.addEventListener('click', function () { copiarNumero(a.getAttribute('data-num')); }); });
   $('corregir').onclick = function () { S.fichaTab = 'datos'; S.editarContacto = true; renderFicha(S.ficha); };
   if ($('ant')) $('ant').onclick = function () { abrirFicha(S.cola[i - 1]); };
   if ($('sig')) $('sig').onclick = function () { abrirFicha(S.cola[i + 1]); };
