@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-10-09.1';
+const CRM_VERSION = '2026-10-09.2';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
