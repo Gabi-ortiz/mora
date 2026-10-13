@@ -334,3 +334,13 @@ pedido, Total incentivos**.
 - El tile "VM netos del mes" ahora toma E33.
 Probado en el archivo (octubre): CA6 13% → $ 4.182.798; FO1 3% →
 $ 805.754; NC1 0%; total $ 4.988.552 (sin bonus: octubre no tiene objetivo).
+
+## BASE: colores (13/10/2026)
+- Se sacó el color automático de Pedido = PENDIENTE (lo pinta el equipo a
+  mano por otra cuestión operativa). Quedan APROBADO, SUSPENDIDO y BAJA ADJ.
+  "Armar / reparar" no vuelve a poner el de PENDIENTE (en una BASE existente
+  no toca los formatos).
+- **Solicitud resaltada** (celeste y negrita) si figura en la hoja
+  **Licitaciones** (solicitud en D) con "Turin" o "FCA" en la columna N
+  (`resaltarLicitaciones`). Regla de formato condicional; "Armar / reparar"
+  solo la agrega si falta. Hoy marca 180 solicitudes.

@@ -29,6 +29,7 @@ const HOJA_PEGAR = 'PEGAR SGA';
 const HOJA_RESUMEN = 'RESUMEN';
 const HOJA_INFORME = 'INFORME';
 const HOJA_PRECIOS = 'PRECIOS';
+const HOJA_LICITACIONES = 'Licitaciones'; // la arma el equipo (solicitud en D, pago en N)
 const HOJA_OBJETIVOS = 'OBJETIVOS';
 const HOJA_LISTAS = 'LISTAS';
 const HOJA_INCENTIVOS = 'INCENTIVOS';
@@ -324,6 +325,7 @@ function armarBase(ss, listas) {
     mesesComoTexto(sh.getRange(2, colBase('Acto'), sh.getMaxRows() - 1, 1));
     mesesComoTexto(sh.getRange(2, colBase('Mes cierre'), sh.getMaxRows() - 1, 1));
     if (!sh.getFilter()) sh.getRange(1, 1, sh.getMaxRows(), sh.getLastColumn()).createFilter();
+    resaltarLicitaciones(sh);
     return;
   }
 
@@ -365,7 +367,6 @@ function armarBase(ss, listas) {
     .whenTextEqualTo(texto).setBackground(fondo).setRanges([rPedido]).build();
   sh.setConditionalFormatRules([
     color('APROBADO', '#d9ead3'),
-    color('PENDIENTE', '#fff2cc'),
     color('SUSPENDIDO', '#fce5cd'),
     color('BAJA ADJ', '#f4cccc'),
   ]);
@@ -376,6 +377,30 @@ function armarBase(ss, listas) {
   sh.getRange(1, 1, sh.getMaxRows(), n)
     .setBorder(true, true, true, true, true, true, '#b7b7b7', SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange(1, 1, sh.getMaxRows(), n).createFilter();
+  resaltarLicitaciones(sh);
+}
+
+/**
+ * Resalta la Solicitud de BASE si figura en la hoja Licitaciones (solicitud en D) con
+ * "Turin" o "FCA" en la columna N. Solo agrega la regla si no está: no toca los demás formatos
+ * condicionales ni los colores que el equipo pinta a mano.
+ */
+function resaltarLicitaciones(sh) {
+  const reglas = sh.getConditionalFormatRules();
+  const yaEsta = reglas.some((regla) => {
+    const cond = regla.getBooleanCondition();
+    return cond && cond.getCriteriaValues().some((v) => String(v).indexOf(`${HOJA_LICITACIONES}!`) >= 0);
+  });
+  if (yaEsta) return;
+  const c = letra(colBase('Solicitud'));
+  const lic = (col) => `INDIRECT("${HOJA_LICITACIONES}!${col}:${col}")`;
+  const cuenta = (pago) => `COUNTIFS(${lic('D')},$${c}2&"",${lic('N')},"${pago}")`;
+  reglas.push(SpreadsheetApp.newConditionalFormatRule()
+    .whenFormulaSatisfied(`=AND($${c}2<>"",${cuenta('Turin')}+${cuenta('FCA')}>0)`)
+    .setBackground('#cfe2f3').setBold(true)
+    .setRanges([sh.getRange(2, colBase('Solicitud'), sh.getMaxRows() - 1, 1)])
+    .build());
+  sh.setConditionalFormatRules(reglas);
 }
 
 /**
