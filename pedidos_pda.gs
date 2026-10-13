@@ -718,31 +718,33 @@ function armarResumen(ss, listas) {
   const enc = ['Modelo', 'Familia', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido',
     'Total incentivos', 'Bonificaciones', 'Total'];
   const titulo = (fila, texto, encabezados) => {
-    sh.getRange(fila, 2, 1, 10).merge().setValue(texto)
+    const n = encabezados.length;
+    sh.getRange(fila, 2, 1, n).merge().setValue(texto)
       .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-    sh.getRange(fila + 1, 2, 1, 10).setValues([encabezados]).setFontWeight('bold').setFontSize(9)
+    sh.getRange(fila + 1, 2, 1, n).setValues([encabezados]).setFontWeight('bold').setFontSize(9)
       .setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
       .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
     sh.getRange(fila + 1, 2).setHorizontalAlignment('left');
     sh.setRowHeight(fila + 1, 32);
   };
-  const formatoTabla = (f0, f1) => {
-    sh.getRange(f0, 2, f1 - f0 + 1, 10).setHorizontalAlignment('center');
-    sh.getRange(f0, 2, f1 - f0 + 1, 1).setHorizontalAlignment('left');
-    sh.getRange(f0 + 1, 2, f1 - f0, 10)
+  // ancho = cantidad de columnas desde B; pesos / porcentajes = números de columna con ese formato.
+  const formatoTabla = (f0, f1, ancho, pesos, porcentajes) => {
+    const filas = f1 - f0 + 1;
+    sh.getRange(f0, 2, filas, ancho).setHorizontalAlignment('center');
+    sh.getRange(f0, 2, filas, 1).setHorizontalAlignment('left');
+    sh.getRange(f0 + 1, 2, f1 - f0, ancho)
       .setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
-    sh.getRange(f0, 2, 1, 10).setFontWeight('bold').setBackground(FONDO_TOTAL);
-    [5, 6, 9, 10, 11].forEach((c) => sh.getRange(f0, c, f1 - f0 + 1, 1).setNumberFormat('$ #,##0')
-      .setHorizontalAlignment('right'));
-    sh.getRange(f0, 7, f1 - f0 + 1, 2).setNumberFormat('0.00%');
-    sh.getRange(f0, 4, f1 - f0 + 1, 1).setNumberFormat('#,##0'); // Netos: cantidad, no $
+    sh.getRange(f0, 2, 1, ancho).setFontWeight('bold').setBackground(FONDO_TOTAL);
+    pesos.forEach((c) => sh.getRange(f0, c, filas, 1).setNumberFormat('$ #,##0').setHorizontalAlignment('right'));
+    porcentajes.forEach((c) => sh.getRange(f0, c, filas, 1).setNumberFormat('0.00%'));
+    sh.getRange(f0, 4, filas, 1).setNumberFormat('#,##0'); // Netos: cantidad, no $
   };
   // --- Por familia (arriba, fila 31): suma la tabla por modelo (fila 48) según su familia.
-  const encFam = ['Familia', 'Modelos', 'Netos del mes', 'V.M promedio', 'VM netos', 'Bonus pedidos',
-    'Inc pedido (prom.)', 'Total incentivos', 'Bonificaciones', 'Total'];
+  // Sin los % (Bonus pedidos / Inc pedido): solo los importes.
+  const encFam = ['Familia', 'Modelos', 'Netos del mes', 'V.M promedio', 'VM netos', 'Total incentivos',
+    'Bonificaciones', 'Total'];
   titulo(31, 'POR FAMILIA', encFam);
   sh.getRange('E32').setNote('VM netos / Netos del mes.');
-  sh.getRange('H32').setNote('Promedio de Inc pedido de la familia, ponderado por VM netos.');
   const lf = 'B34:B45';
   const suma = (col) => `=MAP(${lf},LAMBDA(f,IF(f="","",SUMIF($C$51:$C$97,f,$${col}$51:$${col}$97))))`;
   sh.getRange('B34').setFormula('=IFERROR(SORT(UNIQUE(FILTER(C51:C97,C51:C97<>""))),"")');
@@ -750,14 +752,12 @@ function armarResumen(ss, listas) {
   sh.getRange('D34').setFormula(suma('D'));
   sh.getRange('E34').setFormula(`=MAP(${lf},D34:D45,F34:F45,LAMBDA(f,q,v,IF(OR(f="",N(q)=0),"",v/q)))`);
   sh.getRange('F34').setFormula(suma('F'));
-  sh.getRange('G34').setFormula(`=MAP(${lf},LAMBDA(f,IF(f="","",N($I$23))))`);
-  sh.getRange('H34').setFormula(`=MAP(${lf},F34:F45,I34:I45,G34:G45,LAMBDA(f,v,t,b,IF(OR(f="",N(v)=0),"",t/v-b)))`);
-  sh.getRange('I34').setFormula(suma('I'));
-  sh.getRange('J34').setFormula(suma('J'));
-  sh.getRange('K34').setFormula(suma('K'));
-  sh.getRange('B33:K33').setValues([['TOTAL', '', '=SUM(D34:D45)', '', '=SUM(F34:F45)', '', '',
-    '=SUM(I34:I45)', '=SUM(J34:J45)', '=SUM(K34:K45)']]);
-  formatoTabla(33, 45);
+  sh.getRange('G34').setFormula(suma('I'));
+  sh.getRange('H34').setFormula(suma('J'));
+  sh.getRange('I34').setFormula(suma('K'));
+  sh.getRange('B33:I33').setValues([['TOTAL', '', '=SUM(D34:D45)', '', '=SUM(F34:F45)', '=SUM(G34:G45)',
+    '=SUM(H34:H45)', '=SUM(I34:I45)']]);
+  formatoTabla(33, 45, 8, [5, 6, 7, 8, 9], []);
   sh.getRange('C34:C45').setHorizontalAlignment('left').setFontSize(9).setFontColor(GRIS_TEXTO);
 
   titulo(48, 'POR MODELO PEDIDO (V.M. = Precio CC sin iva)', enc);
@@ -798,7 +798,7 @@ function armarResumen(ss, listas) {
   sh.getRange('K51').setFormula(`=MAP(${lista},I51:I97,J51:J97,LAMBDA(m,t,b,IF(m="","",t-b)))`);
   sh.getRange('B50:K50').setValues([['TOTAL', '', '=SUM(D51:D97)', '', '=SUM(F51:F97)', '', '',
     '=SUM(I51:I97)', '=SUM(J51:J97)', '=SUM(K51:K97)']]);
-  formatoTabla(50, 97);
+  formatoTabla(50, 97, 10, [5, 6, 9, 10, 11], [7, 8]);
 
 }
 

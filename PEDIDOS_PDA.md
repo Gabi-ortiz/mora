@@ -374,3 +374,7 @@ hasta 12 familias) y POR MODELO PEDIDO debajo (fila 48). "Netos del mes" se
 fuerza a formato número (#,##0) en los dos cuadros. Titano (TI1, DT1) también
 va con IVA 10,5% en PRECIOS (jul-oct corregidos con =F/1,105); TN5 y TV6 quedan
 al 21% (no identificados).
+
+**POR FAMILIA sin %:** quedan Familia, Modelos, Netos del mes, V.M promedio,
+VM netos, Total incentivos, Bonificaciones y Total (B:I). Los % de Bonus
+pedidos e Inc pedido quedan solo en el cuadro por modelo.
