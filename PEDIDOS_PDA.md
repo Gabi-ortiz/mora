@@ -317,3 +317,7 @@ usa su Modelo ahorro (`formulaModeloCalculo`). Aplica a:
   descripción de producto de la fila.
 Probado en el archivo real: octubre da CA6 1, FO1 1, NC1 6 (VM $ 223.909.752
 con Prec CC s/IVA); septiembre suma 62 netos (aparece VS1, pedido de un FS1).
+
+**IVA 10,5% (13/10/2026):** en octubre, Strada (FS1, DA1, VS1, DU1), Fiorino
+(FO1) y Toro (NT3, VT3, TT1) tienen Prec CC s/IVA = Prec CC c/IVA / 1,105
+(el Excel lo traía con 21%). El resto de los modelos queda con 21%.
