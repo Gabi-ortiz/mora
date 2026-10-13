@@ -354,3 +354,17 @@ mano; está en `COLUMNAS_BASE`). La tabla "POR MODELO PEDIDO" suma al final:
 La tabla ocupa B:J (la columna J pasó de margen a columna de 118 px). Ojo: el
 archivo está en formato inglés, así que el importe se carga sin puntos
 (100000); "100.000" lo toma como 100.
+
+## Familias (13/10/2026)
+PRECIOS tiene la columna **Familia** (H, la carga el equipo: Cronos, Strada,
+Toro...). En RESUMEN:
+- Tabla por modelo (B:K): columna **Familia** al lado de Modelo. Sale de
+  PRECIOS para ese modelo y mes; si ese mes está vacía, la de otro mes; si
+  no hay ninguna, "Sin familia".
+- Debajo, **POR FAMILIA** (fila 82): Familia, Modelos, Netos, V.M promedio
+  (VM netos / netos), VM netos, Bonus pedidos, Inc pedido (promedio ponderado
+  por VM netos), Total incentivos, Bonificaciones y Total. Suma la tabla por
+  modelo.
+- La celda oculta del mes pasó de K1 a **M1** (K es columna de la tabla).
+Probado (octubre): Cronos = CA6 · NC1, 7 netos, VM $ 199.381.984, incentivos
+$ 4.182.798; Fiorino = FO1, 1 neto, $ 805.754.

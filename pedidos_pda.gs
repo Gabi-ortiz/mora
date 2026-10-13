@@ -118,7 +118,8 @@ const AJUSTES_INICIALES = [
 
 // Columnas de PRECIOS. El VM (RESUMEN, INFORME, AJUSTES) se calcula con Prec CC s/IVA.
 const ENCABEZADOS_PRECIOS = ['Mes', 'Modelo', 'Version', 'Inc pedido', 'Prec publico c/IVA',
-  'Prec CC c/IVA', 'Prec CC s/IVA'];
+  'Prec CC c/IVA', 'Prec CC s/IVA', 'Familia'];
+const COL_FAMILIA = 'H'; // PRECIOS: familia del modelo (Cronos, Strada...), la carga el equipo
 const COL_PRECIO_VM = 'G'; // Prec CC s/IVA
 
 // VM netos del INFORME de los meses que todavía no tienen Prec CC s/IVA cargado: queda el
@@ -434,7 +435,7 @@ function armarPrecios(ss) {
     const filas = [];
     Object.keys(PRECIOS_INICIALES).forEach((mes) => {
       Object.keys(PRECIOS_INICIALES[mes]).forEach((modelo) => {
-        filas.push([mes, modelo, '', '', PRECIOS_INICIALES[mes][modelo], '', '']);
+        filas.push([mes, modelo, '', '', PRECIOS_INICIALES[mes][modelo], '', '', '']);
       });
     });
     const n = ENCABEZADOS_PRECIOS.length;
@@ -553,7 +554,7 @@ const CELDA_MES_RESUMEN = 'H1';
 // Celda oculta con el mes elegido normalizado a "MES AA": Sheets a veces guarda la
 // opción del desplegable como fecha (26/09/2026) y las fórmulas no la encontraban.
 // Todas las fórmulas del RESUMEN usan esta celda, no H1.
-const CELDA_MES_CALC = 'K1';
+const CELDA_MES_CALC = 'M1'; // oculta; K y L las usa la tabla por modelo
 const CELDA_CATEGORIA_RESUMEN = 'I21';
 
 // Paleta: el bordó del reporte de SGA + grises suaves.
@@ -575,8 +576,9 @@ function armarResumen(ss, listas) {
   sh.setHiddenGridlines(true);
 
   const r = rangosBase();
-  const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $K$1
-  if (sh.getMaxColumns() < 11) sh.insertColumnsAfter(sh.getMaxColumns(), 11 - sh.getMaxColumns());
+  const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $M$1
+  if (sh.getMaxColumns() < 13) sh.insertColumnsAfter(sh.getMaxColumns(), 13 - sh.getMaxColumns());
+  sh.showColumns(1, sh.getMaxColumns()); // la celda oculta antes estaba en K
   sh.getRange(CELDA_MES_CALC).setFormula(formulaMesNormalizado(`$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`));
   sh.hideColumns(sh.getRange(CELDA_MES_CALC).getColumn());
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
@@ -585,7 +587,9 @@ function armarResumen(ss, listas) {
   // Grilla: A = margen; B..I = 8 columnas iguales.
   sh.setColumnWidth(1, 16);
   for (let c = 2; c <= 9; c++) sh.setColumnWidth(c, 118);
-  sh.setColumnWidth(10, 118); // J: última columna de la tabla por modelo
+  sh.setColumnWidth(10, 118); // J y K: últimas columnas de la tabla por modelo
+  sh.setColumnWidth(11, 118);
+  sh.setColumnWidth(12, 16);
 
   // Título y selector de mes.
   sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
@@ -637,7 +641,7 @@ function armarResumen(ss, listas) {
     ['Proyección (+15%)', '=IF(E25="","",ROUND(E25*1.15))'],
     ['Faltan para el objetivo', '=IF(E25="","",MAX(0,E25-E21))'],
     ['% cumplimiento', '=IF(N(E25)=0,"",E21/E25)'],
-    ['VM netos del mes', '=E33'],
+    ['VM netos del mes', '=F33'],
   ];
   const der2 = [
     ['Categoría del mes', '=IFERROR(VLOOKUP(' + M + ',OBJETIVOS!$A:$C,3,FALSE),"")'],
@@ -709,23 +713,37 @@ function armarResumen(ss, listas) {
   ]);
 
   // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba. Solo los modelos con netos en el
-  // mes: netos, VM netos, incentivos (bonus cumplimiento pedidos + Inc pedido del modelo) y
-  // bonificaciones ($ descuento de BASE).
-  sh.getRange('B31:J31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
-    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  const enc = ['Modelo', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido', 'Total incentivos',
-    'Bonificaciones', 'Total'];
-  sh.getRange('B32:J32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
-    .setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
-    .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
-  sh.getRange('B32').setHorizontalAlignment('left');
-  sh.setRowHeight(32, 32);
-  sh.getRange('F32').setNote('% de "Bonus cumplimiento pedidos totales" del bloque INCENTIVO PEDIDOS (I23): ' +
+  // mes: familia, netos, VM netos, incentivos (bonus cumplimiento pedidos + Inc pedido del
+  // modelo) y bonificaciones ($ descuento de BASE). Debajo, el mismo cuadro por familia.
+  const enc = ['Modelo', 'Familia', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido',
+    'Total incentivos', 'Bonificaciones', 'Total'];
+  const titulo = (fila, texto, encabezados) => {
+    sh.getRange(fila, 2, 1, 10).merge().setValue(texto)
+      .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+    sh.getRange(fila + 1, 2, 1, 10).setValues([encabezados]).setFontWeight('bold').setFontSize(9)
+      .setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
+      .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
+    sh.getRange(fila + 1, 2).setHorizontalAlignment('left');
+    sh.setRowHeight(fila + 1, 32);
+  };
+  const formatoTabla = (f0, f1) => {
+    sh.getRange(f0, 2, f1 - f0 + 1, 10).setHorizontalAlignment('center');
+    sh.getRange(f0, 2, f1 - f0 + 1, 1).setHorizontalAlignment('left');
+    sh.getRange(f0 + 1, 2, f1 - f0, 10)
+      .setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+    sh.getRange(f0, 2, 1, 10).setFontWeight('bold').setBackground(FONDO_TOTAL);
+    [5, 6, 9, 10, 11].forEach((c) => sh.getRange(f0, c, f1 - f0 + 1, 1).setNumberFormat('$ #,##0')
+      .setHorizontalAlignment('right'));
+    sh.getRange(f0, 7, f1 - f0 + 1, 2).setNumberFormat('0.00%');
+  };
+  titulo(31, 'POR MODELO PEDIDO (V.M. = Precio CC sin iva)', enc);
+  sh.getRange('C32').setNote('Familia del modelo en PRECIOS (columna Familia).');
+  sh.getRange('G32').setNote('% de "Bonus cumplimiento pedidos totales" del bloque INCENTIVO PEDIDOS (I23): ' +
     'según la categoría, y 0 si no se llegó al objetivo de pedidos.');
-  sh.getRange('G32').setNote('Inc pedido del modelo en el mes (hoja PRECIOS).');
-  sh.getRange('H32').setNote('VM netos × (Bonus pedidos + Inc pedido).');
-  sh.getRange('I32').setNote('Suma de "$ descuento" de BASE de los netos del mes de ese modelo.');
-  sh.getRange('J32').setNote('Total incentivos - Bonificaciones.');
+  sh.getRange('H32').setNote('Inc pedido del modelo en el mes (hoja PRECIOS).');
+  sh.getRange('I32').setNote('VM netos × (Bonus pedidos + Inc pedido).');
+  sh.getRange('J32').setNote('Suma de "$ descuento" de BASE de los netos del mes de ese modelo.');
+  sh.getRange('K32').setNote('Total incentivos - Bonificaciones.');
 
   // Modelo = Modelo PEDIDO (o Modelo ahorro si la fila no lo tiene): ver formulaModeloCalculo.
   const lista = 'B34:B80';
@@ -737,27 +755,49 @@ function armarResumen(ss, listas) {
   sh.getRange('B34').setFormula(
     `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",${cierreMes}),"");` +
     `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M},${aj}C2:C<>"",${aj}C2:C<>0),"")}),SORT(FILTER(u,u<>""))),"")`);
-  sh.getRange('C34').setFormula(mapa(`SUMPRODUCT(${cierreMes}*(mp=m))+` +
+  // Familia: la del modelo en el mes; si ese mes no la tiene, la de cualquier otro mes.
+  const fam = `${pr}$${COL_FAMILIA}$2:$${COL_FAMILIA}`;
+  sh.getRange('C34').setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",IFERROR(INDEX(FILTER(${fam},` +
+    `${pr}$B$2:$B=m,${fam}<>"",${pr}$A$2:$A=${M}),1),IFERROR(INDEX(FILTER(${fam},${pr}$B$2:$B=m,${fam}<>""),1),` +
+    `"Sin familia")))))`);
+  sh.getRange('D34').setFormula(mapa(`SUMPRODUCT(${cierreMes}*(mp=m))+` +
     `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
-  sh.getRange('D34').setFormula(mapa(`SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,m)`));
+  sh.getRange('E34').setFormula(mapa(`SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,m)`));
   // VM netos = netos del mes (BASE + AJUSTES) × Prec CC s/IVA del mes en que se liquidan + VM extra de AJUSTES.
-  sh.getRange('E34').setFormula(`=MAP(B34:B80,C34:C80,D34:D80,LAMBDA(m,n,p,IF(m="","",` +
+  sh.getRange('F34').setFormula(`=MAP(${lista},D34:D80,E34:E80,LAMBDA(m,n,p,IF(m="","",` +
     `n*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
-  sh.getRange('F34').setFormula('=MAP(B34:B80,LAMBDA(m,IF(m="","",N($I$23))))');
-  sh.getRange('G34').setFormula(mapa(`SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)`));
-  sh.getRange('H34').setFormula('=MAP(B34:B80,E34:E80,F34:F80,G34:G80,LAMBDA(m,v,b,i,IF(m="","",v*(b+i))))');
-  sh.getRange('I34').setFormula(`=LET(mp,${mp},d,ARRAYFORMULA(IFERROR(--${r['$ descuento']},0)),` +
+  sh.getRange('G34').setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",N($I$23))))`);
+  sh.getRange('H34').setFormula(mapa(`SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)`));
+  sh.getRange('I34').setFormula(`=MAP(${lista},F34:F80,G34:G80,H34:H80,LAMBDA(m,v,b,i,IF(m="","",v*(b+i))))`);
+  sh.getRange('J34').setFormula(`=LET(mp,${mp},d,ARRAYFORMULA(IFERROR(--${r['$ descuento']},0)),` +
     `MAP(${lista},LAMBDA(m,IF(m="","",SUMPRODUCT(${cierreMes}*(mp=m)*d)))))`);
-  sh.getRange('J34').setFormula('=MAP(B34:B80,H34:H80,I34:I80,LAMBDA(m,t,b,IF(m="","",t-b)))');
-  sh.getRange('C34:J80').setHorizontalAlignment('center');
-  sh.getRange('B34:J80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('K34').setFormula(`=MAP(${lista},I34:I80,J34:J80,LAMBDA(m,t,b,IF(m="","",t-b)))`);
+  sh.getRange('B33:K33').setValues([['TOTAL', '', '=SUM(D34:D80)', '', '=SUM(F34:F80)', '', '',
+    '=SUM(I34:I80)', '=SUM(J34:J80)', '=SUM(K34:K80)']]);
+  formatoTabla(33, 80);
 
-  sh.getRange('B33:J33').setValues([['TOTAL', '=SUM(C34:C80)', '', '=SUM(E34:E80)', '', '', '=SUM(H34:H80)',
-    '=SUM(I34:I80)', '=SUM(J34:J80)']])
-    .setFontWeight('bold').setBackground(FONDO_TOTAL).setHorizontalAlignment('center');
-  sh.getRange('B33').setHorizontalAlignment('left');
-  ['D33:E80', 'H33:J80'].forEach((a) => sh.getRange(a).setNumberFormat('$ #,##0').setHorizontalAlignment('right'));
-  sh.getRange('F33:G80').setNumberFormat('0.00%');
+  // --- Por familia (fila 82 en adelante): suma la tabla por modelo según su familia.
+  const encFam = ['Familia', 'Modelos', 'Netos del mes', 'V.M promedio', 'VM netos', 'Bonus pedidos',
+    'Inc pedido (prom.)', 'Total incentivos', 'Bonificaciones', 'Total'];
+  titulo(82, 'POR FAMILIA', encFam);
+  sh.getRange('E83').setNote('VM netos / Netos del mes.');
+  sh.getRange('H83').setNote('Promedio de Inc pedido de la familia, ponderado por VM netos.');
+  const lf = 'B85:B110';
+  const suma = (col) => `=MAP(${lf},LAMBDA(f,IF(f="","",SUMIF($C$34:$C$80,f,$${col}$34:$${col}$80))))`;
+  sh.getRange('B85').setFormula('=IFERROR(SORT(UNIQUE(FILTER(C34:C80,C34:C80<>""))),"")');
+  sh.getRange('C85').setFormula(`=MAP(${lf},LAMBDA(f,IF(f="","",TEXTJOIN(" · ",TRUE,FILTER($B$34:$B$80,$C$34:$C$80=f)))))`);
+  sh.getRange('D85').setFormula(suma('D'));
+  sh.getRange('E85').setFormula(`=MAP(${lf},D85:D110,F85:F110,LAMBDA(f,q,v,IF(OR(f="",N(q)=0),"",v/q)))`);
+  sh.getRange('F85').setFormula(suma('F'));
+  sh.getRange('G85').setFormula(`=MAP(${lf},LAMBDA(f,IF(f="","",N($I$23))))`);
+  sh.getRange('H85').setFormula(`=MAP(${lf},F85:F110,I85:I110,G85:G110,LAMBDA(f,v,t,b,IF(OR(f="",N(v)=0),"",t/v-b)))`);
+  sh.getRange('I85').setFormula(suma('I'));
+  sh.getRange('J85').setFormula(suma('J'));
+  sh.getRange('K85').setFormula(suma('K'));
+  sh.getRange('B84:K84').setValues([['TOTAL', '', '=SUM(D85:D110)', '', '=SUM(F85:F110)', '', '',
+    '=SUM(I85:I110)', '=SUM(J85:J110)', '=SUM(K85:K110)']]);
+  formatoTabla(84, 110);
+  sh.getRange('C85:C110').setHorizontalAlignment('left').setFontSize(9).setFontColor(GRIS_TEXTO);
 }
 
 /** Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. */
