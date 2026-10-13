@@ -321,3 +321,16 @@ con Prec CC s/IVA); septiembre suma 62 netos (aparece VS1, pedido de un FS1).
 **IVA 10,5% (13/10/2026):** en octubre, Strada (FS1, DA1, VS1, DU1), Fiorino
 (FO1) y Toro (NT3, VT3, TT1) tienen Prec CC s/IVA = Prec CC c/IVA / 1,105
 (el Excel lo traía con 21%). El resto de los modelos queda con 21%.
+
+## RESUMEN: tabla por modelo con incentivos (13/10/2026)
+La tabla "POR MODELO PEDIDO" ya no muestra Adjudicados / Aprobados / Susp.
+c/CC aprobada / % conversión del acto. Lista solo los modelos con netos en el
+mes y tiene: **Modelo, Netos del mes, V.M, VM netos, Bonus pedidos, Inc
+pedido, Total incentivos**.
+- Bonus pedidos = el % de "Bonus cumplimiento pedidos totales" del bloque
+  INCENTIVO PEDIDOS (I23): según categoría, y 0 si no se cumplió el objetivo.
+- Inc pedido = columna Inc pedido de PRECIOS para ese modelo y mes.
+- Total incentivos = VM netos × (Bonus pedidos + Inc pedido).
+- El tile "VM netos del mes" ahora toma E33.
+Probado en el archivo (octubre): CA6 13% → $ 4.182.798; FO1 3% →
+$ 805.754; NC1 0%; total $ 4.988.552 (sin bonus: octubre no tiene objetivo).

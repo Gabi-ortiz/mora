@@ -611,7 +611,7 @@ function armarResumen(ss, listas) {
     ['Proyección (+15%)', '=IF(E25="","",ROUND(E25*1.15))'],
     ['Faltan para el objetivo', '=IF(E25="","",MAX(0,E25-E21))'],
     ['% cumplimiento', '=IF(N(E25)=0,"",E21/E25)'],
-    ['VM netos del mes', '=I33'],
+    ['VM netos del mes', '=E33'],
   ];
   const der2 = [
     ['Categoría del mes', '=IFERROR(VLOOKUP(' + M + ',OBJETIVOS!$A:$C,3,FALSE),"")'],
@@ -682,48 +682,48 @@ function armarResumen(ss, listas) {
       .setFontColor('#cc0000').setRanges(semaforo).build(),
   ]);
 
-  // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba.
-  sh.getRange('B31:I31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
+  // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba. Solo los modelos con netos en el
+  // mes: netos, VM netos e incentivos (bonus cumplimiento pedidos + Inc pedido del modelo).
+  sh.getRange('B31:H31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  const enc = ['Modelo', 'Adjudicados (acto)', 'Aprobados (acto)', 'Susp. c/CC aprobada', '% conversión',
-    'Netos del mes', 'V.M', 'VM netos'];
-  sh.getRange('B32:I32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+  const enc = ['Modelo', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido', 'Total incentivos'];
+  sh.getRange('B32:H32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
     .setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
     .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange('B32').setHorizontalAlignment('left');
   sh.setRowHeight(32, 32);
+  sh.getRange('F32').setNote('% de "Bonus cumplimiento pedidos totales" del bloque INCENTIVO PEDIDOS (I23): ' +
+    'según la categoría, y 0 si no se llegó al objetivo de pedidos.');
+  sh.getRange('G32').setNote('Inc pedido del modelo en el mes (hoja PRECIOS).');
+  sh.getRange('H32').setNote('VM netos × (Bonus pedidos + Inc pedido).');
 
   // Modelo = Modelo PEDIDO (o Modelo ahorro si la fila no lo tiene): ver formulaModeloCalculo.
   const lista = 'B34:B80';
   const mp = formulaModeloCalculo(r);
   const mapa = (expr) => `=LET(mp,${mp},MAP(${lista},LAMBDA(m,IF(m="","",${expr}))))`;
-  const enActo = `(${r.Acto}=${M})*(mp=m)`;
-  const aprobado = `(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
+  const cierreMes = `(${r['Mes cierre']}=${M})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
   const aj = `${HOJA_AJUSTES}!`;
+  const pr = `${HOJA_PRECIOS}!`;
   sh.getRange('B34').setFormula(
-    `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})),"");` +
-    `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M}),"")}),SORT(FILTER(u,u<>""))),"")`);
-  sh.getRange('C34').setFormula(mapa(`SUMPRODUCT(${enActo})`));
-  sh.getRange('D34').setFormula(mapa(`SUMPRODUCT(${enActo}*${aprobado})`));
-  sh.getRange('E34').setFormula(mapa(`SUMPRODUCT(${enActo}*(${r.Pedido}="SUSPENDIDO")*(${r.Carpeta}="APROBADA"))`));
-  sh.getRange('F34').setFormula('=MAP(C34:C80,D34:D80,LAMBDA(a,b,IF(N(a)=0,"",b/a)))');
-  sh.getRange('G34').setFormula(mapa(`SUMPRODUCT((${r['Mes cierre']}=${M})*(mp=m)*${aprobado})+` +
+    `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",${cierreMes}),"");` +
+    `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M},${aj}C2:C<>"",${aj}C2:C<>0),"")}),SORT(FILTER(u,u<>""))),"")`);
+  sh.getRange('C34').setFormula(mapa(`SUMPRODUCT(${cierreMes}*(mp=m))+` +
     `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
-  sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$${COL_PRECIO_VM}:$${COL_PRECIO_VM},PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
+  sh.getRange('D34').setFormula(mapa(`SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,m)`));
   // VM netos = netos del mes (BASE + AJUSTES) × Prec CC s/IVA del mes en que se liquidan + VM extra de AJUSTES.
-  sh.getRange('I34').setFormula(`=MAP(B34:B80,G34:G80,H34:H80,LAMBDA(m,n,p,IF(m="","",` +
+  sh.getRange('E34').setFormula(`=MAP(B34:B80,C34:C80,D34:D80,LAMBDA(m,n,p,IF(m="","",` +
     `n*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
-  sh.getRange('C34:I80').setHorizontalAlignment('center');
-  sh.getRange('B34:I80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('F34').setFormula('=MAP(B34:B80,LAMBDA(m,IF(m="","",N($I$23))))');
+  sh.getRange('G34').setFormula(mapa(`SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)`));
+  sh.getRange('H34').setFormula('=MAP(B34:B80,E34:E80,F34:F80,G34:G80,LAMBDA(m,v,b,i,IF(m="","",v*(b+i))))');
+  sh.getRange('C34:H80').setHorizontalAlignment('center');
+  sh.getRange('B34:H80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange('B33:I33').setValues([['TOTAL', '=SUM(C34:C80)', '=SUM(D34:D80)', '=SUM(E34:E80)',
-    '=IF(N(C33)=0,"",D33/C33)', '=SUM(G34:G80)', '', '=SUM(I34:I80)']])
+  sh.getRange('B33:H33').setValues([['TOTAL', '=SUM(C34:C80)', '', '=SUM(E34:E80)', '', '', '=SUM(H34:H80)']])
     .setFontWeight('bold').setBackground(FONDO_TOTAL).setHorizontalAlignment('center');
   sh.getRange('B33').setHorizontalAlignment('left');
-  sh.getRange('F33:F80').setNumberFormat('0%');
-  sh.getRange('H33:I80').setNumberFormat('$ #,##0');
-  sh.getRange('I33:I80').setHorizontalAlignment('right');
-  sh.getRange('H34:H80').setHorizontalAlignment('right');
+  ['D33:E80', 'H33:H80'].forEach((a) => sh.getRange(a).setNumberFormat('$ #,##0').setHorizontalAlignment('right'));
+  sh.getRange('F33:G80').setNumberFormat('0.00%');
 }
 
 /** Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. */
