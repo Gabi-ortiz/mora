@@ -368,3 +368,9 @@ Toro...). En RESUMEN:
 - La celda oculta del mes pasó de K1 a **M1** (K es columna de la tabla).
 Probado (octubre): Cronos = CA6 · NC1, 7 netos, VM $ 199.381.984, incentivos
 $ 4.182.798; Fiorino = FO1, 1 neto, $ 805.754.
+
+**Orden y formato (13/10/2026):** el cuadro POR FAMILIA va arriba (fila 31,
+hasta 12 familias) y POR MODELO PEDIDO debajo (fila 48). "Netos del mes" se
+fuerza a formato número (#,##0) en los dos cuadros. Titano (TI1, DT1) también
+va con IVA 10,5% en PRECIOS (jul-oct corregidos con =F/1,105); TN5 y TV6 quedan
+al 21% (no identificados).
