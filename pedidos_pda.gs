@@ -49,6 +49,7 @@ const COLUMNAS_BASE = [
   { h: 'Concepto de venta', oculta: true, sga: 'Concepto de venta' },
   { h: 'Modelo ahorro', oculta: false, sga: 'Modelo ahorro' },
   { h: 'Modelo PEDIDO', oculta: false, sga: null }, // se carga a mano; es el modelo de los cálculos
+  { h: '$ descuento', oculta: false, sga: null }, // importe bonificado (a mano); resta en RESUMEN
   { h: 'Descripción de producto', oculta: true, sga: 'Descripción de producto' },
   { h: 'Mes cierre', oculta: false, sga: null },
   { h: 'Solicitud', oculta: false, sga: 'Solicitud' },
@@ -584,7 +585,7 @@ function armarResumen(ss, listas) {
   // Grilla: A = margen; B..I = 8 columnas iguales.
   sh.setColumnWidth(1, 16);
   for (let c = 2; c <= 9; c++) sh.setColumnWidth(c, 118);
-  sh.setColumnWidth(10, 16);
+  sh.setColumnWidth(10, 118); // J: última columna de la tabla por modelo
 
   // Título y selector de mes.
   sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
@@ -708,11 +709,13 @@ function armarResumen(ss, listas) {
   ]);
 
   // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba. Solo los modelos con netos en el
-  // mes: netos, VM netos e incentivos (bonus cumplimiento pedidos + Inc pedido del modelo).
-  sh.getRange('B31:H31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
+  // mes: netos, VM netos, incentivos (bonus cumplimiento pedidos + Inc pedido del modelo) y
+  // bonificaciones ($ descuento de BASE).
+  sh.getRange('B31:J31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  const enc = ['Modelo', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido', 'Total incentivos'];
-  sh.getRange('B32:H32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+  const enc = ['Modelo', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido', 'Total incentivos',
+    'Bonificaciones', 'Total'];
+  sh.getRange('B32:J32').setValues([enc]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
     .setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
     .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange('B32').setHorizontalAlignment('left');
@@ -721,6 +724,8 @@ function armarResumen(ss, listas) {
     'según la categoría, y 0 si no se llegó al objetivo de pedidos.');
   sh.getRange('G32').setNote('Inc pedido del modelo en el mes (hoja PRECIOS).');
   sh.getRange('H32').setNote('VM netos × (Bonus pedidos + Inc pedido).');
+  sh.getRange('I32').setNote('Suma de "$ descuento" de BASE de los netos del mes de ese modelo.');
+  sh.getRange('J32').setNote('Total incentivos - Bonificaciones.');
 
   // Modelo = Modelo PEDIDO (o Modelo ahorro si la fila no lo tiene): ver formulaModeloCalculo.
   const lista = 'B34:B80';
@@ -741,13 +746,17 @@ function armarResumen(ss, listas) {
   sh.getRange('F34').setFormula('=MAP(B34:B80,LAMBDA(m,IF(m="","",N($I$23))))');
   sh.getRange('G34').setFormula(mapa(`SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)`));
   sh.getRange('H34').setFormula('=MAP(B34:B80,E34:E80,F34:F80,G34:G80,LAMBDA(m,v,b,i,IF(m="","",v*(b+i))))');
-  sh.getRange('C34:H80').setHorizontalAlignment('center');
-  sh.getRange('B34:H80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('I34').setFormula(`=LET(mp,${mp},d,ARRAYFORMULA(IFERROR(--${r['$ descuento']},0)),` +
+    `MAP(${lista},LAMBDA(m,IF(m="","",SUMPRODUCT(${cierreMes}*(mp=m)*d)))))`);
+  sh.getRange('J34').setFormula('=MAP(B34:B80,H34:H80,I34:I80,LAMBDA(m,t,b,IF(m="","",t-b)))');
+  sh.getRange('C34:J80').setHorizontalAlignment('center');
+  sh.getRange('B34:J80').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
 
-  sh.getRange('B33:H33').setValues([['TOTAL', '=SUM(C34:C80)', '', '=SUM(E34:E80)', '', '', '=SUM(H34:H80)']])
+  sh.getRange('B33:J33').setValues([['TOTAL', '=SUM(C34:C80)', '', '=SUM(E34:E80)', '', '', '=SUM(H34:H80)',
+    '=SUM(I34:I80)', '=SUM(J34:J80)']])
     .setFontWeight('bold').setBackground(FONDO_TOTAL).setHorizontalAlignment('center');
   sh.getRange('B33').setHorizontalAlignment('left');
-  ['D33:E80', 'H33:H80'].forEach((a) => sh.getRange(a).setNumberFormat('$ #,##0').setHorizontalAlignment('right'));
+  ['D33:E80', 'H33:J80'].forEach((a) => sh.getRange(a).setNumberFormat('$ #,##0').setHorizontalAlignment('right'));
   sh.getRange('F33:G80').setNumberFormat('0.00%');
 }
 

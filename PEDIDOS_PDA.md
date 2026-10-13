@@ -344,3 +344,13 @@ $ 805.754; NC1 0%; total $ 4.988.552 (sin bonus: octubre no tiene objetivo).
   **Licitaciones** (solicitud en D) con "Turin" o "FCA" en la columna N
   (`resaltarLicitaciones`). Regla de formato condicional; "Armar / reparar"
   solo la agrega si falta. Hoy marca 180 solicitudes.
+
+## Bonificaciones (13/10/2026)
+El equipo agregó en BASE la columna **$ descuento** (importe bonificado, a
+mano; está en `COLUMNAS_BASE`). La tabla "POR MODELO PEDIDO" suma al final:
+- **Bonificaciones**: suma de $ descuento de los netos del mes de ese modelo
+  (mismo criterio que Netos del mes: Mes cierre = mes, aprobado, Modelo PEDIDO).
+- **Total** = Total incentivos - Bonificaciones. La fila TOTAL suma ambas.
+La tabla ocupa B:J (la columna J pasó de margen a columna de 118 px). Ojo: el
+archivo está en formato inglés, así que el importe se carga sin puntos
+(100000); "100.000" lo toma como 100.
