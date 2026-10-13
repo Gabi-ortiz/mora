@@ -47,6 +47,7 @@ const COLUMNAS_BASE = [
   { h: 'Concesionario', oculta: true, sga: 'Concesionario' },
   { h: 'Concepto de venta', oculta: true, sga: 'Concepto de venta' },
   { h: 'Modelo ahorro', oculta: false, sga: 'Modelo ahorro' },
+  { h: 'Modelo PEDIDO', oculta: false, sga: null }, // se carga a mano; es el modelo de los cálculos
   { h: 'Descripción de producto', oculta: true, sga: 'Descripción de producto' },
   { h: 'Mes cierre', oculta: false, sga: null },
   { h: 'Solicitud', oculta: false, sga: 'Solicitud' },
@@ -438,12 +439,13 @@ function armarFaltanPrecios(sh) {
   sh.getRange('I:J').clearContent();
   sh.getRange('I1:J1').setValues([['Falta precio: Modelo', 'Período']])
     .setFontWeight('bold').setBackground('#b45f06').setFontColor('white');
-  const mod = colBase('Modelo ahorro');
   const cierre = colBase('Mes cierre');
   const col = (c) => `${HOJA_BASE}!${letra(c)}2:${letra(c)}`;
+  const mp = `ARRAYFORMULA(IF(${col(colBase('Modelo PEDIDO'))}<>"",${col(colBase('Modelo PEDIDO'))},` +
+    `${col(colBase('Modelo ahorro'))}))`;
   const nombres = MESES.map((m) => `"${m}"`).join(',');
   sh.getRange('I2').setFormula(
-    `=LET(b,IFERROR(FILTER({${col(mod)},${col(cierre)}},${col(colBase('Pedido'))}="APROBADO",` +
+    `=LET(b,IFERROR(FILTER({${mp},${col(cierre)}},${col(colBase('Pedido'))}="APROBADO",` +
     `${col(colBase('Carpeta'))}="APROBADA",${col(cierre)}<>""),{"",""}),` +
     `a,IFERROR(FILTER({${HOJA_AJUSTES}!B2:B,${HOJA_AJUSTES}!A2:A},${HOJA_AJUSTES}!C2:C<>"",${HOJA_AJUSTES}!C2:C<>0),{"",""}),` +
     `t,{b;a},u,UNIQUE(FILTER(t,INDEX(t,,1)<>"",INDEX(t,,2)<>"")),` +
@@ -623,13 +625,19 @@ function armarResumen(ss, listas) {
   bloqueResumen(sh, 20, 2, 'CIERRES DEL MES', izq2);
   bloqueResumen(sh, 20, 6, 'INCENTIVO PEDIDOS', der2);
   // Objetivos de pedidos por modelo dentro del total: "Cronos 20/27 · Titano 1/4" (netos del mes
-  // cuya descripción de producto contiene CRONOS / TITANO, contra su objetivo).
-  const desc = r['Descripción de producto'];
+  // cuyo modelo contiene CRONOS / TITANO, contra su objetivo). El modelo es la Version de PRECIOS
+  // del Modelo PEDIDO en el mes; si no hay, la descripción de producto de la fila.
+  const pp = `${HOJA_PRECIOS}!`;
+  const cierres = `IFERROR(FILTER({${r['Modelo PEDIDO']},${r['Descripción de producto']}},` +
+    `${r['Mes cierre']}=${M},${r.Pedido}="APROBADO",${r.Carpeta}="APROBADA"),{"",""})`;
   sh.getRange('F26:H26').merge().setValue('   de los cuales, por modelo').setFontColor(GRIS_TEXTO);
   sh.getRange('I26').setFormula(
-    `=IFERROR(TEXTJOIN("  ·  ",TRUE,MAP(FILTER(OBJETIVOS!$F$2:$F,OBJETIVOS!$E$2:$E=${M}),` +
+    `=IFERROR(LET(c,${cierres},` +
+    `v,ARRAYFORMULA(XLOOKUP(${M}&"|"&INDEX(c,,1),${pp}$A$2:$A&"|"&${pp}$B$2:$B,${pp}$C$2:$C,"")),` +
+    `d,ARRAYFORMULA(IF((INDEX(c,,1)<>"")*(v<>""),v,INDEX(c,,2))),` +
+    `TEXTJOIN("  ·  ",TRUE,MAP(FILTER(OBJETIVOS!$F$2:$F,OBJETIVOS!$E$2:$E=${M}),` +
     `FILTER(OBJETIVOS!$G$2:$G,OBJETIVOS!$E$2:$E=${M}),LAMBDA(ind,obj,LET(mod,TRIM(SUBSTITUTE(ind,"PEDIDOS ","")),` +
-    `PROPER(mod)&" "&COUNTIFS(${r['Mes cierre']},${M},${aprob},${desc},"*"&mod&"*")&"/"&obj)))),"—")`)
+    `PROPER(mod)&" "&SUMPRODUCT(--ISNUMBER(SEARCH(mod,d)))&"/"&obj))))),"—")`)
     .setHorizontalAlignment('center').setFontColor(GRIS_TEXTO);
   sh.getRange('F26:I26').setBorder(null, null, true, null, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
   sh.getRange('F27:I29').merge().setWrap(true).setVerticalAlignment('top')
@@ -685,18 +693,21 @@ function armarResumen(ss, listas) {
   sh.getRange('B32').setHorizontalAlignment('left');
   sh.setRowHeight(32, 32);
 
-  const mod = r['Modelo ahorro'];
+  // Modelo = Modelo PEDIDO (o Modelo ahorro si la fila no lo tiene): ver formulaModeloCalculo.
   const lista = 'B34:B80';
-  const mapa = (expr) => `=MAP(${lista},LAMBDA(m,IF(m="","",${expr})))`;
+  const mp = formulaModeloCalculo(r);
+  const mapa = (expr) => `=LET(mp,${mp},MAP(${lista},LAMBDA(m,IF(m="","",${expr}))))`;
+  const enActo = `(${r.Acto}=${M})*(mp=m)`;
+  const aprobado = `(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
   const aj = `${HOJA_AJUSTES}!`;
   sh.getRange('B34').setFormula(
-    `=IFERROR(LET(u,UNIQUE({IFERROR(FILTER(${mod},${mod}<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})),"");` +
+    `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",(${r.Acto}=${M})+(${r['Mes cierre']}=${M})),"");` +
     `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M}),"")}),SORT(FILTER(u,u<>""))),"")`);
-  sh.getRange('C34').setFormula(mapa(`COUNTIFS(${acto},${mod},m)`));
-  sh.getRange('D34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${aprob})`));
-  sh.getRange('E34').setFormula(mapa(`COUNTIFS(${acto},${mod},m,${r.Pedido},"SUSPENDIDO",${r.Carpeta},"APROBADA")`));
+  sh.getRange('C34').setFormula(mapa(`SUMPRODUCT(${enActo})`));
+  sh.getRange('D34').setFormula(mapa(`SUMPRODUCT(${enActo}*${aprobado})`));
+  sh.getRange('E34').setFormula(mapa(`SUMPRODUCT(${enActo}*(${r.Pedido}="SUSPENDIDO")*(${r.Carpeta}="APROBADA"))`));
   sh.getRange('F34').setFormula('=MAP(C34:C80,D34:D80,LAMBDA(a,b,IF(N(a)=0,"",b/a)))');
-  sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})+` +
+  sh.getRange('G34').setFormula(mapa(`SUMPRODUCT((${r['Mes cierre']}=${M})*(mp=m)*${aprobado})+` +
     `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
   sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$${COL_PRECIO_VM}:$${COL_PRECIO_VM},PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
   // VM netos = netos del mes (BASE + AJUSTES) × Prec CC s/IVA del mes en que se liquidan + VM extra de AJUSTES.
@@ -788,8 +799,8 @@ function actualizarInforme() {
       // VM netos: por cada modelo con Prec CC s/IVA en el mes, precio × netos de ese modelo (+ AJUSTES).
       // (Un SUMIFS con criterio de matriz dentro de SUMPRODUCT usaba un solo precio para todo.)
       `=IFERROR(LET(p,FILTER({PRECIOS!$B$2:$B,PRECIOS!$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM}},` +
-        `PRECIOS!$A$2:$A=${A},PRECIOS!$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM}<>""),SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
-        `LAMBDA(m,pr,pr*(COUNTIFS(${r['Mes cierre']},${A},${r['Modelo ahorro']},m,${aprob})+` +
+        `PRECIOS!$A$2:$A=${A},PRECIOS!$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM}<>""),mp,${formulaModeloCalculo(r)},SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
+        `LAMBDA(m,pr,pr*(SUMPRODUCT((${r['Mes cierre']}=${A})*(mp=m)*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA"))+` +
         `SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${A},${HOJA_AJUSTES}!$B:$B,m)))))),0)` +
         `+SUMIFS(${HOJA_AJUSTES}!$D:$D,${HOJA_AJUSTES}!$A:$A,${A})`,
     ];
@@ -1187,6 +1198,14 @@ function letra(n) {
     n = Math.floor((n - 1) / 26);
   }
   return s;
+}
+
+/**
+ * Modelo con el que se calcula (por fila de BASE, como matriz): Modelo PEDIDO; si está vacío,
+ * Modelo ahorro (filas viejas o todavía sin cargar).
+ */
+function formulaModeloCalculo(r) {
+  return `ARRAYFORMULA(IF(${r['Modelo PEDIDO']}<>"",${r['Modelo PEDIDO']},${r['Modelo ahorro']}))`;
 }
 
 /** Rangos abiertos de BASE para usar en fórmulas: r['Pedido'] = BASE!$U$2:$U */

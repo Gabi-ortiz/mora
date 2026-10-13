@@ -302,3 +302,18 @@ La lista "Falta precio" (calculada) se movió a I:J.
   AR2, DT1 y TI1 no están en el Excel (quedan sin precio CC). Se agregaron
   los modelos que no estaban: UL3, AU3, PI3, UA4, FA4, GO0, DA1, VS1, DU1,
   VT3, TT1.
+
+## Cálculos por Modelo PEDIDO (13/10/2026)
+Los cálculos por modelo ya no usan "Modelo ahorro" sino **Modelo PEDIDO**
+(columna cargada a mano en BASE, agregada a `COLUMNAS_BASE`). Si una fila no
+tiene Modelo PEDIDO (julio–septiembre, o adjudicados todavía sin pedido), se
+usa su Modelo ahorro (`formulaModeloCalculo`). Aplica a:
+- RESUMEN, tabla "POR MODELO PEDIDO": modelos, adjudicados/aprobados/
+  suspendidos del acto, netos del mes, V.M y VM netos.
+- INFORME: VM netos de cada mes.
+- PRECIOS, "Falta precio": se busca el precio del Modelo PEDIDO.
+- RESUMEN I26 (Cronos / Titano dentro del total): el modelo se reconoce por
+  la Version de PRECIOS del Modelo PEDIDO en el mes; si no hay, por la
+  descripción de producto de la fila.
+Probado en el archivo real: octubre da CA6 1, FO1 1, NC1 6 (VM $ 223.909.752
+con Prec CC s/IVA); septiembre suma 62 netos (aparece VS1, pedido de un FS1).
