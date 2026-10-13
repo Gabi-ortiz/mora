@@ -740,24 +740,22 @@ function armarResumen(ss, listas) {
     sh.getRange(f0, 4, filas, 1).setNumberFormat('#,##0'); // Netos: cantidad, no $
   };
   // --- Por familia (arriba, fila 31): suma la tabla por modelo (fila 48) según su familia.
-  // Sin los % (Bonus pedidos / Inc pedido): solo los importes.
-  const encFam = ['Familia', 'Modelos', 'Netos del mes', 'V.M promedio', 'VM netos', 'Total incentivos',
-    'Bonificaciones', 'Total'];
+  // Solo importes (sin V.M ni %).
+  const encFam = ['Familia', 'Modelos', 'Netos del mes', 'VM netos', 'Total incentivos', 'Bonificaciones',
+    'Total'];
   titulo(31, 'POR FAMILIA', encFam);
-  sh.getRange('E32').setNote('VM netos / Netos del mes.');
   const lf = 'B34:B45';
   const suma = (col) => `=MAP(${lf},LAMBDA(f,IF(f="","",SUMIF($C$51:$C$97,f,$${col}$51:$${col}$97))))`;
   sh.getRange('B34').setFormula('=IFERROR(SORT(UNIQUE(FILTER(C51:C97,C51:C97<>""))),"")');
   sh.getRange('C34').setFormula(`=MAP(${lf},LAMBDA(f,IF(f="","",TEXTJOIN(" · ",TRUE,FILTER($B$51:$B$97,$C$51:$C$97=f)))))`);
   sh.getRange('D34').setFormula(suma('D'));
-  sh.getRange('E34').setFormula(`=MAP(${lf},D34:D45,F34:F45,LAMBDA(f,q,v,IF(OR(f="",N(q)=0),"",v/q)))`);
-  sh.getRange('F34').setFormula(suma('F'));
-  sh.getRange('G34').setFormula(suma('I'));
-  sh.getRange('H34').setFormula(suma('J'));
-  sh.getRange('I34').setFormula(suma('K'));
-  sh.getRange('B33:I33').setValues([['TOTAL', '', '=SUM(D34:D45)', '', '=SUM(F34:F45)', '=SUM(G34:G45)',
-    '=SUM(H34:H45)', '=SUM(I34:I45)']]);
-  formatoTabla(33, 45, 8, [5, 6, 7, 8, 9], []);
+  sh.getRange('E34').setFormula(suma('F'));
+  sh.getRange('F34').setFormula(suma('I'));
+  sh.getRange('G34').setFormula(suma('J'));
+  sh.getRange('H34').setFormula(suma('K'));
+  sh.getRange('B33:H33').setValues([['TOTAL', '', '=SUM(D34:D45)', '=SUM(E34:E45)', '=SUM(F34:F45)',
+    '=SUM(G34:G45)', '=SUM(H34:H45)']]);
+  formatoTabla(33, 45, 7, [5, 6, 7, 8], []);
   sh.getRange('C34:C45').setHorizontalAlignment('left').setFontSize(9).setFontColor(GRIS_TEXTO);
 
   titulo(48, 'POR MODELO PEDIDO (V.M. = Precio CC sin iva)', enc);
