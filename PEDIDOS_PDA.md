@@ -281,3 +281,24 @@ y "Armar / reparar estructura" corrige las que ya se habían convertido.
 - VM netos = netos del mes × V.M del mes de cierre (el RESUMEN viejo tenía
   además un bloque VM × (aprobados + suspendidos con CC aprobada) con
   precios desactualizados; no se replicó).
+
+## PRECIOS con precio CC (13/10/2026)
+PRECIOS pasa a tener: **Mes, Modelo, Version, Inc pedido, Prec publico c/IVA,
+Prec CC c/IVA, Prec CC s/IVA**. El viejo "V.M" quedó como Prec publico c/IVA.
+La lista "Falta precio" (calculada) se movió a I:J.
+- **El VM se calcula con Prec CC s/IVA** (`COL_PRECIO_VM`): RESUMEN (VM netos
+  del mes y tabla "POR MODELO PEDIDO (V.M. = Precio CC sin iva)"), INFORME y
+  AJUSTES. "Falta precio" lista los modelos con netos sin Prec CC s/IVA.
+- **INFORME, julio–septiembre 2026**: no tienen Prec CC s/IVA, así que el VM
+  netos queda como valor fijo (sin fórmula) con el importe que daba el precio
+  cliente con IVA (`VM_INFORME_A_CORREGIR`: 1.855.113.000 / 2.006.468.000 /
+  2.711.975.000) y al costado "Precio cliente con iva - a corregir". Cuando se
+  cargan los Prec CC s/IVA de ese mes, el INFORME vuelve a la fórmula solo
+  (al actualizarlo). En el RESUMEN esos meses dan $0 hasta cargarlos.
+- **Octubre** se completó con bonus_x_modelo_1.xlsx (Version, IPC Pedidos →
+  Inc pedido, precios CC con y sin IVA). Los precios públicos coincidían con
+  los que había. El Excel trae "DP1 – CRONOS DRIVE PLUS 1.3" a $39.210.000,
+  que es el precio de NC1 en octubre: se cargó en NC1 (no se agregó DP1).
+  AR2, DT1 y TI1 no están en el Excel (quedan sin precio CC). Se agregaron
+  los modelos que no estaban: UL3, AU3, PI3, UA4, FA4, GO0, DA1, VS1, DU1,
+  VT3, TT1.

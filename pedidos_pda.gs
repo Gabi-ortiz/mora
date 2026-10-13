@@ -12,7 +12,7 @@
  * - PEGAR SGA: se pega el reporte de SGA tal cual se baja (un acto).
  * - RESUMEN: el tablero del mes, con el mes elegido en B1.
  * - INFORME: evolución mes a mes (acto y cierres) y por responsable.
- * - PRECIOS: V.M por mes y modelo (se carga una vez por mes).
+ * - PRECIOS: precios por mes y modelo (se carga una vez por mes). El VM se calcula con Prec CC s/IVA.
  * - OBJETIVOS / INCENTIVOS: se leen (IMPORTRANGE) del archivo "Objetivos y
  *   señales comerciales - PDA"; no se cargan acá.
  *
@@ -100,11 +100,8 @@ const HISTORICOS = [
   { id: '1_5SnWB3QvWHHkV2nNZ0kH3ZVhNBNJX0W4ipnlBrvaOI', hoja: 'SEPTIEMBRE', acto: 'SEPTIEMBRE 26' },
 ];
 
-// Semilla de PRECIOS (tomada de los RESUMEN de cada mes).
-// Cierres que no están en BASE, para que los meses de arranque den igual que sus
-// RESUMEN mensuales originales: [Mes, Modelo, Netos, VM netos, Nota].
 // Cierres que no están en BASE, para que los meses den igual que sus RESUMEN mensuales:
-// [Mes, Modelo, Netos, VM extra, Nota]. Los netos se valúan con el V.M del mes de cierre
+// [Mes, Modelo, Netos, VM extra, Nota]. Los netos se valúan con el Prec CC s/IVA del mes de cierre
 // (PRECIOS), como cualquier cierre; "VM extra" queda solo para correcciones de importe.
 const NOTA_JUNIO = 'Cierres en julio del acto de junio (archivo JUNIO 26.xlsx; junio no está en BASE).';
 const AJUSTES_JUNIO_EN_JULIO = [['DP1', 14], ['MB1', 6], ['AR2', 4], ['FO1', 2], ['FT3', 1], ['FP3', 1]]
@@ -116,6 +113,22 @@ const AJUSTES_INICIALES = [
     '"+1" cargado a mano en el RESUMEN de SEPTIEMBRE 26 (NETOS ANTERIOR). Confirmar de qué solicitud es.'],
 ];
 
+// Columnas de PRECIOS. El VM (RESUMEN, INFORME, AJUSTES) se calcula con Prec CC s/IVA.
+const ENCABEZADOS_PRECIOS = ['Mes', 'Modelo', 'Version', 'Inc pedido', 'Prec publico c/IVA',
+  'Prec CC c/IVA', 'Prec CC s/IVA'];
+const COL_PRECIO_VM = 'G'; // Prec CC s/IVA
+
+// VM netos del INFORME de los meses que todavía no tienen Prec CC s/IVA cargado: queda el
+// importe que se calculaba con el precio cliente con IVA, como valor fijo y aclarado. Cuando se
+// cargan los Prec CC s/IVA del mes, el INFORME vuelve a calcularlo solo.
+const VM_INFORME_A_CORREGIR = {
+  'JULIO 26': 1855113000,
+  'AGOSTO 26': 2006468000,
+  'SEPTIEMBRE 26': 2711975000,
+};
+const NOTA_VM_A_CORREGIR = 'Precio cliente con iva - a corregir';
+
+// Semilla de PRECIOS al crear la hoja: precio cliente con IVA (Prec publico c/IVA).
 const PRECIOS_INICIALES = {
   'AGOSTO 26': {
     DP1: 38370000, AR2: 30700000, FS1: 38300000, FT3: 45310000, FO1: 29310000,
@@ -394,15 +407,20 @@ function armarPrecios(ss) {
     const filas = [];
     Object.keys(PRECIOS_INICIALES).forEach((mes) => {
       Object.keys(PRECIOS_INICIALES[mes]).forEach((modelo) => {
-        filas.push([mes, modelo, PRECIOS_INICIALES[mes][modelo]]);
+        filas.push([mes, modelo, '', '', PRECIOS_INICIALES[mes][modelo], '', '']);
       });
     });
+    const n = ENCABEZADOS_PRECIOS.length;
     sh.getRange('A:A').setNumberFormat('@');
-    sh.getRange(1, 1, 1, 3).setValues([['Mes', 'Modelo', 'V.M']]);
-    sh.getRange(2, 1, filas.length, 3).setValues(filas);
-    sh.getRange('C:C').setNumberFormat('$ #,##0');
-    sh.getRange(1, 1, 1, 3).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+    sh.getRange(1, 1, 1, n).setValues([ENCABEZADOS_PRECIOS]);
+    sh.getRange(2, 1, filas.length, n).setValues(filas);
+    sh.getRange('D:D').setNumberFormat('0.0%');
+    sh.getRange('E:G').setNumberFormat('$ #,##0');
+    sh.getRange(1, 1, 1, n).setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
     sh.setFrozenRows(1);
+  } else if (String(sh.getRange('C1').getValue()).trim() === 'V.M') {
+    SpreadsheetApp.getUi().alert('PRECIOS tiene el formato viejo (Mes, Modelo, V.M). Pasar V.M a ' +
+      '"Prec publico c/IVA" (columna E) y armar las columnas ' + ENCABEZADOS_PRECIOS.join(', ') + '.');
   }
   // Hoja ya creada: los precios (valores y formato) no se tocan. Solo se corrige un mes
   // que Sheets haya convertido en fecha (26/09/2026 -> "SEPTIEMBRE 26"); el resto queda igual.
@@ -411,30 +429,30 @@ function armarPrecios(ss) {
 }
 
 /**
- * PRECIOS!G:H (calculado, no se edita): modelos con netos en un mes (BASE aprobados por Mes
- * cierre, o AJUSTES) que no tienen V.M cargado para ese mes. Sin ese precio, su VM da 0.
- * Desaparecen solos al cargar el precio en A:C.
+ * PRECIOS!I:J (calculado, no se edita): modelos con netos en un mes (BASE aprobados por Mes
+ * cierre, o AJUSTES) que no tienen Prec CC s/IVA cargado para ese mes. Sin ese precio, su VM
+ * da 0. Desaparecen solos al cargar el precio.
  */
 function armarFaltanPrecios(sh) {
-  if (sh.getMaxColumns() < 8) sh.insertColumnsAfter(sh.getMaxColumns(), 8 - sh.getMaxColumns());
-  sh.getRange('G:H').clearContent();
-  sh.getRange('G1:H1').setValues([['Falta precio: Modelo', 'Período']])
+  if (sh.getMaxColumns() < 10) sh.insertColumnsAfter(sh.getMaxColumns(), 10 - sh.getMaxColumns());
+  sh.getRange('I:J').clearContent();
+  sh.getRange('I1:J1').setValues([['Falta precio: Modelo', 'Período']])
     .setFontWeight('bold').setBackground('#b45f06').setFontColor('white');
   const mod = colBase('Modelo ahorro');
   const cierre = colBase('Mes cierre');
   const col = (c) => `${HOJA_BASE}!${letra(c)}2:${letra(c)}`;
   const nombres = MESES.map((m) => `"${m}"`).join(',');
-  sh.getRange('G2').setFormula(
+  sh.getRange('I2').setFormula(
     `=LET(b,IFERROR(FILTER({${col(mod)},${col(cierre)}},${col(colBase('Pedido'))}="APROBADO",` +
     `${col(colBase('Carpeta'))}="APROBADA",${col(cierre)}<>""),{"",""}),` +
     `a,IFERROR(FILTER({${HOJA_AJUSTES}!B2:B,${HOJA_AJUSTES}!A2:A},${HOJA_AJUSTES}!C2:C<>"",${HOJA_AJUSTES}!C2:C<>0),{"",""}),` +
     `t,{b;a},u,UNIQUE(FILTER(t,INDEX(t,,1)<>"",INDEX(t,,2)<>"")),` +
-    `f,MAP(INDEX(u,,1),INDEX(u,,2),LAMBDA(mo,me,COUNTIFS($B$2:$B,mo,$A$2:$A,me)=0)),` +
+    `f,MAP(INDEX(u,,1),INDEX(u,,2),LAMBDA(mo,me,COUNTIFS($B$2:$B,mo,$A$2:$A,me,$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM},"<>")=0)),` +
     `x,FILTER(u,f),p,INDEX(x,,2),` +
     `IFERROR(SORT(x,ARRAYFORMULA(IFERROR(DATE(2000+VALUE(RIGHT(p,2)),MATCH(LEFT(p,LEN(p)-3),{${nombres}},0),1),0)),TRUE,INDEX(x,,1),TRUE),` +
     `"Todos los modelos con netos tienen precio"))`);
-  sh.getRange('G2:H').setFontColor('#b45f06');
-  sh.setColumnWidth(7, 170);
+  sh.getRange('I2:J').setFontColor('#b45f06');
+  sh.setColumnWidth(9, 170);
 }
 
 /**
@@ -490,7 +508,7 @@ function armarAjustes(ss) {
   if (sh.getRange('D1').getValue() !== 'VM netos' && !nueva) return; // ya armada: no se toca
   sh.getRange(1, 1, 1, 5).setValues([['Mes', 'Modelo', 'Netos', 'VM extra (opcional)', 'Nota']])
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  sh.getRange('C1').setNote('Netos que no están en BASE. Se valúan con el V.M del mes de PRECIOS ' +
+  sh.getRange('C1').setNote('Netos que no están en BASE. Se valúan con el Prec CC s/IVA del mes de PRECIOS ' +
     '(como todo cierre: vale el precio del mes en que se liquida).');
   sh.getRange('D1').setNote('Solo para corregir importes. Vacío en los ajustes de netos: el VM sale de PRECIOS.');
   sh.getRange('D:D').setNumberFormat('$ #,##0');
@@ -657,7 +675,7 @@ function armarResumen(ss, listas) {
   ]);
 
   // --- Por modelo (fila 31 en adelante), con TOTAL fijo arriba.
-  sh.getRange('B31:I31').merge().setValue('POR MODELO')
+  sh.getRange('B31:I31').merge().setValue('POR MODELO PEDIDO (V.M. = Precio CC sin iva)')
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   const enc = ['Modelo', 'Adjudicados (acto)', 'Aprobados (acto)', 'Susp. c/CC aprobada', '% conversión',
     'Netos del mes', 'V.M', 'VM netos'];
@@ -680,8 +698,8 @@ function armarResumen(ss, listas) {
   sh.getRange('F34').setFormula('=MAP(C34:C80,D34:D80,LAMBDA(a,b,IF(N(a)=0,"",b/a)))');
   sh.getRange('G34').setFormula(mapa(`COUNTIFS(${r['Mes cierre']},${M},${mod},m,${aprob})+` +
     `SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`));
-  sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$C:$C,PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
-  // VM netos = netos del mes (BASE + AJUSTES) × V.M del mes en que se liquidan + VM extra de AJUSTES.
+  sh.getRange('H34').setFormula(mapa(`SUMIFS(PRECIOS!$${COL_PRECIO_VM}:$${COL_PRECIO_VM},PRECIOS!$A:$A,${M},PRECIOS!$B:$B,m)`));
+  // VM netos = netos del mes (BASE + AJUSTES) × Prec CC s/IVA del mes en que se liquidan + VM extra de AJUSTES.
   sh.getRange('I34').setFormula(`=MAP(B34:B80,G34:G80,H34:H80,LAMBDA(m,n,p,IF(m="","",` +
     `n*p+SUMIFS(${aj}$D:$D,${aj}$A:$A,${M},${aj}$B:$B,m))))`);
   sh.getRange('C34:I80').setHorizontalAlignment('center');
@@ -767,9 +785,10 @@ function actualizarInforme() {
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$B,2,FALSE),"")`,
       `=IF(N(H${f})=0,"",G${f}/H${f})`,
       `=IFERROR(VLOOKUP(${A},OBJETIVOS!$A:$C,3,FALSE),"")`,
-      // VM netos: por cada modelo con precio en el mes, V.M × netos de ese modelo (+ AJUSTES).
+      // VM netos: por cada modelo con Prec CC s/IVA en el mes, precio × netos de ese modelo (+ AJUSTES).
       // (Un SUMIFS con criterio de matriz dentro de SUMPRODUCT usaba un solo precio para todo.)
-      `=IFERROR(LET(p,FILTER(PRECIOS!$B$2:$C,PRECIOS!$A$2:$A=${A}),SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
+      `=IFERROR(LET(p,FILTER({PRECIOS!$B$2:$B,PRECIOS!$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM}},` +
+        `PRECIOS!$A$2:$A=${A},PRECIOS!$${COL_PRECIO_VM}$2:$${COL_PRECIO_VM}<>""),SUM(MAP(INDEX(p,,1),INDEX(p,,2),` +
         `LAMBDA(m,pr,pr*(COUNTIFS(${r['Mes cierre']},${A},${r['Modelo ahorro']},m,${aprob})+` +
         `SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${A},${HOJA_AJUSTES}!$B:$B,m)))))),0)` +
         `+SUMIFS(${HOJA_AJUSTES}!$D:$D,${HOJA_AJUSTES}!$A:$A,${A})`,
@@ -793,6 +812,16 @@ function actualizarInforme() {
     sh.getRange(`F${f1}:F${fTotal}`).setNumberFormat('0%');
     sh.getRange(`I${f1}:I${fTotal}`).setNumberFormat('0%');
     sh.getRange(`K${f1}:K${fTotal}`).setNumberFormat('$ #,##0').setHorizontalAlignment('right');
+
+    // Meses sin Prec CC s/IVA: VM fijo calculado con el precio cliente con IVA, aclarado al costado.
+    const conPrecioCC = mesesConPrecioCC(ss);
+    meses.forEach((mes, i) => {
+      if (!(mes in VM_INFORME_A_CORREGIR) || conPrecioCC.has(mes)) return;
+      sh.getRange(f1 + i, 11).setValue(VM_INFORME_A_CORREGIR[mes]);
+      sh.getRange(f1 + i, 12).setValue(NOTA_VM_A_CORREGIR)
+        .setFontSize(9).setFontStyle('italic').setFontColor('#b45f06');
+    });
+    sh.setColumnWidth(12, 220);
 
     const cumpl = [sh.getRange(`I${f1}:I${fTotal}`)];
     sh.setConditionalFormatRules([
@@ -849,6 +878,18 @@ function actualizarInforme() {
     const ultimo = meses.filter((m) => actos.indexOf(m) >= 0).pop();
     if (ultimo) resumen.getRange(CELDA_MES_RESUMEN).setValue(ultimo);
   }
+}
+
+/** Meses que tienen al menos un Prec CC s/IVA cargado en PRECIOS. */
+function mesesConPrecioCC(ss) {
+  const sh = ss.getSheetByName(HOJA_PRECIOS);
+  const set = new Set();
+  if (!sh || sh.getLastRow() < 2) return set;
+  const col = COL_PRECIO_VM.charCodeAt(0) - 64;
+  const meses = sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues();
+  const precios = sh.getRange(2, col, sh.getLastRow() - 1, 1).getValues();
+  meses.forEach((f, i) => { if (precios[i][0] !== '' && precios[i][0] !== null) set.add(textoMes(f[0])); });
+  return set;
 }
 
 /** Meses desde el primer acto hasta el último acto o mes de cierre cargado. */
