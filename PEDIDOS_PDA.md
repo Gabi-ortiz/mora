@@ -380,7 +380,7 @@ Total incentivos, Bonificaciones y Total (B:H; sin V.M promedio). Los % de Bonus
 pedidos e Inc pedido quedan solo en el cuadro por modelo.
 
 ## PROYECCION (14/10/2026)
-Columna **PROYECCION** al lado de cada cuadro del RESUMEN: N (por modelo) y J
+Columna **PROYECCION (sin carpeta aprobada)** al lado de cada cuadro del RESUMEN: N (por modelo) y J
 (por familia). Cuenta las operaciones de BASE (de cualquier acto) con
 **Modelo PEDIDO cargado y Carpeta vacía**, por Modelo PEDIDO (la familia suma
 sus modelos). Solo se muestra cuando el mes elegido es el mes en curso (hoy

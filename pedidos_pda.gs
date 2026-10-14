@@ -807,8 +807,9 @@ function armarResumen(ss, listas) {
 
   // Columna PROYECCION al lado de cada cuadro: N (por modelo) y J (por familia).
   const proyeccion = (fTitulo, fTotal, fUlt, col) => {
-    sh.getRange(fTitulo, col).setValue('PROYECCION').setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
-      .setFontColor('white').setHorizontalAlignment('center');
+    sh.getRange(fTitulo, col).setValue('PROYECCION (sin carpeta aprobada)').setFontWeight('bold')
+      .setBackground(COLOR_ENCABEZADO).setFontColor('white').setHorizontalAlignment('center').setWrap(true)
+      .setVerticalAlignment('middle');
     sh.getRange(fTitulo + 1, col).setValue('Con Modelo PEDIDO y sin carpeta').setFontWeight('bold')
       .setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center')
       .setVerticalAlignment('middle')
