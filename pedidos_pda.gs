@@ -554,7 +554,7 @@ const CELDA_MES_RESUMEN = 'H1';
 // Celda oculta con el mes elegido normalizado a "MES AA": Sheets a veces guarda la
 // opción del desplegable como fecha (26/09/2026) y las fórmulas no la encontraban.
 // Todas las fórmulas del RESUMEN usan esta celda, no H1.
-const CELDA_MES_CALC = 'M1'; // oculta; K y L las usa la tabla por modelo
+const CELDA_MES_CALC = 'Z1'; // oculta; B:M las usan los cuadros
 const CELDA_CATEGORIA_RESUMEN = 'I21';
 
 // Paleta: el bordó del reporte de SGA + grises suaves.
@@ -576,9 +576,9 @@ function armarResumen(ss, listas) {
   sh.setHiddenGridlines(true);
 
   const r = rangosBase();
-  const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $M$1
-  if (sh.getMaxColumns() < 14) sh.insertColumnsAfter(sh.getMaxColumns(), 14 - sh.getMaxColumns());
-  sh.showColumns(1, sh.getMaxColumns()); // la celda oculta antes estaba en K
+  const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $Z$1
+  if (sh.getMaxColumns() < 26) sh.insertColumnsAfter(sh.getMaxColumns(), 26 - sh.getMaxColumns());
+  sh.showColumns(1, sh.getMaxColumns()); // la celda oculta antes estaba en K y después en M
   sh.getRange(CELDA_MES_CALC).setFormula(formulaMesNormalizado(`$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`));
   sh.hideColumns(sh.getRange(CELDA_MES_CALC).getColumn());
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
@@ -586,11 +586,10 @@ function armarResumen(ss, listas) {
 
   // Grilla: A = margen; B..I = 8 columnas iguales.
   sh.setColumnWidth(1, 16);
-  // Anchos para ver todo en una pantalla: B (etiquetas) un poco más ancha; C..L y N iguales
-  // (L: incentivos de la proyección por familia; N: PROYECCION del cuadro por modelo).
+  // Anchos para ver todo en una pantalla: B (etiquetas) un poco más ancha; C..M iguales
+  // (J:M: proyección por familia; M: también PROYECCION del cuadro por modelo).
   sh.setColumnWidth(2, 110);
-  for (let c = 3; c <= 12; c++) sh.setColumnWidth(c, 94);
-  sh.setColumnWidth(14, 94);
+  for (let c = 3; c <= 13; c++) sh.setColumnWidth(c, 94);
 
   // Título y selector de mes.
   sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
@@ -805,7 +804,7 @@ function armarResumen(ss, listas) {
     '=SUM(I51:I97)', '=SUM(J51:J97)', '=SUM(K51:K97)']]);
   formatoTabla(50, 97, 10, [5, 6, 9, 10, 11], [7, 8]);
 
-  // Columna PROYECCION al lado de cada cuadro: N (por modelo) y J (por familia).
+  // Columna PROYECCION al lado de cada cuadro: M (por modelo) y J:M (por familia).
   const proyeccion = (fTitulo, fTotal, fUlt, col) => {
     sh.getRange(fTitulo, col).setValue('PROYECCION (sin carpeta aprobada)').setFontWeight('bold')
       .setBackground(COLOR_ENCABEZADO).setFontColor('white').setHorizontalAlignment('center').setWrap(true)
@@ -821,19 +820,19 @@ function armarResumen(ss, listas) {
     sh.getRange(fTotal + 1, col, fUlt - fTotal, 1)
       .setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
   };
-  sh.getRange('N51').setFormula(`=MAP(${lista},LAMBDA(m,IF(OR(m="",NOT(${mesEnCurso})),"",` +
+  sh.getRange('M51').setFormula(`=MAP(${lista},LAMBDA(m,IF(OR(m="",NOT(${mesEnCurso})),"",` +
     `SUMPRODUCT((${mped}=m)*(${r.Carpeta}="")))))`);
-  sh.getRange('N50').setFormula('=IF(COUNT(N51:N97)=0,"",SUM(N51:N97))');
-  proyeccion(48, 50, 97, 14);
-  sh.getRange('J34').setFormula('=MAP(B34:B45,LAMBDA(f,IF(OR(f="",COUNT($N$51:$N$97)=0),"",' +
-    'SUMIF($C$51:$C$97,f,$N$51:$N$97))))');
+  sh.getRange('M50').setFormula('=IF(COUNT(M51:M97)=0,"",SUM(M51:M97))');
+  proyeccion(48, 50, 97, 13);
+  sh.getRange('J34').setFormula('=MAP(B34:B45,LAMBDA(f,IF(OR(f="",COUNT($M$51:$M$97)=0),"",' +
+    'SUMIF($C$51:$C$97,f,$M$51:$M$97))))');
   sh.getRange('J33').setFormula('=IF(COUNT(J34:J45)=0,"",SUM(J34:J45))');
   proyeccion(31, 33, 45, 10);
 
   // Por familia, además: descuentos ($ descuento) e incentivos / bonus de esas operaciones.
   // Incentivo de cada una = Prec CC s/IVA del modelo en el mes × (Bonus pedidos I23 + Inc pedido).
-  sh.getRange('J31:L31').merge();
-  sh.getRange('J32:L32').setValues([['Cantidad', 'Descuentos', 'Incentivos / bonus']]).setFontWeight('bold')
+  sh.getRange('J31:M31').merge();
+  sh.getRange('J32:M32').setValues([['Cantidad', 'Descuentos', 'Incentivos / bonus', 'Incentivos esperados']]).setFontWeight('bold')
     .setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center')
     .setVerticalAlignment('middle')
     .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
@@ -848,10 +847,14 @@ function armarResumen(ss, listas) {
     `MAP(B34:B45,LAMBDA(f,IF(f="","",${expr})))))`;
   sh.getRange('K34').setFormula(porFamilia('SUMPRODUCT((fa=f)*d)'));
   sh.getRange('L34').setFormula(porFamilia('SUMPRODUCT((fa=f)*inc)'));
-  sh.getRange('K33:L33').setFormulas([['=IF(COUNT(K34:K45)=0,"",SUM(K34:K45))', '=IF(COUNT(L34:L45)=0,"",SUM(L34:L45))']])
+  // Incentivos esperados = Incentivos / bonus - Descuentos.
+  sh.getRange('M34').setFormula('=MAP(B34:B45,K34:K45,L34:L45,LAMBDA(f,d,i,IF(OR(f="",AND(d="",i="")),"",N(i)-N(d))))');
+  sh.getRange('M32').setNote('Incentivos / bonus - Descuentos.');
+  sh.getRange('K33:M33').setFormulas([['=IF(COUNT(K34:K45)=0,"",SUM(K34:K45))', '=IF(COUNT(L34:L45)=0,"",SUM(L34:L45))',
+    '=IF(COUNT(M34:M45)=0,"",SUM(M34:M45))']])
     .setFontWeight('bold').setBackground(FONDO_TOTAL);
-  sh.getRange('K33:L45').setNumberFormat('$ #,##0').setHorizontalAlignment('right');
-  sh.getRange('K34:L45').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('K33:M45').setNumberFormat('$ #,##0').setHorizontalAlignment('right');
+  sh.getRange('K34:M45').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
   alinearTodo(sh);
 }
 

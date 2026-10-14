@@ -398,3 +398,6 @@ Todo centrado horizontal y verticalmente y con ajuste de texto (`alinearTodo`),
 al armar el RESUMEN y al actualizar el INFORME. Columnas más angostas para ver
 todo en una pantalla: RESUMEN B 110 px, C:L y N 94 px; INFORME B 110 px, C:K
 92 px (L, la aclaración "a corregir", 200 px).
+- **Incentivos esperados** (M, cuadro por familia) = Incentivos / bonus -
+  Descuentos de la proyección. La PROYECCION del cuadro por modelo pasó de N
+  a M (justo debajo) y la celda oculta del mes pasó a **Z1**.
