@@ -577,7 +577,7 @@ function armarResumen(ss, listas) {
 
   const r = rangosBase();
   const M = `$${CELDA_MES_CALC.replace(/(\d+)/, '$$$1')}`; // $M$1
-  if (sh.getMaxColumns() < 13) sh.insertColumnsAfter(sh.getMaxColumns(), 13 - sh.getMaxColumns());
+  if (sh.getMaxColumns() < 14) sh.insertColumnsAfter(sh.getMaxColumns(), 14 - sh.getMaxColumns());
   sh.showColumns(1, sh.getMaxColumns()); // la celda oculta antes estaba en K
   sh.getRange(CELDA_MES_CALC).setFormula(formulaMesNormalizado(`$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`));
   sh.hideColumns(sh.getRange(CELDA_MES_CALC).getColumn());
@@ -590,6 +590,7 @@ function armarResumen(ss, listas) {
   sh.setColumnWidth(10, 118); // J y K: últimas columnas de la tabla por modelo
   sh.setColumnWidth(11, 118);
   sh.setColumnWidth(12, 16);
+  sh.setColumnWidth(14, 118); // N: PROYECCION del cuadro por modelo
 
   // Título y selector de mes.
   sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
@@ -774,9 +775,15 @@ function armarResumen(ss, listas) {
   const cierreMes = `(${r['Mes cierre']}=${M})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
   const aj = `${HOJA_AJUSTES}!`;
   const pr = `${HOJA_PRECIOS}!`;
+  // PROYECCION: operaciones con Modelo PEDIDO cargado y Carpeta vacía (de cualquier acto). Solo se
+  // muestra cuando el mes elegido es el mes en curso; esos modelos se suman a la lista.
+  const nombresMes = MESES.map((x) => `"${x}"`).join(',');
+  const mesEnCurso = `(${M}=CHOOSE(MONTH(TODAY()),${nombresMes})&" "&RIGHT(YEAR(TODAY()),2))`;
+  const mped = r['Modelo PEDIDO'];
   sh.getRange('B51').setFormula(
     `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",${cierreMes}),"");` +
-    `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M},${aj}C2:C<>"",${aj}C2:C<>0),"")}),SORT(FILTER(u,u<>""))),"")`);
+    `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M},${aj}C2:C<>"",${aj}C2:C<>0),"");` +
+    `IF(${mesEnCurso},IFERROR(FILTER(${mped},${mped}<>"",${r.Carpeta}=""),""),"")}),SORT(FILTER(u,u<>""))),"")`);
   // Familia: la del modelo en el mes; si ese mes no la tiene, la de cualquier otro mes.
   const fam = `${pr}$${COL_FAMILIA}$2:$${COL_FAMILIA}`;
   sh.getRange('C51').setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",IFERROR(INDEX(FILTER(${fam},` +
@@ -797,6 +804,30 @@ function armarResumen(ss, listas) {
   sh.getRange('B50:K50').setValues([['TOTAL', '', '=SUM(D51:D97)', '', '=SUM(F51:F97)', '', '',
     '=SUM(I51:I97)', '=SUM(J51:J97)', '=SUM(K51:K97)']]);
   formatoTabla(50, 97, 10, [5, 6, 9, 10, 11], [7, 8]);
+
+  // Columna PROYECCION al lado de cada cuadro: N (por modelo) y J (por familia).
+  const proyeccion = (fTitulo, fTotal, fUlt, col) => {
+    sh.getRange(fTitulo, col).setValue('PROYECCION').setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
+      .setFontColor('white').setHorizontalAlignment('center');
+    sh.getRange(fTitulo + 1, col).setValue('Con Modelo PEDIDO y sin carpeta').setFontWeight('bold')
+      .setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center')
+      .setVerticalAlignment('middle')
+      .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID)
+      .setNote('Operaciones de BASE (de cualquier acto) con Modelo PEDIDO cargado y Carpeta vacía. ' +
+        'Solo se muestra en el mes en curso.');
+    sh.getRange(fTotal, col, fUlt - fTotal + 1, 1).setNumberFormat('#,##0').setHorizontalAlignment('center');
+    sh.getRange(fTotal, col).setFontWeight('bold').setBackground(FONDO_TOTAL);
+    sh.getRange(fTotal + 1, col, fUlt - fTotal, 1)
+      .setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  };
+  sh.getRange('N51').setFormula(`=MAP(${lista},LAMBDA(m,IF(OR(m="",NOT(${mesEnCurso})),"",` +
+    `SUMPRODUCT((${mped}=m)*(${r.Carpeta}="")))))`);
+  sh.getRange('N50').setFormula('=IF(COUNT(N51:N97)=0,"",SUM(N51:N97))');
+  proyeccion(48, 50, 97, 14);
+  sh.getRange('J34').setFormula('=MAP(B34:B45,LAMBDA(f,IF(OR(f="",COUNT($N$51:$N$97)=0),"",' +
+    'SUMIF($C$51:$C$97,f,$N$51:$N$97))))');
+  sh.getRange('J33').setFormula('=IF(COUNT(J34:J45)=0,"",SUM(J34:J45))');
+  proyeccion(31, 33, 45, 10);
 
 }
 

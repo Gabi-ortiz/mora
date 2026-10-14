@@ -378,3 +378,12 @@ al 21% (no identificados).
 **POR FAMILIA sin %:** quedan Familia, Modelos, Netos del mes, VM netos,
 Total incentivos, Bonificaciones y Total (B:H; sin V.M promedio). Los % de Bonus
 pedidos e Inc pedido quedan solo en el cuadro por modelo.
+
+## PROYECCION (14/10/2026)
+Columna **PROYECCION** al lado de cada cuadro del RESUMEN: N (por modelo) y J
+(por familia). Cuenta las operaciones de BASE (de cualquier acto) con
+**Modelo PEDIDO cargado y Carpeta vacía**, por Modelo PEDIDO (la familia suma
+sus modelos). Solo se muestra cuando el mes elegido es el mes en curso (hoy
+OCTUBRE 26); en meses anteriores queda vacía. Los modelos que solo están en
+la proyección se agregan a la lista con 0 netos. Probado: PC5 = 1 (acto
+OCTUBRE 26, ahorro NC1, Pedido HECHO, sin carpeta).
