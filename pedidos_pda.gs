@@ -586,11 +586,11 @@ function armarResumen(ss, listas) {
 
   // Grilla: A = margen; B..I = 8 columnas iguales.
   sh.setColumnWidth(1, 16);
-  for (let c = 2; c <= 9; c++) sh.setColumnWidth(c, 118);
-  sh.setColumnWidth(10, 118); // J y K: últimas columnas de la tabla por modelo
-  sh.setColumnWidth(11, 118);
-  sh.setColumnWidth(12, 118); // L: incentivos de la proyección por familia
-  sh.setColumnWidth(14, 118); // N: PROYECCION del cuadro por modelo
+  // Anchos para ver todo en una pantalla: B (etiquetas) un poco más ancha; C..L y N iguales
+  // (L: incentivos de la proyección por familia; N: PROYECCION del cuadro por modelo).
+  sh.setColumnWidth(2, 110);
+  for (let c = 3; c <= 12; c++) sh.setColumnWidth(c, 94);
+  sh.setColumnWidth(14, 94);
 
   // Título y selector de mes.
   sh.getRange('B1:E1').merge().setValue('Resumen de pedidos')
@@ -852,7 +852,13 @@ function armarResumen(ss, listas) {
     .setFontWeight('bold').setBackground(FONDO_TOTAL);
   sh.getRange('K33:L45').setNumberFormat('$ #,##0').setHorizontalAlignment('right');
   sh.getRange('K34:L45').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  alinearTodo(sh);
+}
 
+/** RESUMEN e INFORME: todo centrado (horizontal y vertical) y con ajuste de texto. */
+function alinearTodo(sh) {
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).setHorizontalAlignment('center')
+    .setVerticalAlignment('middle').setWrap(true);
 }
 
 /** Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. */
@@ -889,8 +895,8 @@ function actualizarInforme() {
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
 
   sh.setColumnWidth(1, 16);
-  sh.setColumnWidth(2, 140);
-  for (let c = 3; c <= 11; c++) sh.setColumnWidth(c, 104);
+  sh.setColumnWidth(2, 110);
+  for (let c = 3; c <= 11; c++) sh.setColumnWidth(c, 92);
   sh.getRange('B1:G1').merge().setValue('Evolución mensual')
     .setFontSize(16).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
   sh.getRange('B2:K2').merge()
@@ -961,7 +967,7 @@ function actualizarInforme() {
       sh.getRange(f1 + i, 12).setValue(NOTA_VM_A_CORREGIR)
         .setFontSize(9).setFontStyle('italic').setFontColor('#b45f06');
     });
-    sh.setColumnWidth(12, 220);
+    sh.setColumnWidth(12, 200);
 
     const cumpl = [sh.getRange(`I${f1}:I${fTotal}`)];
     sh.setConditionalFormatRules([
@@ -1018,6 +1024,7 @@ function actualizarInforme() {
     const ultimo = meses.filter((m) => actos.indexOf(m) >= 0).pop();
     if (ultimo) resumen.getRange(CELDA_MES_RESUMEN).setValue(ultimo);
   }
+  alinearTodo(sh);
 }
 
 /** Meses que tienen al menos un Prec CC s/IVA cargado en PRECIOS. */

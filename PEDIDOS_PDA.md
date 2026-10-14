@@ -392,3 +392,9 @@ OCTUBRE 26, ahorro NC1, Pedido HECHO, sin carpeta).
   bonus** (Prec CC s/IVA del modelo en el mes × (Bonus pedidos + Inc pedido)).
   El cuadro por modelo solo muestra la cantidad (N). Cuenta solo Carpeta vacía.
   Probado: Cronos 1 (PC5), descuento $ 2.700.000, incentivo $ 5.090.063.
+
+## Formato de RESUMEN e INFORME (14/10/2026)
+Todo centrado horizontal y verticalmente y con ajuste de texto (`alinearTodo`),
+al armar el RESUMEN y al actualizar el INFORME. Columnas más angostas para ver
+todo en una pantalla: RESUMEN B 110 px, C:L y N 94 px; INFORME B 110 px, C:K
+92 px (L, la aclaración "a corregir", 200 px).
