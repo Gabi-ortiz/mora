@@ -387,3 +387,8 @@ sus modelos). Solo se muestra cuando el mes elegido es el mes en curso (hoy
 OCTUBRE 26); en meses anteriores queda vacía. Los modelos que solo están en
 la proyección se agregan a la lista con 0 netos. Probado: PC5 = 1 (acto
 OCTUBRE 26, ahorro NC1, Pedido HECHO, sin carpeta).
+- En el cuadro **por familia** la proyección tiene 3 columnas (J:L): Cantidad,
+  **Descuentos** (suma de $ descuento de esas operaciones) e **Incentivos /
+  bonus** (Prec CC s/IVA del modelo en el mes × (Bonus pedidos + Inc pedido)).
+  El cuadro por modelo solo muestra la cantidad (N). Cuenta solo Carpeta vacía.
+  Probado: Cronos 1 (PC5), descuento $ 2.700.000, incentivo $ 5.090.063.

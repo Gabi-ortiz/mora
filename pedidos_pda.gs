@@ -589,7 +589,7 @@ function armarResumen(ss, listas) {
   for (let c = 2; c <= 9; c++) sh.setColumnWidth(c, 118);
   sh.setColumnWidth(10, 118); // J y K: últimas columnas de la tabla por modelo
   sh.setColumnWidth(11, 118);
-  sh.setColumnWidth(12, 16);
+  sh.setColumnWidth(12, 118); // L: incentivos de la proyección por familia
   sh.setColumnWidth(14, 118); // N: PROYECCION del cuadro por modelo
 
   // Título y selector de mes.
@@ -829,6 +829,29 @@ function armarResumen(ss, listas) {
     'SUMIF($C$51:$C$97,f,$N$51:$N$97))))');
   sh.getRange('J33').setFormula('=IF(COUNT(J34:J45)=0,"",SUM(J34:J45))');
   proyeccion(31, 33, 45, 10);
+
+  // Por familia, además: descuentos ($ descuento) e incentivos / bonus de esas operaciones.
+  // Incentivo de cada una = Prec CC s/IVA del modelo en el mes × (Bonus pedidos I23 + Inc pedido).
+  sh.getRange('J31:L31').merge();
+  sh.getRange('J32:L32').setValues([['Cantidad', 'Descuentos', 'Incentivos / bonus']]).setFontWeight('bold')
+    .setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center')
+    .setVerticalAlignment('middle')
+    .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange('L32').setNote('Prec CC s/IVA del mes × (Bonus pedidos + Inc pedido) de cada operación proyectada.');
+  const famDe = `IFERROR(INDEX(FILTER(${fam},${pr}$B$2:$B=x,${fam}<>"",${pr}$A$2:$A=${M}),1),` +
+    `IFERROR(INDEX(FILTER(${fam},${pr}$B$2:$B=x,${fam}<>""),1),"Sin familia"))`;
+  const pend = `IFERROR(FILTER({${mped},ARRAYFORMULA(IFERROR(--${r['$ descuento']},0))},${mped}<>"",${r.Carpeta}=""),{"",0})`;
+  const porFamilia = (expr) => `=IF(NOT(${mesEnCurso}),"",LET(p,${pend},mo,INDEX(p,,1),d,INDEX(p,,2),` +
+    `fa,MAP(mo,LAMBDA(x,IF(x="","",${famDe}))),` +
+    `inc,MAP(mo,LAMBDA(x,IF(x="",0,SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,x)*` +
+    `(N($I$23)+SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,x))))),` +
+    `MAP(B34:B45,LAMBDA(f,IF(f="","",${expr})))))`;
+  sh.getRange('K34').setFormula(porFamilia('SUMPRODUCT((fa=f)*d)'));
+  sh.getRange('L34').setFormula(porFamilia('SUMPRODUCT((fa=f)*inc)'));
+  sh.getRange('K33:L33').setFormulas([['=IF(COUNT(K34:K45)=0,"",SUM(K34:K45))', '=IF(COUNT(L34:L45)=0,"",SUM(L34:L45))']])
+    .setFontWeight('bold').setBackground(FONDO_TOTAL);
+  sh.getRange('K33:L45').setNumberFormat('$ #,##0').setHorizontalAlignment('right');
+  sh.getRange('K34:L45').setBorder(null, null, null, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
 
 }
 
