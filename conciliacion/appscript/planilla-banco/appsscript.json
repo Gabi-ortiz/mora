@@ -1,0 +1,22 @@
+{
+  "timeZone": "America/Argentina/Cordoba",
+  "dependencies": {
+    "libraries": [
+      {
+        "userSymbol": "Motor",
+        "libraryId": "PEGAR_ACA_EL_ID_DEL_PROYECTO_MOTOR",
+        "version": "0",
+        "developmentMode": true
+      }
+    ]
+  },
+  "oauthScopes": [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+    "https://www.googleapis.com/auth/script.external_request",
+    "https://www.googleapis.com/auth/script.container.ui",
+    "https://www.googleapis.com/auth/userinfo.email"
+  ],
+  "exceptionLogging": "STACKDRIVER",
+  "runtimeVersion": "V8"
+}

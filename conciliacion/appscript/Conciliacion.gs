@@ -38,7 +38,7 @@ const HOJA = {
   mayorE: 'Mayor E',
   mayorO: 'Mayor O',
   anteriores: 'Pendientes anteriores',
-  anterioresAlt: ['Pend mes anterior'],
+  anterioresAlt: ['Pendientes en trabajo', 'Pend mes anterior'],
   reglas: 'Reglas',
   empresas: 'Empresas grupo',
   tablero: 'Tablero',
@@ -161,12 +161,16 @@ const REGLAS_INICIALES = [
 
 // ------------------------------------------------------------------ menú
 
-function onOpen() {
+function onOpen() { crearMenu(); }
+
+/** Menú de la planilla. Con la biblioteca, la planilla de cada banco llama a Motor.crearMenu() en su onOpen. */
+function crearMenu() {
   SpreadsheetApp.getUi().createMenu('Conciliación')
     .addItem('1. Crear hojas de entrada', 'crearHojasEntrada')
     .addItem('2. Procesar conciliación', 'procesarConciliacion')
     .addItem('3. Cerrar mes (guardar foto y pasar pendientes)', 'cerrarMes')
     .addSeparator()
+    .addItem('Revisar pendientes (con la base al día)', 'revisarPendientes')
     .addItem('Agregar reglas nuevas del script', 'agregarReglasNuevas')
     .addToUi();
 }
@@ -182,10 +186,12 @@ function crearParametros_(ss) {
     ['Cuenta bancaria', 'Banco Macro'],
     ['Base FBS (link o ID)', ''],
     ['Hoja de la base', 'MOVIMIENTOS'],
+    ['Carpeta de cierres (link o ID)', ''],
     ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
     ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
     ['Sin cuenta O', 'Si la empresa tiene la confirmación de valores al día (ej. Chexa), poné NO en "Cuenta O": se concilia solo la cuenta E.'],
     ['Base FBS', 'Link de la planilla base de la empresa (la que se actualiza todos los días). Con la base, los movimientos del mes y los saldos iniciales de E y O se toman solos de ahí; no hace falta la hoja "Base".'],
+    ['Carpeta de cierres', 'Carpeta de Drive donde "Cerrar mes" guarda la foto de cada cierre. Vacía: "Conciliaciones - Historial" junto a esta planilla.'],
     ['Saldos iniciales', 'Con la hoja "Base": saldo final de E y de O de la conciliación anterior. Al cerrar el mes se completan solos.'],
   ];
   let sh = ss.getSheetByName(HOJA.parametros);
@@ -236,7 +242,7 @@ function crearHojasEntrada() {
   };
   // solo crea lo que falta. FBS se lee de la base de la empresa (link en Parámetros); los mayores E y O ya no se usan
   if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
-  if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [['Sector', 'Fecha', 'Concepto', 'Importe']]);
+  if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [COLS_PEND]);
   limpiarHojasSobrantes_(ss);
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
@@ -369,14 +375,20 @@ function cerrarMes() {
     .setLinkUrl(archivo.getUrl()).build());
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
-  const n = pasarPendientes_(ss);
+  const n = pasarPendientes_(ss, res.corte);
+  const par = ss.getSheetByName(HOJA.parametros);
   // foto de E y O en la base al cierre: el mes siguiente detecta lo que se cargue o cambie después con fecha de meses cerrados
+  if (par) {   // fecha del último cierre: desde ahí "Revisar pendientes" busca movimientos nuevos en la base
+    const v = par.getDataRange().getValues();
+    let i = v.findIndex(r => /^ultimo cierre/i.test(normalizar_(r[0])));
+    if (i < 0) { par.appendRow(['Último cierre', '']); i = par.getLastRow() - 1; }
+    par.getRange(i + 1, 2).setValue(res.hastaBase || new Date(res.corte.getFullYear(), res.corte.getMonth() + 1, 0)).setNumberFormat('dd/mm/yyyy');
+  }
   if (res.baseCtx) {
     try { guardarFotoBase_(ss, res.baseCtx, res.hastaBase); } catch (e) {
       ui.alert('No se pudo guardar la foto de la base (' + e.message + '). El mes siguiente se controla solo por saldo.');
     }
   }
-  const par = ss.getSheetByName(HOJA.parametros);
   if (par) {
     const v = par.getDataRange().getValues();
     v.forEach((r, i) => {
@@ -407,6 +419,14 @@ function hojaHistorial_(ss) {
 }
 
 function carpetaHistorial_(ss) {
+  const par = ss.getSheetByName(HOJA.parametros);
+  const link = par ? paramDe_(par.getDataRange().getValues(), '^carpeta de cierres') : '';
+  const idCarpeta = String(link || '').match(/folders\/([a-zA-Z0-9_-]{10,})/) || String(link || '').trim().match(/^([a-zA-Z0-9_-]{10,})$/);
+  if (idCarpeta) {
+    try { return DriveApp.getFolderById(idCarpeta[1]); } catch (e) {
+      throw new Error('No puedo abrir la carpeta de cierres de "' + HOJA.parametros + '": revisá el link y que tengas permiso de edición.');
+    }
+  }
   const nombre = 'Conciliaciones - Historial';
   const padres = DriveApp.getFileById(ss.getId()).getParents();
   const padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
@@ -447,22 +467,78 @@ function marcarComoFoto_(copia, periodo, empresa) {
   (tablero || info).activate();
 }
 
-function pasarPendientes_(ss) {
-  const filas = [['Sector', 'Fecha', 'Concepto', 'Importe']];
+const COLS_PEND = ['Sector', 'Fecha', 'Concepto', 'Importe', 'ID', 'Días', 'Estado', 'Responsable', 'Comentario', 'Revisión automática', 'Revisado el'];
+const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Justificado', 'Error de la lista'];
+
+/** Clave estable de un pendiente (sector, fecha, concepto, importe) para conservar estado y comentarios entre cierres. */
+function clavePend_(sector, fecha, concepto, importe) {
+  const f = parseFecha_(fecha);
+  return [String(sector).trim().toUpperCase(), f ? fechaTexto_(f) : '', normalizar_(concepto).replace(/\s+/g, ' '),
+    Math.abs(parseNum_(importe) || 0).toFixed(2)].join('|');
+}
+
+/** Agrega el ID a cada fila (con #2, #3 si se repite). filas sin encabezado: [sector, fecha, concepto, importe]. */
+function idsPend_(filas) {
+  const vistos = {};
+  return filas.map(r => { const k = clavePend_(r[0], r[1], r[2], r[3]); vistos[k] = (vistos[k] || 0) + 1; return vistos[k] > 1 ? k + '#' + vistos[k] : k; });
+}
+
+/**
+ * Arma "Pendientes en trabajo" con los pendientes del cierre: Sector, Fecha, Concepto, Importe (lo que lee el proceso)
+ * y columnas para trabajarlos (Estado, Responsable, Comentario). Lo que ya estaba en la lista conserva su estado y
+ * comentarios; lo resuelto no pasa.
+ */
+function pasarPendientes_(ss, corte) {
+  const nuevas = [];
   [HOJA.pendO, HOJA.pendFbs, HOJA.pendBanco].forEach(nombre => {
     const sh = ss.getSheetByName(nombre);
     if (!sh) throw new Error('Primero corré "2. Procesar conciliación".');
     const v = sh.getDataRange().getValues();
     const h = v[1];   // fila 1 = título, fila 2 = encabezados
     const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe') };
-    v.slice(2).forEach(r => { if (r[c.s]) filas.push([r[c.s], r[c.f], r[c.t], r[c.i]]); });
+    v.slice(2).forEach(r => { if (r[c.s]) nuevas.push([r[c.s], r[c.f], r[c.t], r[c.i]]); });
   });
-  const sh = hojaDe_(ss, nombresAnteriores_()) || ss.insertSheet(HOJA.anteriores);
+  let sh = hojaDe_(ss, nombresAnteriores_());
+  // lo trabajado en la lista anterior (por ID)
+  const previo = {};
+  if (sh && sh.getLastRow() > 1) {
+    const v = sh.getDataRange().getValues(), h = v[0].map(String);
+    const ix = n => h.indexOf(n);
+    const ids = ix('ID') >= 0 ? v.slice(1).map(r => String(r[ix('ID')])) : idsPend_(v.slice(1));
+    v.slice(1).forEach((r, i) => {
+      if (ix('Estado') < 0) return;
+      previo[ids[i]] = [r[ix('Estado')], r[ix('Responsable')], r[ix('Comentario')]];
+    });
+  }
+  if (!sh) sh = ss.insertSheet(HOJA.anterioresAlt[0]);
+  if (sh.getName() !== HOJA.anterioresAlt[0] && !ss.getSheetByName(HOJA.anterioresAlt[0])) sh.setName(HOJA.anterioresAlt[0]);
+  const ids = idsPend_(nuevas);
+  const filas = nuevas.map((r, i) => {
+    const p = previo[ids[i]] || [];
+    const f = parseFecha_(r[1]);
+    const estado = p[0] && !/^Resuelto/i.test(p[0]) ? p[0] : 'Pendiente';
+    return [r[0], r[1], r[2], Math.abs(parseNum_(r[3]) || 0), ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', ''];
+  });
+  escribirPendTrabajo_(sh, filas);
+  return filas.length;
+}
+
+function escribirPendTrabajo_(sh, filas) {
+  if (sh.getFilter()) sh.getFilter().remove();
   sh.clear();
-  sh.getRange(1, 1, filas.length, 4).setValues(filas);
-  sh.getRange(1, 1, 1, 4).setFontWeight('bold');
-  sh.getRange(2, 4, Math.max(filas.length - 1, 1), 1).setNumberFormat(NUM_FMT);
-  return filas.length - 1;
+  sh.getRange(1, 1, 1, COLS_PEND.length).setValues([COLS_PEND]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  sh.setFrozenRows(1);
+  if (filas.length) {
+    sh.getRange(2, 1, filas.length, COLS_PEND.length).setValues(filas);
+    sh.getRange(2, 2, filas.length, 1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(2, 4, filas.length, 1).setNumberFormat(NUM_FMT);
+    sh.getRange(2, 11, filas.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+    sh.getRange(2, 7, filas.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(ESTADOS_PEND, true).setAllowInvalid(false).build());
+    sh.getRange(2, 10, filas.length, 1).setWrap(true);
+  }
+  sh.getRange(1, 1, Math.max(filas.length, 1) + 1, COLS_PEND.length).createFilter();
+  [55, 85, 360, 120, 60, 50, 120, 110, 260, 380, 110].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.hideColumns(5);   // ID
 }
 
 // ------------------------------------------------------------------ salida
@@ -2021,6 +2097,173 @@ function gastosBancarios_(movs) {
 }
 
 /** Agrega a la hoja "Reglas" las reglas del script que todavía no están (no toca las existentes). */
+// ------------------------------------------------------------------ revisar pendientes entre cierres
+
+/**
+ * Revisa la lista "Pendientes en trabajo" contra la base FBS al día (movimientos cargados después del último cierre,
+ * más los tardíos de meses cerrados) y escribe en "Revisión automática" lo que encuentra. No cambia Sector, Fecha,
+ * Concepto ni Importe (eso lo sigue usando el proceso del mes): solo informa y, si quedó resuelto, sugiere el estado.
+ */
+function revisarPendientes() {
+  const ss = SpreadsheetApp.getActive();
+  const sh = hojaDe_(ss, nombresAnteriores_());
+  if (!sh || sh.getLastRow() < 2) throw new Error('No hay pendientes para revisar.');
+  const parametros = ss.getSheetByName(HOJA.parametros) ? ss.getSheetByName(HOJA.parametros).getDataRange().getValues() : null;
+  const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
+  if (!idBase) throw new Error('Falta el link de la base FBS en "' + HOJA.parametros + '".');
+  let cierre = parseFecha_(paramDe_(parametros, '^.ltimo cierre'));
+  if (!cierre) {
+    const hist = ss.getSheetByName(HOJA.historial);
+    const ult = hist && hist.getLastRow() > 1 ? String(hist.getRange(hist.getLastRow(), 1).getValue()) : '';
+    const m = ult.match(/^(\d{4})-(\d{2})$/);
+    if (m) cierre = new Date(Number(m[1]), Number(m[2]), 0);
+  }
+  if (!cierre) throw new Error('No sé la fecha del último cierre: cargala en "' + HOJA.parametros + '" (fila "Último cierre").');
+  const ctas = cuentasDe_(parametros);
+  const hoy = new Date();
+  // movimientos de E y O después del cierre + los tardíos (meses cerrados cambiados después de la foto)
+  const desde = new Date(cierre.getFullYear(), cierre.getMonth(), cierre.getDate() + 1);
+  const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', ctas, desde, new Date(hoy.getFullYear() + 1, 0, 1));
+  let filas = r.filas;
+  if (r.ctx) {
+    const foto = leerFotoBase_(ss);
+    if (foto) { const t = movimientosTardios_(r.ctx, desde, {}, foto); if (t.filas.length > 1) filas = unirFilas_(filas, t.filas); }
+  }
+  const b = leerBase_(filas, ctas.E, ctas.O || '__sin_cuenta_O__');
+  const movs = b.E.map(a => Object.assign(a, { cuenta: 'E' })).concat(b.O.map(a => Object.assign(a, { cuenta: 'O' })));
+  const v = sh.getDataRange().getValues();
+  const pend = v.slice(1).map(x => [x[0], x[1], x[2], x[3]]);
+  const res = revisarPendientesCore_(pend, movs, cierre);
+  // pendientes del banco sin rastro: ¿están registrados en la cuenta de otro banco?
+  if (r.ctx) {
+    const sinRastro = res.filter((x, i) => !x.texto && /^S[12]$/.test(String(pend[i][0]).trim().toUpperCase()) && especifico_(parseNum_(pend[i][3]) || 0));
+    if (sinRastro.length) otrasCuentas_(r.ctx, pend, res, desde);
+  }
+  // escribir
+  const h = v[0].map(String), cRev = h.indexOf('Revisión automática'), cFecha = h.indexOf('Revisado el'), cEst = h.indexOf('Estado');
+  if (cRev < 0) throw new Error('La hoja "' + sh.getName() + '" no tiene las columnas de trabajo: se agregan solas en el próximo "Cerrar mes".');
+  const rev = res.map(x => [x.texto || 'Sin novedades en FBS']), fec = res.map(() => [hoy]);
+  sh.getRange(2, cRev + 1, rev.length, 1).setValues(rev);
+  sh.getRange(2, cFecha + 1, rev.length, 1).setValues(fec).setNumberFormat('dd/mm/yyyy hh:mm');
+  const colores = res.map(x => [x.tipo === 'resuelto' ? '#C6EFCE' : x.tipo === 'posible' ? '#FFEB9C' : null]);
+  sh.getRange(2, cRev + 1, rev.length, 1).setBackgrounds(colores);
+  if (cEst >= 0) {
+    const est = v.slice(1).map((x, i) => [res[i].tipo === 'resuelto' && (!x[cEst] || x[cEst] === 'Pendiente') ? 'Resuelto en FBS' : x[cEst]]);
+    sh.getRange(2, cEst + 1, est.length, 1).setValues(est);
+  }
+  const n = { resuelto: 0, posible: 0 };
+  res.forEach(x => { if (n[x.tipo] !== undefined) n[x.tipo]++; });
+  sh.activate();
+  SpreadsheetApp.getUi().alert('Revisar pendientes', 'Revisé ' + res.length + ' pendientes contra FBS (movimientos desde el ' + fechaTexto_(desde) +
+    ').\n\n' + n.resuelto + ' resueltos (verde)\n' + n.posible + ' con un posible cruce para mirar (amarillo)\n\nVer columna "Revisión automática".',
+    SpreadsheetApp.getUi().ButtonSet.OK);
+}
+
+/**
+ * Núcleo (sin hojas): pend = [[sector, fecha, concepto, importe]], movs = líneas de E y O cargadas después del cierre
+ * (formato de leerBase_ con .cuenta). Devuelve por pendiente { tipo: 'resuelto' | 'posible' | '', texto }.
+ */
+function revisarPendientesCore_(pend, movs, cierre) {
+  CRUCES_ = [];
+  CORTE_ = null;
+  const out = pend.map(() => ({ tipo: '', texto: '' }));
+  const items = pend.map((r, i) => {
+    const sec = String(r[0] || '').trim().toUpperCase(), imp = Math.abs(parseNum_(r[3]) || 0);
+    const fecha = parseFecha_(r[1]) || cierre, texto = String(r[2] || '');
+    let p = null;
+    if (sec === 'S1' || sec === 'S2') p = partidaBanco_({ fecha, concepto: texto, importe: sec === 'S1' ? imp : -imp, ref: '', nombre: '' }, 'Arrastre');
+    else if (sec === 'S3' || sec === 'S4') p = partidaFbs_({ fecha, comentario: texto, referencia: '', debe: sec === 'S3' ? imp : 0, haber: sec === 'S4' ? imp : 0 }, 'Arrastre');
+    if (p) { p.idx = i; p.sec = sec; }
+    return p;
+  });
+  const banco = items.filter(p => p && p.lado === 'BANCO'), fbsPend = items.filter(p => p && p.lado === 'FBS');
+  const nuevos = movs.map(a => { const p = partidaFbs_(a, 'Mes'); p.cuenta = a.cuenta; return p; });
+  const desc = f => f.texto + ' (cuenta ' + f.cuenta + ', asiento ' + f.asiento + ', ' + fechaTexto_(f.fecha) + (f.tardio ? ', mes ya cerrado' : '') + ')';
+  // 1. banco sin registrar (S1 / S2): ¿se registró después del cierre?
+  const v = 400;
+  pasada_(banco, nuevos, MISMO_ID_, 'CUIT/DNI', v, false);
+  pasada_(banco, nuevos, POR_REF_, 'referencia', v, false);
+  pasada_(banco, nuevos, POR_NOMBRE_, 'nombre', 60, false);
+  pasada_(banco, nuevos, (x, f) => !!f.fechaRef && dias_(f.fechaRef, x.fecha) === 0 && especifico_(x.importe), 'fecha del valor + importe', v, true);
+  pasada_(banco, nuevos, (x, f) => f.tardio && especifico_(x.importe), 'registro tardío + importe', 5, true);
+  banco.forEach(x => {
+    if (x.match === null) return;
+    // CUIT, referencia o nombre: resuelto; solo fecha e importe: posible (a confirmar)
+    const seguro = /^(CUIT|referencia|nombre)/.test(x.metodo);
+    out[x.idx] = { tipo: seguro ? 'resuelto' : 'posible', texto: (seguro ? 'Registrado en FBS por ' : 'Posible registro en FBS (por ') + x.metodo +
+      (seguro ? ': ' : ', confirmar): ') + x.match.map(desc).join(' + ') };
+  });
+  // importe específico único después del cierre: posible, para mirar
+  pasada_(banco.filter(x => x.match === null), nuevos, x => especifico_(x.importe), 'importe', 400, true);
+  banco.forEach(x => {
+    if (x.match !== null && !out[x.idx].texto) out[x.idx] = { tipo: 'posible', texto: 'Posible registro (mismo importe, sin CUIT ni nombre): ' + x.match.map(desc).join(' + ') };
+  });
+  // 2. FBS sin banco (S3 / S4): ¿se anuló o se confirmó en FBS?
+  fbsPend.forEach(p => {
+    const clave = claveO_(p.texto), comp = /^(RC-|RM-|LIQ )/.test(clave);
+    const rev = nuevos.find(f => f.match === null && Math.abs(f.importe + p.importe) <= TOLERANCIA &&
+      ((comp && claveO_(f.texto) === clave) || comparten_(f.nombre, p.nombre) || /ANULA|REVERS/i.test(f.texto)));
+    if (!rev) return;
+    rev.match = [p];
+    const pase = rev.cuenta === 'O' && nuevos.some(f => f !== rev && f.cuenta === 'E' && String(f.asiento) === String(rev.asiento) && Math.abs(f.importe + rev.importe) <= TOLERANCIA);
+    out[p.idx] = pase
+      ? { tipo: 'posible', texto: 'Confirmado en FBS (pase de O a E) el ' + fechaTexto_(rev.fecha) + ', asiento ' + rev.asiento + ': se va a cruzar con el banco al procesar el mes' }
+      : { tipo: 'resuelto', texto: 'Revertido o anulado en FBS: ' + desc(rev) };
+  });
+  // 3. pendientes que se anulan entre sí
+  const libresB = banco.filter(x => x.match === null && !out[x.idx].texto);
+  libresB.forEach(x => {
+    if (x.match !== null || x.importe <= 0) return;
+    const y = libresB.find(z => z !== x && z.match === null && Math.abs(z.importe + x.importe) <= TOLERANCIA &&
+      (MISMO_ID_(x, z) || comparten_(x.nombre, z.nombre) || normalizar_(x.texto) === normalizar_(z.texto)));
+    if (!y) return;
+    x.match = [y]; y.match = [x];
+    out[x.idx] = out[y.idx] = { tipo: 'resuelto', texto: 'Se anula con el otro pendiente del banco: ' + fechaTexto_(x.fecha) + ' ' + x.texto + ' / ' + fechaTexto_(y.fecha) + ' ' + y.texto };
+  });
+  const libresF = fbsPend.filter(p => !out[p.idx].texto);
+  netearPendientesFbs_(libresF);
+  libresF.forEach(p => {
+    if (p.match === null) return;
+    const otro = CRUCES_.filter(c => c.fbs.indexOf(p) >= 0).map(c => c.fbs.find(q => q !== p))[0];
+    out[p.idx] = { tipo: 'resuelto', texto: 'Se anula con el otro pendiente de FBS (mismo importe y comentario)' + (otro ? ': ' + fechaTexto_(otro.fecha) + ' ' + otro.texto : '') };
+  });
+  return out;
+}
+
+/** S1/S2 sin rastro en E/O: busca en la base el mismo importe registrado en la cuenta de otro banco después del pendiente. */
+function otrasCuentas_(ctx, pend, res, desde) {
+  const L = ctx.L;
+  const sh = SpreadsheetApp.openById(ctx.id).getSheetByName(ctx.hoja);
+  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
+  const col = re => { const i = cab.findIndex(x => re.test(x)); return i < 0 ? null : letra_(i + 1); };
+  const nombre = col(/^cuentanombre$/), com = col(/^detcomenta$/), asi = col(/^detmovnro$/);
+  const pedidos = [];
+  res.forEach((x, i) => {
+    const sec = String(pend[i][0]).trim().toUpperCase(), imp = Math.abs(parseNum_(pend[i][3]) || 0);
+    if (!x.texto && /^S[12]$/.test(sec) && especifico_(imp)) pedidos.push({ i, sec, imp, fecha: parseFecha_(pend[i][1]) });
+  });
+  const propias = [ctx.ctas.E, ctx.ctas.O].filter(Boolean).map(c => L.plan + ' <> ' + Number(c)).join(' and ');
+  for (let k = 0; k < pedidos.length; k += 30) {
+    const grupo = pedidos.slice(k, k + 30);
+    const conds = grupo.map(g => (g.sec === 'S1' ? L.debe : L.haber) + ' = ' + g.imp).join(' or ');
+    const sel = [L.plan, nombre, asi, L.fecha, L.debe, L.haber, com].filter(Boolean);
+    const filas = consultaGviz_(ctx.id, ctx.hoja, 'select ' + sel.join(', ') + ' where ' + L.plan + ' >= 1103000 and ' + L.plan + ' < 1105000 and ' +
+      propias + ' and (' + conds + ')' + ctx.vigente);
+    const h = filas[0].map(normalizar_);
+    const ix = n => h.indexOf(n);
+    grupo.forEach(g => {
+      const hit = filas.slice(1).find(r => {
+        const imp = g.sec === 'S1' ? Number(r[ix('detdebe')]) : Number(r[ix('dethaber')]);
+        const f = r[ix('detfecha')] instanceof Date ? r[ix('detfecha')] : parseFecha_(r[ix('detfecha')]);
+        return Math.abs(imp - g.imp) <= TOLERANCIA && f && (!g.fecha || f >= new Date(g.fecha.getTime() - 5 * 86400000));
+      });
+      if (hit) res[g.i] = { tipo: 'posible', texto: 'Posible registro en otra cuenta: ' + (ix('cuentanombre') >= 0 ? hit[ix('cuentanombre')] : hit[0]) +
+        ' (' + hit[ix('detplan')] + (ix('detmovnro') >= 0 ? ', asiento ' + hit[ix('detmovnro')] : '') + ', ' + fechaTexto_(parseFecha_(hit[ix('detfecha')])) +
+        (ix('detcomenta') >= 0 ? ', ' + hit[ix('detcomenta')] : '') + ')' };
+    });
+  }
+}
+
 function agregarReglasNuevas() {
   const ss = SpreadsheetApp.getActive();
   const sh = ss.getSheetByName(HOJA.reglas);
@@ -2182,4 +2425,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };

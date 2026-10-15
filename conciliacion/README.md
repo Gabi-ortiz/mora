@@ -92,3 +92,24 @@ Al pie se arma el asiento de gastos bancarios (comisiones, IVA, percepciones, im
 débitos con su 33% computable, SIRCREB, retenciones IIBB renta financiera); la hoja `Resumen` ya lo calcula.
 
 Los extractos y planillas generadas no se versionan (contienen datos de la empresa).
+
+## Una planilla por banco + motor único (biblioteca)
+
+- **Motor Conciliaciones**: proyecto de Apps Script independiente con `appscript/Conciliacion.gs`. Es la biblioteca
+  `Motor`; las mejoras se pegan solo acá.
+- **Planilla de cada banco** (ej. "BANCO MACRO" de Turin): su script es `appscript/planilla-banco/Banco.gs` (menú que
+  llama al motor) y el manifiesto `appscript/planilla-banco/appsscript.json` (biblioteca en modo desarrollo + permisos).
+  En `Parámetros`: cuentas E y O, link de la base FBS de la empresa, carpeta de cierres.
+- Los usuarios de las planillas necesitan acceso de edición al proyecto Motor para usar el modo desarrollo (siempre la
+  última versión).
+
+## Ciclo mensual
+
+1. Cargar el extracto del mes y **2. Procesar conciliación** (FBS sale de la base de la empresa).
+2. Revisar `Conciliación` / `Para revisar` y corregir en FBS; reprocesar las veces que haga falta.
+3. **3. Cerrar mes**: foto de la planilla en la carpeta de cierres, fila en `Historial`, pendientes a
+   `Pendientes en trabajo`, saldos finales y fecha de `Último cierre` en `Parámetros`, foto oculta de E y O (`_Foto FBS`).
+4. Entre cierres, trabajar `Pendientes en trabajo` (Estado, Responsable, Comentario) y correr
+   **Revisar pendientes**: busca en la base lo cargado en FBS después del cierre y marca lo resuelto (verde), lo posible
+   (amarillo: solo fecha + importe, pase O→E, posible registro en la cuenta de otro banco) y los pendientes que se
+   anulan entre sí. Al cerrar el mes siguiente, lo que sigue abierto conserva estado y comentarios.
