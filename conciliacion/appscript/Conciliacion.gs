@@ -178,7 +178,6 @@ function crearMenu() {
 function crearParametros_(ss) {
   const filas = [
     ['Parámetro', 'Valor'],
-    ['Modo de cruce', 'ESTRICTO'],
     ['Cuenta E', 1103013],
     ['Cuenta O', 1103012],
     ['Saldo inicial cuenta E', ''],
@@ -187,8 +186,6 @@ function crearParametros_(ss) {
     ['Base FBS (link o ID)', ''],
     ['Hoja de la base', 'MOVIMIENTOS'],
     ['Carpeta de cierres (link o ID)', ''],
-    ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
-    ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
     ['Sin cuenta O', 'Si la empresa tiene la confirmación de valores al día (ej. Chexa), poné NO en "Cuenta O": se concilia solo la cuenta E.'],
     ['Base FBS', 'Link de la planilla base de la empresa (la que se actualiza todos los días). Con la base, los movimientos del mes y los saldos iniciales de E y O se toman solos de ahí; no hace falta la hoja "Base".'],
     ['Carpeta de cierres', 'Carpeta de Drive donde "Cerrar mes" guarda la foto de cada cierre. Vacía: "Conciliaciones - Historial" junto a esta planilla.'],
@@ -203,8 +200,7 @@ function crearParametros_(ss) {
   sh = ss.insertSheet(HOJA.parametros);
   sh.getRange(1, 1, filas.length, 2).setValues(filas);
   sh.getRange(1, 1, 1, 2).setFontWeight('bold');
-  sh.getRange(5, 2, 2, 1).setNumberFormat(NUM_FMT);
-  sh.getRange(2, 2).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(['ESTRICTO', 'INTERMEDIO']).build());
+  sh.getRange(4, 2, 2, 1).setNumberFormat(NUM_FMT);
   sh.setColumnWidth(1, 150); sh.setColumnWidth(2, 700);
 }
 
@@ -1904,7 +1900,7 @@ function especifico_(x) {
 }
 
 /** Importe redondo: se cruza solo si ese día hay UN movimiento del banco y UN registro de E con ese importe. */
-let CRUZAR_REDONDO_UNICO_DIA = 0;   // 0 = ESTRICTO, 3 = INTERMEDIO (se lee de la hoja "Parámetros")
+let CRUZAR_REDONDO_UNICO_DIA = 3;   // cruces de importe redondo con candidato único (hasta 3 días), siempre marcados "(revisar)"
 function unicoDelDia_(banco, fbs) {
   const clave = p => p.fecha.getTime() + '|' + p.importe.toFixed(2);
   const cb = new Map(), cf = new Map();
@@ -2278,11 +2274,8 @@ function agregarReglasNuevas() {
 
 /** Todo el proceso sobre matrices de valores (sin tocar hojas): se puede probar fuera de Sheets. */
 function conciliarTodo_(entrada, redondoUnico) {
-  if (redondoUnico !== undefined) CRUZAR_REDONDO_UNICO_DIA = redondoUnico;
-  else if (entrada.parametros) {
-    const fila = entrada.parametros.find(r => /modo de cruce/i.test(String(r[0])));
-    CRUZAR_REDONDO_UNICO_DIA = fila && /INTERMEDIO/i.test(String(fila[1])) ? 3 : 0;
-  }
+  // un solo modo de cruce (el que antes se llamaba INTERMEDIO); el parámetro solo lo usan las pruebas
+  CRUZAR_REDONDO_UNICO_DIA = redondoUnico !== undefined ? redondoUnico : 3;
   const reglas = leerReglas_(entrada.reglas), empresas = leerEmpresas_(entrada.empresas);
   const ext = leerExtracto_(entrada.extracto, reglas, empresas);
   const movs = ext.movs;
