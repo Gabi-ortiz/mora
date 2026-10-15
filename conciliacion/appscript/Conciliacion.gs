@@ -270,7 +270,7 @@ function procesar_(ss) {
   const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
   const extracto = leer(hojaExtracto), reglas = leer(HOJA.reglas), empresas = leer(HOJA.empresas);
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
-  let base = null, saldosIniciales = null, avisosBase = [];
+  let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null;
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
     const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas)).movs;
@@ -279,7 +279,17 @@ function procesar_(ss) {
     const ult = movs[movs.length - 1].fecha;
     const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
     const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
-    base = r.filas; saldosIniciales = r.saldos;
+    base = r.filas; saldosIniciales = r.saldos; ctxBase = r.ctx || null; hastaBase = hasta;
+    // movimientos de meses cerrados cargados o modificados después del cierre anterior
+    const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
+    const foto = leerFotoBase_(ss);
+    if (r.ctx && (foto || cierre.E !== null || cierre.O !== null)) {
+      const dif = { E: cierre.E === null ? 0 : r.saldos.E - cierre.E, O: cierre.O === null ? 0 : r.saldos.O - cierre.O };
+      if (foto || Math.abs(dif.E) > 1 || Math.abs(dif.O) > 1) {
+        const t = movimientosTardios_(r.ctx, desde, dif, foto);
+        if (t.filas.length > 1) { base = unirFilas_(base, t.filas); tardios = t.total; }
+      }
+    }
     if (ss.getSheetByName(HOJA.base) && ss.getSheetByName(HOJA.base).getLastRow() > 1) {
       avisosBase.push('Se usó la base externa de "' + HOJA.parametros + '"; la hoja "' + HOJA.base + '" de esta planilla se ignoró (se puede borrar).');
     }
@@ -289,12 +299,13 @@ function procesar_(ss) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
   const res = conciliarTodo_({
-    extracto, base, saldosIniciales, avisosBase,
+    extracto, base, saldosIniciales, avisosBase, tardios,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: leer(hojaAnteriores),
     reglas, empresas, parametros,
   });
+  res.baseCtx = ctxBase; res.hastaBase = hastaBase;
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirCuatroPuntas_(ss, res);
   escribirTablero_(ss, res);
@@ -359,6 +370,12 @@ function cerrarMes() {
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
   const n = pasarPendientes_(ss);
+  // foto de E y O en la base al cierre: el mes siguiente detecta lo que se cargue o cambie después con fecha de meses cerrados
+  if (res.baseCtx) {
+    try { guardarFotoBase_(ss, res.baseCtx, res.hastaBase); } catch (e) {
+      ui.alert('No se pudo guardar la foto de la base (' + e.message + '). El mes siguiente se controla solo por saldo.');
+    }
+  }
   const par = ss.getSheetByName(HOJA.parametros);
   if (par) {
     const v = par.getDataRange().getValues();
@@ -578,6 +595,7 @@ function escribirTablero_(ss, res) {
 
 function observacion_(p) {
   if (p.alerta) return p.alerta;
+  if (p.tardio) return 'Movimiento con fecha ' + fechaTexto_(p.fecha) + ' (mes ya cerrado) cargado o modificado en FBS después del cierre';
   if (p.desfasado) return 'Confirmado con fecha ' + fechaTexto_(p.fecha) + ' pero el recibo se registró el ' + fechaTexto_(p.fechaRef2) +
     ': queda en S4 y se cancela solo el mes próximo, cuando entra el ingreso en O';
   if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) return 'Cargado después del cierre (' + fechaTexto_(p.fechaRef2) + ') con fecha del mes';
@@ -961,7 +979,7 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   if (!sh) throw new Error('La base FBS no tiene la hoja "' + hoja + '".');
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
   const col = re => { const i = cab.findIndex(h => re.test(h)); return i < 0 ? null : letra_(i + 1); };
-  const L = { plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/) };
+  const L = { id: col(/^detmovid$/), plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/) };
   if (!L.plan || !L.fecha || !L.debe || !L.haber) throw new Error('La base FBS no tiene las columnas DETPLAN, DETFECHA, DETDEBE y DETHABER.');
   const cuentas = [ctas.E].concat(ctas.O ? [ctas.O] : []);
   const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
@@ -973,7 +991,7 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
       ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + vigente + ' group by ' + L.plan);
     const saldos = { E: 0, O: 0 };
     sum.slice(1).forEach(r => { const k = String(r[0]) === String(Number(ctas.E)) ? 'E' : 'O'; saldos[k] = redondear_(Number(r[1] || 0) - Number(r[2] || 0)); });
-    return { filas, saldos };
+    return { filas, saldos, ctx: { id, hoja, L, enCuentas, vigente, ctas } };
   } catch (e) {
     // sin consulta: se lee la hoja entera y se filtra acá (más lento)
     const todo = sh.getDataRange().getValues();
@@ -991,10 +1009,109 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   }
 }
 
+/**
+ * Movimientos de meses ya cerrados que se cargaron, cambiaron o borraron en FBS después del cierre anterior (ej. la
+ * confirmación en E de un recibo hecha después de cerrar el mes, con fecha de ese mes). Se suman al mes que se concilia
+ * para que crucen contra los pendientes anteriores; el saldo inicial sigue siendo el del cierre.
+ *  - Con la foto del cierre anterior (hoja oculta "_Foto FBS", la guarda "Cerrar mes"): diferencia exacta por DETMOVID.
+ *  - Sin foto (primer mes): por cada cuenta cuyo saldo en la base no coincide con el del cierre, busca el movimiento
+ *    anterior al mes por exactamente esa diferencia.
+ * Devuelve filas (con encabezado, columna extra _TARDIO) y el total por cuenta.
+ */
+function movimientosTardios_(ctx, desde, dif, foto) {
+  const L = ctx.L, total = { E: 0, O: 0 };
+  const cuentaDe = plan => (String(Number(plan)) === String(Number(ctx.ctas.E)) ? 'E' : 'O');
+  let filas = null;
+  const sumar = rows => rows.slice(1).forEach(r => {
+    if (!filas) filas = [rows[0].concat(['_TARDIO'])];
+    filas.push(r.concat(['SI']));
+  });
+  if (foto && L.id) {
+    const actual = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
+      ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + ctx.vigente);
+    const vistos = new Set(), nuevos = [];
+    actual.slice(1).forEach(r => {
+      const id = String(r[0]), imp = redondear_(Number(r[2] || 0) - Number(r[3] || 0)), f = foto.get(id);
+      vistos.add(id);
+      if (!f || f.cuenta !== String(Number(r[1])) || Math.abs(f.importe - imp) > 0.005) {
+        nuevos.push(id);
+        if (f) foto.set(id, Object.assign({}, f, { cambiado: true }));
+      }
+    });
+    for (let i = 0; i < nuevos.length; i += 40) {
+      sumar(consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + nuevos.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or ')));
+    }
+    // lo que estaba en la foto y ya no está (o cambió): se revierte la versión vieja
+    const quitados = [];
+    foto.forEach((f, id) => { if ((!vistos.has(id) || f.cambiado) && Math.abs(f.importe) > 0.005) quitados.push([id, f]); });
+    if (quitados.length) {
+      if (!filas) filas = [['DETMOVID', 'DETMOVNRO', 'DETFECHA', 'DETPLAN', 'DETDEBE', 'DETHABER', 'DETComenta', '_TARDIO']];
+      const h = filas[0].map(normalizar_), fila = () => filas[0].map(() => '');
+      quitados.forEach(([id, f]) => {
+        const r = fila();
+        r[h.indexOf('detmovid')] = id; r[h.indexOf('detfecha')] = f.fecha; r[h.indexOf('detplan')] = Number(f.cuenta);
+        r[h.indexOf('detdebe')] = Math.max(-f.importe, 0); r[h.indexOf('dethaber')] = Math.max(f.importe, 0);
+        r[h.indexOf('detcomenta')] = 'Movimiento ' + id + ' del ' + fechaTexto_(f.fecha) + ' borrado o cambiado en FBS después del cierre (se revierte)';
+        if (h.indexOf('detmovnro') >= 0) r[h.indexOf('detmovnro')] = 'foto ' + id;
+        r[r.length - 1] = 'SI';
+        filas.push(r);
+      });
+    }
+  } else {
+    ['E', 'O'].forEach(k => {
+      const d = redondear_(dif[k] || 0), cuenta = ctx.ctas[k];
+      if (!cuenta || Math.abs(d) <= 1) return;
+      const cond = d > 0 ? L.debe + ' = ' + d : L.haber + ' = ' + (-d);
+      const r = consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + L.plan + ' = ' + Number(cuenta) + ' and ' + L.fecha + ' < ' +
+        fechaGviz_(desde) + ' and ' + cond + ctx.vigente + (L.id ? ' order by ' + L.id + ' desc' : '') + ' limit 1');
+      sumar(r);
+    });
+  }
+  if (filas) {
+    const h = filas[0].map(normalizar_), ip = h.indexOf('detplan'), id = h.indexOf('detdebe'), ih = h.indexOf('dethaber');
+    filas.slice(1).forEach(r => { total[cuentaDe(r[ip])] += Number(r[id] || 0) - Number(r[ih] || 0); });
+  }
+  return { filas: filas || [], total: { E: redondear_(total.E), O: redondear_(total.O) } };
+}
+
+/** Une las filas del mes con las tardías (mismas columnas por nombre; se agrega _TARDIO). */
+function unirFilas_(filas, extra) {
+  if (!extra.length) return filas;
+  const cab = filas[0].concat(['_TARDIO']), h = cab.map(normalizar_), he = extra[0].map(normalizar_);
+  return [cab].concat(filas.slice(1).map(r => r.concat([''])),
+    extra.slice(1).map(r => h.map(c => { const i = he.indexOf(c); return i < 0 ? '' : r[i]; })));
+}
+
+const HOJA_FOTO_FBS = '_Foto FBS';
+
+/** Foto de las cuentas E y O al cierre: DETMOVID, cuenta, importe (debe - haber) y fecha de todo hasta fin de mes. */
+function guardarFotoBase_(ss, ctx, hasta) {
+  const L = ctx.L;
+  if (!L.id) return 0;
+  const r = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
+    ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + ctx.vigente);
+  const filas = [['DETMOVID', 'Cuenta', 'Importe', 'Fecha', 'Cierre al ' + fechaTexto_(hasta)]].concat(r.slice(1).map(x =>
+    [String(x[0]), String(Number(x[1])), redondear_(Number(x[2] || 0) - Number(x[3] || 0)), x[4], '']));
+  let sh = ss.getSheetByName(HOJA_FOTO_FBS);
+  if (sh) sh.clearContents(); else sh = ss.insertSheet(HOJA_FOTO_FBS);
+  sh.getRange(1, 1, filas.length, 5).setValues(filas);
+  sh.getRange(2, 1, Math.max(filas.length - 1, 1), 2).setNumberFormat('@');
+  sh.hideSheet();
+  return filas.length - 1;
+}
+
+function leerFotoBase_(ss) {
+  const sh = ss.getSheetByName(HOJA_FOTO_FBS);
+  if (!sh || sh.getLastRow() < 2) return null;
+  const m = new Map();
+  sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().forEach(r => m.set(String(r[0]), { cuenta: String(r[1]), importe: Number(r[2]), fecha: r[3] }));
+  return m;
+}
+
 function leerBase_(filas, cuentaE, cuentaO) {
   const h = encabezados_(filas, {
     plan: /^detplan$/, asiento: /^detmovnro$/, fecha: /^detfecha$/, ref: /^detref$/, debe: /^detdebe$/, haber: /^dethaber$/,
-    com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/, estado: /^_estado$/,
+    com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/, estado: /^_estado$/, tardio: /^_tardio$/,
   }, ['plan', 'fecha', 'debe', 'haber', 'com']);
   if (!h) throw new Error('Base: no encuentro las columnas DETPLAN, DETFECHA, DETDEBE, DETHABER, DETComenta.');
   const c = h.col, out = { E: [], O: [] };
@@ -1009,7 +1126,7 @@ function leerBase_(filas, cuentaE, cuentaO) {
       comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
       aux: aux instanceof Date ? aux : (typeof aux === 'number' ? String(Math.round(aux)) : String(aux || '').trim()),
       id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: String(cuentaO),
-      cc: c.cc !== undefined ? String(r[c.cc] || '').trim() : '' });
+      cc: c.cc !== undefined ? String(r[c.cc] || '').trim() : '', tardio: c.tardio !== undefined && r[c.tardio] === 'SI' });
   });
   return out;
 }
@@ -1046,7 +1163,7 @@ function datosAux_(aux, base, cc) {
   const t = String(aux).trim();
   const out = Object.assign({}, vacio);
   if (parseFecha_(t)) return Object.assign(out, { fecha: parseFecha_(t) });   // la celda trae directamente una fecha
-  const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);
+  const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*-?\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);   // también \"BANCO MACRO-(1103015)\"
   const dm = (txt) => {
     let x = txt.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})(?!\d)/);
     if (x) {
@@ -1148,7 +1265,7 @@ function partidaFbs_(a, origen) {
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
     fechaRef: fr || null, fechaRef2: ax.fecha2 && (!fr || dias_(ax.fecha2, fr) > 0) ? ax.fecha2 : null, cruces: '', valor: ax.numero,
     otroBanco, aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
-    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', cc: a.cc || '',
+    ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', cc: a.cc || '', tardio: !!a.tardio,
     alerta: otroBanco ? 'El valor figura en otro banco (' + otroBanco + ' ' + ax.cuentaBanco + '): no corresponde a esta cuenta' : '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
@@ -1749,6 +1866,8 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   pasada_(antBanco, eItems, POR_NOMBRE_, 'Pendiente anterior: nombre', v, false);
   pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe),
     'Pendiente anterior: fecha del comentario + importe', v, true);
+  // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
+  pasada_(antBanco, eItems, (b, f) => f.tardio && especifico_(b.importe), 'Pendiente anterior: registro tardío + importe', 5, true);
   antFbs.forEach(a => {
     if (a.match !== null) return;
     const f = eItems.find(x => x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
@@ -1936,15 +2055,20 @@ function conciliarTodo_(entrada, redondoUnico) {
       // anteriores. La base suma todo lo anterior al mes como está HOY, así que incluye lo que se cargó o modificó en FBS
       // con fecha de meses ya cerrados después del cierre; esa diferencia se informa. Sin saldo en Parámetros (primer
       // mes) se usa el de la base.
-      const avisoSaldo = [];
+      const avisoSaldo = [], tard = entrada.tardios || { E: 0, O: 0 };
       const comparar = (n, cargado, calculado) => {
-        if (cargado !== null && Math.abs(cargado - calculado) > 1) avisoSaldo.push('cuenta ' + n + ': cierre anterior ' + formato_(cargado) +
-          ', base hoy ' + formato_(calculado) + ' (dif. ' + formato_(calculado - cargado) + ')');
+        if (cargado === null) return;
+        const resto = redondear_(calculado - cargado - tard[n]);
+        if (Math.abs(resto) > 1) avisoSaldo.push('cuenta ' + n + ': cierre anterior ' + formato_(cargado) + ', base hoy ' + formato_(calculado) +
+          (tard[n] ? ', registros tardíos ' + formato_(tard[n]) : '') + ' (sin explicar ' + formato_(resto) + ')');
       };
       comparar('E', siE, entrada.saldosIniciales.E);
       if (!sinO) comparar('O', siO, entrada.saldosIniciales.O);
-      if (avisoSaldo.length) entrada.avisosBase = (entrada.avisosBase || []).concat(['Movimientos de meses ya cerrados cargados o modificados en FBS ' +
-        'después del cierre: ' + avisoSaldo.join('; ') + '. Se usó el saldo del cierre anterior; esos movimientos no entran en este mes.']);
+      if (tard.E || tard.O) entrada.avisosBase = (entrada.avisosBase || []).concat(['Se sumaron a este mes movimientos de meses ya cerrados ' +
+        'cargados o modificados en FBS después del cierre (E ' + formato_(tard.E) + ', O ' + formato_(tard.O) + '): se cruzan contra los pendientes ' +
+        'anteriores (ver "Movimiento con fecha ... (mes ya cerrado)" en las hojas de detalle).']);
+      if (avisoSaldo.length) entrada.avisosBase = (entrada.avisosBase || []).concat(['La base no coincide con el saldo del cierre anterior: ' +
+        avisoSaldo.join('; ') + '. Se usó el saldo del cierre anterior.']);
       if (siE === null) siE = entrada.saldosIniciales.E;
       if (siO === null) siO = sinO ? 0 : entrada.saldosIniciales.O;
     }
