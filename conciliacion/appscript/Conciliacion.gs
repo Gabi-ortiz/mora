@@ -180,9 +180,12 @@ function crearParametros_(ss) {
     ['Saldo inicial cuenta E', ''],
     ['Saldo inicial cuenta O', ''],
     ['Cuenta bancaria', 'Banco Macro'],
+    ['Base FBS (link o ID)', ''],
+    ['Hoja de la base', 'MOVIMIENTOS'],
     ['ESTRICTO', 'Sin CUIT / referencia / nombre / fecha escrita en el comprobante, solo cruza si coincide la fecha y el importe no es redondo.'],
     ['INTERMEDIO', 'Además cruza importes redondos cuando hay un único candidato de cada lado (mismo día o hasta 3 días) y transferencias propias / FCI contra pases de E. Todo queda marcado "(revisar)".'],
     ['Sin cuenta O', 'Si la empresa tiene la confirmación de valores al día (ej. Chexa), poné NO en "Cuenta O": se concilia solo la cuenta E.'],
+    ['Base FBS', 'Link de la planilla base de la empresa (la que se actualiza todos los días). Con la base, los movimientos del mes y los saldos iniciales de E y O se toman solos de ahí; no hace falta la hoja "Base".'],
     ['Saldos iniciales', 'Con la hoja "Base": saldo final de E y de O de la conciliación anterior. Al cerrar el mes se completan solos.'],
   ];
   let sh = ss.getSheetByName(HOJA.parametros);
@@ -231,17 +234,14 @@ function crearHojasEntrada() {
     }
     return sh;
   };
-  // solo crea lo que falta. FBS se carga siempre en la hoja "Base" (los mayores E y O ya no se usan)
+  // solo crea lo que falta. FBS se lee de la base de la empresa (link en Parámetros); los mayores E y O ya no se usan
   if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
-  if (!ss.getSheetByName(HOJA.base) && !ss.getSheetByName(HOJA.mayorE)) {
-    crear(HOJA.base, [['Pegar acá el reporte de FBS (DETPLAN, DETMOVNRO, DETFECHA, DETDEBE, DETHABER, DETComenta, DETComentaAux, …) desde A1']]);
-  }
   if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [['Sector', 'Fecha', 'Concepto', 'Importe']]);
   limpiarHojasSobrantes_(ss);
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
   crearParametros_(ss);
-  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Completá "' + HOJA.base + '", el extracto, los pendientes anteriores ' +
+  SpreadsheetApp.getUi().alert('Hojas de entrada listas. Cargá el link de la base FBS de la empresa en "' + HOJA.parametros + '", el extracto y los pendientes anteriores ' +
     'y los saldos iniciales en "' + HOJA.parametros + '", y corré "2. Procesar conciliación".');
 }
 
@@ -267,16 +267,33 @@ function procesar_(ss) {
   limpiarHojasSobrantes_(ss);
   const hojaExtracto = (hojaDe_(ss, nombresExtracto_()) || { getName: () => HOJA.extracto }).getName();
   const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
-  const conBase = !!ss.getSheetByName(HOJA.base);
+  const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
+  const extracto = leer(hojaExtracto), reglas = leer(HOJA.reglas), empresas = leer(HOJA.empresas);
+  const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
+  let base = null, saldosIniciales = null, avisosBase = [];
+  if (idBase) {
+    // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
+    const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas)).movs;
+    if (!movs.length) throw new Error('El extracto está vacío.');
+    const desde = new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1);
+    const ult = movs[movs.length - 1].fecha;
+    const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
+    const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
+    base = r.filas; saldosIniciales = r.saldos;
+    if (ss.getSheetByName(HOJA.base) && ss.getSheetByName(HOJA.base).getLastRow() > 1) {
+      avisosBase.push('Se usó la base externa de "' + HOJA.parametros + '"; la hoja "' + HOJA.base + '" de esta planilla se ignoró (se puede borrar).');
+    }
+  } else if (ss.getSheetByName(HOJA.base)) {
+    base = leer(HOJA.base);
+  } else if (!ss.getSheetByName(HOJA.mayorE)) {
+    throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
+  }
   const res = conciliarTodo_({
-    extracto: leer(hojaExtracto),
-    base: conBase ? leer(HOJA.base) : null,
-    mayorE: conBase ? null : leer(HOJA.mayorE),
-    mayorO: conBase ? null : leer(HOJA.mayorO),
+    extracto, base, saldosIniciales, avisosBase,
+    mayorE: base ? null : leer(HOJA.mayorE),
+    mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: leer(hojaAnteriores),
-    reglas: leer(HOJA.reglas),
-    empresas: leer(HOJA.empresas),
-    parametros: ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null,
+    reglas, empresas, parametros,
   });
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirCuatroPuntas_(ss, res);
@@ -878,10 +895,106 @@ function leerExtracto_(filas, reglas, empresas) {
  * Reporte de la base (hoja "Base"): una fila por renglón de asiento, con DETPLAN = cuenta del mayor
  * (1103012 = O, 1103013 = E) y DETComentaAux con el número y la fecha del valor ("Nº 994833-BANCO MACRO(1103012)-14/07/2026").
  */
+// ------------------------------------------------------------------ base FBS de la empresa (otra planilla)
+
+function paramDe_(parametros, nombre) {
+  const f = (parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0])));
+  return f ? f[1] : null;
+}
+
+/** Cuentas a conciliar según Parámetros. O = null si "Cuenta O" está en NO (solo se concilia la E). */
+function cuentasDe_(parametros) {
+  const limpio = v => String(v).replace(/\.0+$/, '').trim();
+  const pE = paramDe_(parametros, '^cuenta e$'), pO = paramDe_(parametros, '^cuenta o$');
+  const sinO = pO !== null && (String(pO).trim() === '' || /^no$/i.test(String(pO).trim()));
+  return { E: limpio(pE || 1103013), O: sinO ? null : limpio(pO || 1103012) };
+}
+
+function idDeLink_(v) {
+  const t = String(v || '').trim();
+  if (!t) return '';
+  const m = t.match(/\/d\/([a-zA-Z0-9_-]{20,})/);
+  return m ? m[1] : (/^[a-zA-Z0-9_-]{20,}$/.test(t) ? t : '');
+}
+
+/** Letra de columna (1 -> A, 27 -> AA). */
+function letra_(n) { let s = ''; for (; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + (n - 1) % 26) + s; return s; }
+
+function fechaGviz_(d) { return "date '" + d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2) + "'"; }
+
+/** Respuesta JSON de la consulta de Google Sheets (gviz) -> filas con encabezado; las fechas vuelven como Date. */
+function parseGviz_(texto) {
+  const json = JSON.parse(texto.slice(texto.indexOf('{'), texto.lastIndexOf('}') + 1));
+  if (json.status === 'error') throw new Error((json.errors || []).map(e => e.detailed_message || e.message).join('; '));
+  const cols = json.table.cols;
+  const valor = c => {
+    if (!c || c.v === null || c.v === undefined) return '';
+    if (typeof c.v === 'string') {
+      const d = c.v.match(/^Date\((\d+),(\d+),(\d+)/);
+      if (d) return new Date(Number(d[1]), Number(d[2]), Number(d[3]));
+    }
+    return c.v;
+  };
+  return [cols.map(c => c.label || c.id)].concat((json.table.rows || []).map(r => cols.map((_, i) => valor(r.c[i]))));
+}
+
+function consultaGviz_(id, hoja, consulta) {
+  const url = 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:json&headers=1&sheet=' +
+    encodeURIComponent(hoja) + '&tq=' + encodeURIComponent(consulta);
+  const r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+  if (r.getResponseCode() !== 200 || !/setResponse/.test(r.getContentText().slice(0, 200))) {
+    throw new Error('consulta a la base: respuesta ' + r.getResponseCode());
+  }
+  return parseGviz_(r.getContentText());
+}
+
+/**
+ * Trae de la base de la empresa los movimientos de las cuentas E y O entre "desde" y "hasta" (sin los eliminados) y
+ * calcula el saldo inicial de cada cuenta sumando todo lo anterior a "desde". Consulta filtrada (rápida); si falla,
+ * lee la hoja completa.
+ */
+function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
+  let sh;
+  try { sh = SpreadsheetApp.openById(id).getSheetByName(hoja); } catch (e) {
+    throw new Error('No pude abrir la base FBS (' + id + '): revisá el link en "' + HOJA.parametros + '" y que tengas acceso.');
+  }
+  if (!sh) throw new Error('La base FBS no tiene la hoja "' + hoja + '".');
+  const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
+  const col = re => { const i = cab.findIndex(h => re.test(h)); return i < 0 ? null : letra_(i + 1); };
+  const L = { plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/) };
+  if (!L.plan || !L.fecha || !L.debe || !L.haber) throw new Error('La base FBS no tiene las columnas DETPLAN, DETFECHA, DETDEBE y DETHABER.');
+  const cuentas = [ctas.E].concat(ctas.O ? [ctas.O] : []);
+  const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
+  const vigente = L.estado ? ' and not (' + L.estado + " contains 'ELIMIN')" : '';
+  try {
+    const filas = consultaGviz_(id, hoja, 'select * where ' + enCuentas + ' and ' + L.fecha + ' >= ' + fechaGviz_(desde) +
+      ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + vigente);
+    const sum = consultaGviz_(id, hoja, 'select ' + L.plan + ', sum(' + L.debe + '), sum(' + L.haber + ') where ' + enCuentas +
+      ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + vigente + ' group by ' + L.plan);
+    const saldos = { E: 0, O: 0 };
+    sum.slice(1).forEach(r => { const k = String(r[0]) === String(Number(ctas.E)) ? 'E' : 'O'; saldos[k] = redondear_(Number(r[1] || 0) - Number(r[2] || 0)); });
+    return { filas, saldos };
+  } catch (e) {
+    // sin consulta: se lee la hoja entera y se filtra acá (más lento)
+    const todo = sh.getDataRange().getValues();
+    const h = encabezados_(todo, { plan: /^detplan$/, fecha: /^detfecha$/, debe: /^detdebe$/, haber: /^dethaber$/, estado: /^_estado$/ }, ['plan', 'fecha', 'debe', 'haber']);
+    const c = h.col, filas = [todo[h.fila]], saldos = { E: 0, O: 0 };
+    todo.slice(h.fila + 1).forEach(r => {
+      const plan = String(r[c.plan]).replace(/\.0+$/, '').trim();
+      const k = plan === ctas.E ? 'E' : (ctas.O && plan === ctas.O ? 'O' : null);
+      const f = parseFecha_(r[c.fecha]);
+      if (!k || !f || (c.estado !== undefined && /ELIMIN/i.test(String(r[c.estado])))) return;
+      if (f < desde) saldos[k] += (parseNum_(r[c.debe]) || 0) - (parseNum_(r[c.haber]) || 0);
+      else if (f <= hasta) filas.push(r);
+    });
+    return { filas, saldos: { E: redondear_(saldos.E), O: redondear_(saldos.O) } };
+  }
+}
+
 function leerBase_(filas, cuentaE, cuentaO) {
   const h = encabezados_(filas, {
     plan: /^detplan$/, asiento: /^detmovnro$/, fecha: /^detfecha$/, ref: /^detref$/, debe: /^detdebe$/, haber: /^dethaber$/,
-    com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/,
+    com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/, estado: /^_estado$/,
   }, ['plan', 'fecha', 'debe', 'haber', 'com']);
   if (!h) throw new Error('Base: no encuentro las columnas DETPLAN, DETFECHA, DETDEBE, DETHABER, DETComenta.');
   const c = h.col, out = { E: [], O: [] };
@@ -890,6 +1003,7 @@ function leerBase_(filas, cuentaE, cuentaO) {
     const cta = plan === String(cuentaE) ? 'E' : plan === String(cuentaO) ? 'O' : null;
     const fecha = parseFecha_(r[c.fecha]);
     if (!cta || !fecha) return;
+    if (c.estado !== undefined && /ELIMIN/i.test(String(r[c.estado]))) return;   // borrado en el ERP
     const aux = c.aux !== undefined ? r[c.aux] : '';
     out[cta].push({ asiento: String(r[c.asiento] || '').replace(/\.0+$/, ''), fecha, referencia: String(r[c.ref] || '').trim(),
       comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
@@ -1812,16 +1926,26 @@ function conciliarTodo_(entrada, redondoUnico) {
   const param = nombre => { const f = (entrada.parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0]))); return f ? f[1] : null; };
   let e, o;
   if (entrada.base) {
-    // "Cuenta O" en NO (o vacía): la empresa tiene la confirmación de valores al día y solo se concilia la cuenta E
-    const pO = param('^cuenta o');
-    const sinO = pO !== null && (String(pO).trim() === '' || /^no$/i.test(String(pO).trim()));
-    const cuentaO = sinO ? '__sin_cuenta_O__' : (pO || 1103012);
-    const b = leerBase_(entrada.base, param('^cuenta e') || 1103013, cuentaO);
-    const siE = parseNum_(param('^saldo inicial cuenta e'));
-    const siO = sinO ? 0 : parseNum_(param('^saldo inicial cuenta o'));
+    const ctas = cuentasDe_(entrada.parametros), sinO = !ctas.O;
+    const cuentaO = sinO ? '__sin_cuenta_O__' : ctas.O;
+    const b = leerBase_(entrada.base, ctas.E, cuentaO);
+    let siE = parseNum_(param('^saldo inicial cuenta e'));
+    let siO = sinO ? 0 : parseNum_(param('^saldo inicial cuenta o'));
+    if (entrada.saldosIniciales) {
+      // base externa: los saldos iniciales salen de sumar en la base todos los movimientos anteriores al mes
+      const avisoSaldo = [];
+      const comparar = (n, cargado, calculado) => {
+        if (cargado !== null && Math.abs(cargado - calculado) > 1) avisoSaldo.push('cuenta ' + n + ': en Parámetros ' + formato_(cargado) + ', según la base ' + formato_(calculado));
+      };
+      comparar('E', siE, entrada.saldosIniciales.E);
+      if (!sinO) comparar('O', siO, entrada.saldosIniciales.O);
+      siE = entrada.saldosIniciales.E; siO = sinO ? 0 : entrada.saldosIniciales.O;
+      if (avisoSaldo.length) entrada.avisosBase = (entrada.avisosBase || []).concat(['El saldo inicial calculado con la base no coincide con el cierre anterior (' +
+        avisoSaldo.join('; ') + '). Se usó el de la base: puede haber movimientos de meses anteriores modificados después del cierre.']);
+    }
     const mk = (lista, si, n) => ({ asientos: lista, avisos: [], info: { cuenta: n, saldoInicial: si || 0,
       saldoFinal: redondear_((si || 0) + lista.reduce((x, a) => x + a.debe - a.haber, 0)) } });
-    e = mk(b.E, siE, 'E (' + (param('^cuenta e') || 1103013) + ')');
+    e = mk(b.E, siE, 'E (' + ctas.E + ')');
     o = mk(b.O, siO, sinO ? 'O (no se usa)' : 'O (' + cuentaO + ')');
     if (siE === null || siO === null) {
       // sin saldos iniciales: se deducen de la conciliación anterior (saldo inicial del banco - pendientes anteriores)
@@ -1840,7 +1964,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   const desde = new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1);
   const corte = movs[movs.length - 1].fecha;
-  const avisos = e.avisos.concat(o.avisos);
+  const avisos = (entrada.avisosBase || []).concat(e.avisos, o.avisos);
 
   // controles de los archivos
   let quiebres = 0;
@@ -1929,4 +2053,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };

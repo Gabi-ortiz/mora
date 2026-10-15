@@ -50,6 +50,12 @@ fecha del valor (20/07), número del valor (= Nro. de referencia del banco cuand
 (si no es la cuenta 1103012 se avisa "otro banco"). Los saldos iniciales de E y O van en `Parámetros` y se
 actualizan solos al cerrar el mes.
 
+**Base de la empresa (recomendado):** en `Parámetros` → `Base FBS (link o ID)` se pone el link de la planilla base de
+la empresa (hoja `MOVIMIENTOS`, se actualiza todos los días con todas las cuentas bancarias). Al procesar se traen
+solo las cuentas E y O de `Parámetros` del mes del extracto (consulta filtrada; si falla, lee la hoja completa), se
+descartan los movimientos con `_ESTADO` eliminado y los saldos iniciales de E y O se calculan sumando en la base todo
+lo anterior al mes. Si no coinciden con los de `Parámetros` (cierre anterior) se avisa en el Tablero.
+
 Flujo (igual al procedimiento de administración):
 1. **Cuenta O** (hoja `Análisis O` y `O sin confirmar`): se netea por comprobante (RC / RM) o número de liquidación,
    junto con los pendientes anteriores. Lo que no netea queda "no confirmado" (puntas 3 y 4) y se marca, en la columna
