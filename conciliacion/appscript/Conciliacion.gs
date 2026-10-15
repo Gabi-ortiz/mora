@@ -1932,16 +1932,21 @@ function conciliarTodo_(entrada, redondoUnico) {
     let siE = parseNum_(param('^saldo inicial cuenta e'));
     let siO = sinO ? 0 : parseNum_(param('^saldo inicial cuenta o'));
     if (entrada.saldosIniciales) {
-      // base externa: los saldos iniciales salen de sumar en la base todos los movimientos anteriores al mes
+      // base externa. Manda el saldo del cierre anterior (Parámetros): es el que se usó para armar los pendientes
+      // anteriores. La base suma todo lo anterior al mes como está HOY, así que incluye lo que se cargó o modificó en FBS
+      // con fecha de meses ya cerrados después del cierre; esa diferencia se informa. Sin saldo en Parámetros (primer
+      // mes) se usa el de la base.
       const avisoSaldo = [];
       const comparar = (n, cargado, calculado) => {
-        if (cargado !== null && Math.abs(cargado - calculado) > 1) avisoSaldo.push('cuenta ' + n + ': en Parámetros ' + formato_(cargado) + ', según la base ' + formato_(calculado));
+        if (cargado !== null && Math.abs(cargado - calculado) > 1) avisoSaldo.push('cuenta ' + n + ': cierre anterior ' + formato_(cargado) +
+          ', base hoy ' + formato_(calculado) + ' (dif. ' + formato_(calculado - cargado) + ')');
       };
       comparar('E', siE, entrada.saldosIniciales.E);
       if (!sinO) comparar('O', siO, entrada.saldosIniciales.O);
-      siE = entrada.saldosIniciales.E; siO = sinO ? 0 : entrada.saldosIniciales.O;
-      if (avisoSaldo.length) entrada.avisosBase = (entrada.avisosBase || []).concat(['El saldo inicial calculado con la base no coincide con el cierre anterior (' +
-        avisoSaldo.join('; ') + '). Se usó el de la base: puede haber movimientos de meses anteriores modificados después del cierre.']);
+      if (avisoSaldo.length) entrada.avisosBase = (entrada.avisosBase || []).concat(['Movimientos de meses ya cerrados cargados o modificados en FBS ' +
+        'después del cierre: ' + avisoSaldo.join('; ') + '. Se usó el saldo del cierre anterior; esos movimientos no entran en este mes.']);
+      if (siE === null) siE = entrada.saldosIniciales.E;
+      if (siO === null) siO = sinO ? 0 : entrada.saldosIniciales.O;
     }
     const mk = (lista, si, n) => ({ asientos: lista, avisos: [], info: { cuenta: n, saldoInicial: si || 0,
       saldoFinal: redondear_((si || 0) + lista.reduce((x, a) => x + a.debe - a.haber, 0)) } });
