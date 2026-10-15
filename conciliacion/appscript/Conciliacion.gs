@@ -344,7 +344,7 @@ function cerrarMes() {
   const ui = SpreadsheetApp.getUi();
   const res = procesar_(ss);
   const periodo = res.corte.getFullYear() + '-' + ('0' + (res.corte.getMonth() + 1)).slice(-2);
-  const empresa = res.info.empresa || '';
+  const empresa = res.empresa || res.info.empresa || '';
   const dif = redondear_(res.ajustado - res.saldoBanco);
 
   const hist = hojaHistorial_(ss);
@@ -358,7 +358,7 @@ function cerrarMes() {
 
   // 2. foto
   const carpeta = carpetaHistorial_(ss);
-  let nombre = 'Conciliación Macro' + (empresa ? ' - ' + empresa : '') + ' - ' + periodo;
+  let nombre = 'Conciliación ' + String(res.cuentaBanco || 'Banco Macro').replace(/^banco\s+/i, '') + (empresa ? ' - ' + empresa : '') + ' - ' + periodo;
   const version = previos.filter(r => String(r[0]) === periodo && String(r[1]) === empresa).length + 1;
   if (version > 1) nombre += ' (v' + version + ')';
   const archivo = DriveApp.getFileById(ss.getId()).makeCopy(nombre, carpeta);
@@ -618,7 +618,8 @@ function escribirTablero_(ss, res) {
   const filas = [];
   const estilos = [];   // 'titulo' | 'cab' | 'total' | 'dif' | ''
   const add = (fila, estilo) => { while (fila.length < 3) fila.push(''); filas.push(fila); estilos.push(estilo || ''); };
-  add(['CONCILIACIÓN BANCO MACRO' + (res.info.empresa ? ' — ' + res.info.empresa : '') + ' — al ' + fechaTexto_(res.corte)], 'titulo');
+  const emp = res.empresa || res.info.empresa;
+  add(['CONCILIACIÓN ' + String(res.cuentaBanco || 'Banco Macro').toUpperCase() + (emp ? ' — ' + emp : '') + ' — al ' + fechaTexto_(res.corte)], 'titulo');
   add([]);
   add(['Concepto', 'Importe', 'Partidas'], 'cab');
   add(['Cuenta E  ' + (res.infoE.cuenta || ''), res.saldoE]);
@@ -2421,7 +2422,12 @@ function conciliarTodo_(entrada, redondoUnico) {
   });
   const listas = { O: ao.pendientes, E: fbs.filter(p => p.match === null), B: banco.filter(p => p.match === null) };
 
-  return { cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
+  let empresa = '';
+  if (entrada.base) {
+    const ie = (entrada.base[0] || []).map(normalizar_).indexOf('empresa');
+    if (ie >= 0) { const f = entrada.base.slice(1).find(r => String(r[ie] || '').trim()); empresa = f ? String(f[ie]).trim() : ''; }
+  }
+  return { empresa, cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
