@@ -397,9 +397,9 @@ function cerrarMes() {
     });
   }
   if (ui.alert('Mes cerrado', 'Foto guardada en la carpeta "' + carpeta.getName() + '" y registrada en "Historial".\n' + n +
-      ' partidas pasadas a los pendientes anteriores.\n\n¿Vaciar las hojas del extracto y de la base (o Mayor E / Mayor O) para cargar el mes siguiente?',
+      ' partidas pasadas a "' + HOJA.anterioresAlt[0] + '".\n\n¿Vaciar la hoja del extracto para cargar el mes siguiente? (FBS se lee de la base, no hay que borrar nada más)',
       ui.ButtonSet.YES_NO) === ui.Button.YES) {
-    [HOJA.extracto, HOJA.mayorE, HOJA.mayorO, HOJA.base].concat(HOJA.extractoAlt)
+    [HOJA.extracto].concat(HOJA.extractoAlt).concat(res.baseCtx ? [] : [HOJA.mayorE, HOJA.mayorO, HOJA.base])
       .forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
   }
   hist.activate();
