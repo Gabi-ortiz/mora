@@ -130,8 +130,36 @@ function reglasDelBanco_(nombreBanco) {
   const n = String(nombreBanco || '');
   if (/galicia/i.test(n)) return REGLAS_GALICIA;
   if (/santander|r[ií]o\b/i.test(n)) return REGLAS_SANTANDER;
+  if (/patagonia/i.test(n)) return REGLAS_PATAGONIA;
   return REGLAS_INICIALES;
 }
+
+/** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
+const REGLAS_PATAGONIA = [
+  ["*", "Crédito", "^CREDITO POR TRANSFERENCIA", "COBRANZA CLIENTES", "Crédito por transferencia"],
+  ["*", "Crédito", "^TRANSFERENCIA ENTRE CUENTAS", "COBRANZA CLIENTES", "Transferencia entre cuentas (de terceros)"],
+  ["*", "Crédito", "^TRANSFERENCIA D/C", "COBRANZA CLIENTES", "Transferencia D/C recibida"],
+  ["*", "Débito", "^TRANSFERENCIA D/C", "PAGO PROVEEDORES", "Transferencia D/C enviada"],
+  ["*", "Crédito", "^DEPOSITO CHEQUE", "CHEQUES", "Depósito de cheque"],
+  ["*", "Crédito", "^DEPOSITO EN EFECTIVO", "DEPOSITOS EN EFECTIVO", "Depósito en efectivo por caja"],
+  ["*", "Crédito", "^CREDITO INTERPYME", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Crédito Interpyme"],
+  ["*", "Crédito", "^PROMOCION PRODUCTOS", "OTROS CREDITOS DEL BANCO", "Promoción productos Patagonia"],
+  ["*", "Débito", "^TRANSF\\. TERCEROS", "PAGO PROVEEDORES", "Transferencia a terceros (e-bank)"],
+  ["*", "Débito", "^TRANSF\\. MEP", "PAGO PROVEEDORES", "Transferencia MEP a otros bancos"],
+  ["*", "Débito", "^TRANSF\\. PROP", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia a cuenta propia (e-bank)"],
+  ["*", "Débito", "^DEBITO P/ACREDITAC\\.DE SUELDOS", "SUELDOS", "Acreditación de sueldos"],
+  ["*", "Débito", "^DEBITO AUTOMATICO", "DEBITOS AUTOMATICOS", "Débito automático"],
+  ["*", "Débito", "^COMISION POR CONVENIOS", "PAGO PROVEEDORES", "Comisión por convenios (se registra aparte)"],
+  ["*", "Débito", "^IMP\\.DB/CR BANCARIOS", "GASTOS BANCARIOS", "Impuesto Ley 25.413 (débitos y créditos)"],
+  ["*", "Débito", "^RET\\.IIBB SIRCREB", "GASTOS BANCARIOS", "Retención IIBB SIRCREB"],
+  ["*", "Débito", "^RET\\.IIBB TUCUMAN", "GASTOS BANCARIOS", "Retención IIBB Tucumán"],
+  ["*", "Débito", "^IMPUESTO A LOS SELLOS", "GASTOS BANCARIOS", "Impuesto de sellos"],
+  ["*", "Débito", "^INTERES", "GASTOS BANCARIOS", "Intereses (acuerdo)"],
+  ["*", "Débito", "^IVA", "GASTOS BANCARIOS", "IVA (comisiones e intereses)"],
+  ["*", "Débito", "^COM", "GASTOS BANCARIOS", "Comisiones"],
+  ["*", "Crédito", "^BONIFICACION COMISION", "GASTOS BANCARIOS", "Bonificación de comisiones"],
+  ["*", "Crédito", "^IVA", "GASTOS BANCARIOS", "Devolución de IVA"],
+];
 
 /** Santander Río: "Cod. Operativo" del Excel de Últimos Movimientos. */
 const REGLAS_SANTANDER = [
@@ -1016,7 +1044,9 @@ function extraerCuit_(texto) {
 function extraerNombre_(concepto) {
   const pats = [/\s-\s+De\s+(.+?)\s*\//i, /^(?:Pago a proveedores recibido|Transferencia pagos a terceros|Servicios de pago) - (.+?)\s{2,}/i,
     /ING TRANSF:(.+?)-\d{11}/, /^TRANSF (.+?) \d{11}/, /TEF DATANET \w+ (.+?)\s+\d{11}/,
-    /^CCERR (.+?) \d{11}/, /^TRMIN (.+?) \d{11}/, /^TRPRO (.+?) \d{11}/, /^\d{11} (.+?) DL1/, /Transf\. \w+ (.+?)\s+\d{11}/];
+    /^CCERR (.+?) \d{11}/, /^TRMIN (.+?) \d{11}/, /^TRPRO (.+?) \d{11}/, /^\d{11} (.+?) DL1/, /Transf\. \w+ (.+?)\s+\d{11}/,
+    // Patagonia (al final, para no pisar a Macro): "... VAR 20323224545  LEANDRO JESUS GRASSI", "... 30500007539 MAPFRE ARG SEGUR"
+    /^(?:CREDITO POR|TRANSFERENCIA|TRANSF\.).*?\d{11}\s+([A-ZÑ][A-ZÑ .,]+?)\s*$/i];
   for (const p of pats) {
     const m = concepto.match(p);
     if (m) return m[1].replace(/\s+/g, ' ').replace(/^[ /,]+|[ /,]+$/g, '');
@@ -1105,10 +1135,13 @@ function leerExtracto_(filas, reglas, empresas) {
     if (c.descripcion !== undefined) {
       // Galicia (Office Banking): Descripción + leyendas (nombre, CUIT, motivo, banco); el código de "Concepto" es el causal
       const ley = ['ley1', 'ley2', 'ley3', 'ley4'].map(k => (c[k] !== undefined ? String(r[c[k]] == null ? '' : r[c[k]]).trim() : ''));
-      concepto = [String(r[c.descripcion] || '').trim()].concat(ley.filter(x => x && x !== '0')).join(' ').replace(/\s+/g, ' ');
+      // Patagonia: sin leyendas ni código; la Referencia trae el CUIT y el nombre ("30500007539 MAPFRE ARG SEGUR")
+      const sinLey = c.concepto === undefined && ['ley1', 'ley2', 'ley3', 'ley4'].every(k => c[k] === undefined);
+      const extra = sinLey && c.ref !== undefined ? [String(r[c.ref] == null ? '' : r[c.ref]).trim()] : [];
+      concepto = [String(r[c.descripcion] || '').trim()].concat(ley.filter(x => x && x !== '0'), extra).join(' ').replace(/\s+/g, ' ').trim();
       const cod = c.concepto !== undefined ? String(r[c.concepto] || '').match(/^\s*(\d{4,})/) : null;
       causal = cod ? cod[1] : (c.causal !== undefined ? String(r[c.causal]).trim() : '');
-      nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : '';
+      nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : (extra.length ? extraerNombre_(concepto) : '');
     } else {
       concepto = String(r[c.concepto] || '').trim();
       causal = c.causal !== undefined ? String(r[c.causal]).trim() : '';
@@ -1202,7 +1235,8 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   if (!sh) throw new Error('La base FBS no tiene la hoja "' + hoja + '".');
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
   const col = re => { const i = cab.findIndex(h => re.test(h)); return i < 0 ? null : letra_(i + 1); };
-  const L = { id: col(/^detmovid$/), plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/) };
+  const L = { id: col(/^detmovid$/), plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/),
+    asiento: col(/^detmovnro$/) };
   if (!L.plan || !L.fecha || !L.debe || !L.haber) throw new Error('La base FBS no tiene las columnas DETPLAN, DETFECHA, DETDEBE y DETHABER.');
   const cuentas = [ctas.E].concat(ctas.O ? [ctas.O] : []);
   const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
@@ -1287,7 +1321,36 @@ function movimientosTardios_(ctx, desde, dif, foto) {
       const cond = d > 0 ? L.debe + ' = ' + d : L.haber + ' = ' + (-d);
       const r = consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + L.plan + ' = ' + Number(cuenta) + ' and ' + L.fecha + ' < ' +
         fechaGviz_(desde) + ' and ' + cond + ctx.vigente + (L.id ? ' order by ' + L.id + ' desc' : '') + ' limit 1');
-      sumar(r);
+      if (r.length > 1) { sumar(r); return; }
+      const mesAnt = new Date(desde.getFullYear(), desde.getMonth() - 1, 1);
+      const delMes = ' where ' + L.plan + ' = ' + Number(cuenta) + ' and ' + L.fecha + ' >= ' + fechaGviz_(mesAnt) + ' and ' + L.fecha +
+        ' < ' + fechaGviz_(desde) + ctx.vigente;
+      // un asiento entero del mes cerrado (ej. el asiento de sueldos del 30/06 con una línea por empleado, cargado en O
+      // después del cierre), o dos asientos, que suman la diferencia
+      if (L.asiento) {
+        const g = consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.asiento + ', sum(' + L.debe + ') - sum(' + L.haber + ')' + delMes +
+          ' group by ' + L.asiento);
+        const asientos = g.slice(1).map(x => ({ nro: x[0], importe: redondear_(Number(x[1] || 0)) })).filter(x => x.nro !== '' && x.nro !== null);
+        let combo = null;
+        for (let n = 1; n <= 2 && !combo; n++) combo = primeraCombinacion_(asientos.slice().reverse().slice(0, 300), n, d);
+        if (combo) {
+          const val = x => (typeof x === 'number' || /^\d+$/.test(String(x)) ? Number(x) : "'" + x + "'");
+          sumar(consultaGviz_(ctx.id, ctx.hoja, 'select *' + delMes + ' and (' + combo.map(x => L.asiento + ' = ' + val(x.nro)).join(' or ') + ')'));
+          return;
+        }
+      }
+      // varios movimientos sueltos: la combinación de hasta 3 movimientos del mes cerrado, del mismo sentido
+      const cands = consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + L.plan + ' = ' + Number(cuenta) + ' and ' + L.fecha + ' >= ' +
+        fechaGviz_(mesAnt) + ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + ' and ' + (d > 0 ? L.debe : L.haber) + ' > 0' + ctx.vigente +
+        (L.id ? ' order by ' + L.id + ' desc' : '') + ' limit 150');
+      if (cands.length < 3) return;
+      const h = cands[0].map(normalizar_), ide = h.indexOf('detdebe'), iha = h.indexOf('dethaber');
+      const items = cands.slice(1).map(row => ({ row, importe: redondear_(Number(row[ide] || 0) - Number(row[iha] || 0)) }))
+        .filter(x => Math.abs(x.importe) <= Math.abs(d) + 0.01);
+      for (let n = 2; n <= 3; n++) {
+        const combo = primeraCombinacion_(items.slice(0, 60), n, d);
+        if (combo) { sumar([cands[0]].concat(combo.map(x => x.row))); return; }
+      }
     });
   }
   if (filas) {
@@ -1917,12 +1980,13 @@ function combinacionesFechaEscrita_(banco, fbs) {
   });
   // una línea de FBS con fecha escrita = varios movimientos del banco de ese día
   fbs.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(f => {
-    if (f.match !== null || f.origen !== 'Mes' || !especifico_(f.importe)) return;
-    const ds = fechasFbs(f);
-    if (!ds.length) return;
+    if (f.match !== null || f.origen !== 'Mes') return;
+    const ds = fechasFbs(f), esp = especifico_(f.importe);
+    if (!ds.length || (!esp && !f.fechaRef)) return;
     const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && (b.importe > 0) === (f.importe > 0) &&
       Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0).slice(0, 25);
-    for (let n = 2; n <= 4 && cands.length >= n; n++) {
+    // importe redondo (ej. RM por 2.420.000 = comisión 2.000.000 + IVA 420.000 del día): solo de a dos
+    for (let n = 2; n <= (esp ? 4 : 2) && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, f.importe);
       if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); break; }
     }
@@ -2163,7 +2227,12 @@ function difCentavos_(banco, fbs, ventana) {
 }
 
 function gastosAsiento_(banco, fbs) {
-  const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)));
+  // el IVA de una comisión que no va al asiento de gastos (Patagonia "COMISION POR CONVENIOS" 2.000.000 + IVA 420.000 del
+  // mismo día) se cruza junto con la comisión, no con el asiento
+  const ivaDeOtra = x => /^IVA/i.test(x.texto) && banco.some(c => c !== x && c.cat !== 'GASTOS BANCARIOS' && /^COMISION/i.test(c.texto) &&
+    c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
+  const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)) &&
+    !ivaDeOtra(x));
   // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
   const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /GASTOS BANCARIOS \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
     !/LIQ/.test(x.texto.toUpperCase()));
@@ -2254,7 +2323,9 @@ function mismaCantidad_(banco, fbs, d) {
     if (bs.length < 2 || bs.length !== fs.length) return;
     // importe redondo: solo registros que no son de personas (no recibos) y con el mismo detalle ("BANCO GALICIA Nº ...")
     const detalle = f => (f.texto.split(' / ').slice(1).join(' / ') || f.texto).replace(/Nº.*$/, '').replace(/\s+/g, ' ').trim().toUpperCase();
-    if (!especifico_(b.importe) && fs.some(f => /^RC-/.test(f.texto) || detalle(f) !== detalle(fs[0]))) return;
+    // (o pagos RM de banco a banco: "RM-388981 / BANCO PATAGONIA Nº ..." y "RM-388967 / BANCO GALICIA Nº ...")
+    if (!especifico_(b.importe) && fs.some(f => /^RC-/.test(f.texto) ||
+      (detalle(f) !== detalle(fs[0]) && !(/^RM-/.test(f.texto) && /^BANCO /i.test(detalle(f)))))) return;
     const fechas = bs.map(x => x.fecha.getTime()).concat(fs.map(f => f.fecha.getTime()));
     if ((Math.max.apply(null, fechas) - Math.min.apply(null, fechas)) / 864e5 > 7) return;
     const orden = (x, y) => x.fecha - y.fecha;
@@ -2431,7 +2502,8 @@ function limpiezaO_(banco, oPend) {
     [claveO_(f.texto) + '|' + f.fecha.getTime(), 'as:' + f.asiento].forEach(k => grupos.set(k + '|' + (f.importe > 0), (grupos.get(k + '|' + (f.importe > 0)) || []).concat([f])));
   });
   const gb = new Map();
-  b.forEach(y => { if (y.origen === 'Mes') { const k = y.fecha.getTime() + '|' + y.causal + '|' + (y.importe > 0); gb.set(k, (gb.get(k) || []).concat([y])); } });
+  const cz = y => y.causal || y.cat || y.texto.slice(0, 20);   // Patagonia no trae código: se agrupa por categoría
+  b.forEach(y => { if (y.origen === 'Mes') { const k = y.fecha.getTime() + '|' + cz(y) + '|' + (y.importe > 0); gb.set(k, (gb.get(k) || []).concat([y])); } });
   grupos.forEach(g => {
     if (g.length < 2 || g.some(f => f.match !== null)) return;
     const total = g.reduce((x, f) => x + f.importe, 0);
@@ -2442,12 +2514,17 @@ function limpiezaO_(banco, oPend) {
         Math.abs(bs.reduce((a, y) => a + y.importe, 0) - total) <= TOLERANCIA) { unir_(bs, g, 'Limpieza O sin confirmar ↔ banco: lote del día'); return; }
     }
     // ej. sueldos: un asiento de O con todas las transferencias contra los débitos del mismo concepto en los días siguientes
-    const causales = new Set(b.filter(y => y.match === null && y.origen === 'Mes' && (y.importe > 0) === (total > 0)).map(y => y.causal));
-    for (const cz of causales) {
-      const bs = b.filter(y => y.match === null && y.origen === 'Mes' && y.causal === cz && (y.importe > 0) === (total > 0) &&
+    const causales = new Set(b.filter(y => y.match === null && y.origen === 'Mes' && (y.importe > 0) === (total > 0)).map(cz));
+    for (const c of causales) {
+      const bs = b.filter(y => y.match === null && y.origen === 'Mes' && cz(y) === c && (y.importe > 0) === (total > 0) &&
         y.fecha >= g[0].fecha && dias_(y.fecha, g[0].fecha) <= 10);
       if (bs.length > 1 && Math.abs(bs.reduce((a, y) => a + y.importe, 0) - total) <= TOLERANCIA) {
         unir_(bs, g, 'Limpieza O sin confirmar ↔ banco: lote (mismo concepto en varios días)'); return;
+      }
+      // no todos: los débitos del concepto que suman el asiento (ej. 4 débitos de sueldos del 06 al 13/07 y otro del 16/07)
+      for (let n = 2; n <= Math.min(6, bs.length - 1); n++) {
+        const combo = primeraCombinacion_(bs.slice(0, 15), n, total);
+        if (combo) { unir_(combo, g, 'Limpieza O sin confirmar ↔ banco: lote (mismo concepto en varios días)'); return; }
       }
     }
   });
@@ -2469,7 +2546,10 @@ function valorSector_(p) {
 
 function gastosBancarios_(movs) {
   const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
-  movs.forEach(m => {
+  // el IVA de una comisión que se registra aparte (Patagonia "COMISION POR CONVENIOS") no va al asiento de gastos
+  const ivaDeOtra = x => /^IVA/i.test(x.concepto) && movs.some(c => c !== x && c.cat !== 'GASTOS BANCARIOS' && /^COMISION/i.test(c.concepto) &&
+    c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
+  movs.filter(m => !ivaDeOtra(m)).forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
     if (['1684', '1685', '907176', '907376', '917376', '4637', '4633'].includes(m.causal)) g.imp += d;
     else if (m.causal === '1384') g.sircreb += d;   // Santander
@@ -2483,12 +2563,23 @@ function gastosBancarios_(movs) {
     else if (m.causal === '1972') g.tuc += d;
     else if (m.causal === '1479') g.sellos += d;
     else if (m.cat === 'GASTOS BANCARIOS') {
-      if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
+      // Patagonia: sin código, por la descripción
+      if (t.startsWith('IMP.DB/CR')) g.imp += d;
+      else if (t.includes('SIRCREB')) g.sircreb += d;
+      else if (t.includes('IIBB TUCUMAN')) g.tuc += d;
+      else if (t.includes('SELLOS')) g.sellos += d;
+      else if (t.startsWith('INTERES')) g.int += d;
+      else if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
       else if (t.includes('IVA')) { if (m.causal === '5') g.iva105 += d; else g.iva += d; }
       else if (m.causal === '5') g.int += d;
       else g.com += d;
     }
   });
+  // IVA sin distinguir en la descripción (Patagonia "IVA ALICUOTA GENERAL"): la línea igual al 10,5% de los intereses es IVA 10,5%
+  if (g.int && !g.iva105) {
+    const m = movs.find(x => x.cat === 'GASTOS BANCARIOS' && /^IVA/i.test(x.concepto) && Math.abs(-x.importe - redondear_(g.int * 0.105)) <= 0.02);
+    if (m) { g.iva105 = -m.importe; g.iva += m.importe; }
+  }
   const filas = [['Comisiones', g.com], ['IVA 21%', g.iva], ['Intereses', g.int], ['IVA 10,5%', g.iva105],
     ['Percepciones IVA', g.perc], ['Percepciones IIBB (SIRCREB)', g.sircreb], ['Retenciones IIBB rentas financieras', g.ret],
     ['Percepciones IIBB Tucumán', g.tuc], ['Impuesto de sellos', g.sellos], ['Imp. créditos y débitos (total)', g.imp],
@@ -2837,4 +2928,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
