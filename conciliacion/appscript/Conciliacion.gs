@@ -2526,12 +2526,30 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
     if (!b && especifico_(p.importe)) { b = bancoMes.find(x => x.match === null && mismoSigno(x, p) && distancia_(x, p) === 0); soloImporte = !!b; }
     if (b) marcas.push('Banco' + (soloImporte ? ' (misma fecha e importe específico)' : '') + ': ' + desc(b) +
       (b.match !== null ? ' [conciliado con E]' : ' [sin registrar]'));
+    // mismo cliente (CUIT/DNI o nombre) en el extracto por otro importe (recibo de $2.000.000 y transferencia de $3.000.000)
+    if (!b) {
+      const otro = bancoMes.filter(x => (x.importe > 0) === (p.importe > 0) && !mismoSigno(x, p) && distancia_(x, p) <= 31 && parecido(x, p))
+        .sort((x, y) => (x.match === null ? 0 : 1) - (y.match === null ? 0 : 1) || distancia_(x, p) - distancia_(y, p))[0];
+      if (otro) marcas.push('Banco, mismo cliente con otro importe: ' + desc(otro) + ' (dif. ' + formato_(redondear_(otro.importe - p.importe)) + ')' +
+        (otro.match !== null ? ' [conciliado con E]' : ' [sin registrar]'));
+    }
     p.cruces = marcas.join(' | ');
+  });
+  // lo mismo para los registros de E que quedaron sin cruzar
+  eItems.forEach(p => {
+    if (p.match !== null || p.origen !== 'Mes') return;
+    const otro = bancoMes.filter(x => x.match === null && (x.importe > 0) === (p.importe > 0) && !mismoSigno(x, p) &&
+      distancia_(x, p) <= 31 && parecido(x, p)).sort((x, y) => distancia_(x, p) - distancia_(y, p))[0];
+    if (otro) p.cruces = (p.cruces ? p.cruces + ' | ' : '') + 'Banco, mismo cliente con otro importe: ' + desc(otro) +
+      ' (dif. ' + formato_(redondear_(otro.importe - p.importe)) + ') [sin registrar]';
   });
   bancoMes.forEach(b => {
     if (b.match !== null) return;
     const o = oPend.find(x => mismoSigno(x, b) && distancia_(b, x) <= 15 && parecido(b, x));
-    if (o) b.cruces = 'Posible recibo de O sin confirmar: ' + desc(o);
+    if (o) { b.cruces = 'Posible recibo de O sin confirmar: ' + desc(o); return; }
+    const o2 = oPend.find(x => (x.importe > 0) === (b.importe > 0) && distancia_(b, x) <= 31 && parecido(b, x));
+    if (o2) b.cruces = 'Recibo de O sin confirmar del mismo cliente con otro importe: ' + desc(o2) + ' (dif. ' +
+      formato_(redondear_(b.importe - o2.importe)) + ')';
   });
   // sugerencias que NO se cruzan (regla: importe redondo o sin dato que lo identifique): misma fecha e importe
   bancoMes.forEach(b => {
