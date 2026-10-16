@@ -132,6 +132,7 @@ function reglasDelBanco_(nombreBanco) {
   if (/santander|r[ií]o\b/i.test(n)) return REGLAS_SANTANDER;
   if (/patagonia/i.test(n)) return REGLAS_PATAGONIA;
   if (/c[oó]rdoba|bancor/i.test(n)) return REGLAS_CORDOBA;
+  if (/naci[oó]n/i.test(n)) return REGLAS_NACION;
   return REGLAS_INICIALES;
 }
 
@@ -148,7 +149,7 @@ function asegurarReglasDelBanco_(ss, banco) {
   const hay = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().filter(r => String(r[0]).trim()) : [];
   const claves = new Set(hay.map(clave));
   if (delBanco.some(r => claves.has(clave(r)))) return;
-  const deFabrica = new Set([].concat(REGLAS_INICIALES, REGLAS_GALICIA, REGLAS_SANTANDER, REGLAS_PATAGONIA, REGLAS_CORDOBA).map(clave));
+  const deFabrica = new Set([].concat(REGLAS_INICIALES, REGLAS_GALICIA, REGLAS_SANTANDER, REGLAS_PATAGONIA, REGLAS_CORDOBA, REGLAS_NACION).map(clave));
   if (hay.every(r => deFabrica.has(clave(r))) && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
   const desde = hay.every(r => deFabrica.has(clave(r))) ? 2 : sh.getLastRow() + 1;
   sh.getRange(desde, 1, delBanco.length, 5).setValues(delBanco);
@@ -175,6 +176,29 @@ const REGLAS_CORDOBA = [
   ["*", "Débito", "^GASTOS DE MANTENIMIENTO", "GASTOS BANCARIOS", "Gastos de mantenimiento"],
   ["*", "Débito", "^IVA", "GASTOS BANCARIOS", "IVA (comisiones y percepción)"],
   ["*", "Débito", "^COMISI", "GASTOS BANCARIOS", "Comisiones"],
+];
+
+/** Nación: el Excel de "Últimos movimientos" (Fecha, Comprobante, Concepto, Monto, Saldo) no trae código; reglas por concepto. */
+const REGLAS_NACION = [
+  ["*", "Crédito", "^TRANSF\\.INT\\.DIST", "COBRANZA CLIENTES", "Transferencia recibida (otro titular)"],
+  ["*", "Crédito", "^CR DEBIN", "COBRANZA CLIENTES", "Crédito DEBIN"],
+  ["*", "Crédito", "^CR CREDIN", "COBRANZA CLIENTES", "Crédito CREDIN (transferencia recibida)"],
+  ["*", "Crédito", "^TRANSF\\.MINORISTA RECIBIDA", "COBRANZA CLIENTES", "Transferencia minorista recibida"],
+  ["*", "Crédito", "^DEPOSITO DE TERCEROS", "COBRANZA CLIENTES", "Depósito de terceros"],
+  ["*", "Crédito", "^C BE TR O/BCO-DIS TIT", "COBRANZA CLIENTES", "Transferencia de otro banco (otro titular)"],
+  ["*", "Crédito", "^CRED BE O BCO-MIS TIT", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia de otro banco (mismo titular)"],
+  ["*", "Crédito", "^CREDITO \\+AUTOS", "COBRANZA EMPRESAS / ASEGURADORAS", "Crédito +Autos (prendario)"],
+  ["*", "Crédito", "^DEP\\.? ?EFVO", "DEPOSITOS EN EFECTIVO", "Depósito en efectivo"],
+  ["*", "Débito", "^DEB\\.TRAN\\.INTERB ?MISMO TIT", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia a cuenta propia de otro banco"],
+  ["*", "Débito", "^DB CREDIN", "PAGO PROVEEDORES", "Transferencia enviada (CREDIN)"],
+  ["*", "Débito", "^PAGO FCA PLAN", "PAGO PROVEEDORES", "Pago fábrica plan de ahorro"],
+  ["*", "Débito", "^DEB\\.PAGO SERV", "DEBITOS AUTOMATICOS", "Pago de servicios"],
+  ["*", "Débito", "^GRAVAMEN LEY 25413", "GASTOS BANCARIOS", "Impuesto Ley 25.413 (débitos y créditos)"],
+  ["*", "Débito", "^GRAVAMEN IBTC", "GASTOS BANCARIOS", "Impuesto Ley 25.413 (IBTC s/créditos)"],
+  ["*", "Débito", "^REG\\.REC\\.SIRCREB", "GASTOS BANCARIOS", "Recaudación IIBB SIRCREB"],
+  ["*", "Débito", "^RETEN\\. I\\.V\\.A", "GASTOS BANCARIOS", "Percepción IVA RG 2408"],
+  ["*", "Débito", "^I\\.V\\.A\\. BASE", "GASTOS BANCARIOS", "IVA (comisiones)"],
+  ["*", "Débito", "^COM", "GASTOS BANCARIOS", "Comisiones"],
 ];
 
 /** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
@@ -1199,6 +1223,14 @@ function leerExtracto_(filas, reglas, empresas) {
   });
   if (!movs.length) throw new Error('Extracto: no hay movimientos con fecha debajo de los encabezados.');
   if (movs[0].fecha > movs[movs.length - 1].fecha) movs.reverse();   // el banco lo entrega del más nuevo al más viejo
+  // Nación: la columna Saldo trae el saldo ANTERIOR a cada movimiento (corrida una fila); se pasa a saldo posterior
+  let despues = 0, antes = 0;
+  for (let i = 1; i < movs.length; i++) {
+    if (movs[i].saldo === null || movs[i - 1].saldo === null) continue;
+    if (Math.abs(movs[i].saldo - (movs[i - 1].saldo + movs[i].importe)) < 0.005) despues++;
+    else if (Math.abs(movs[i].saldo - (movs[i - 1].saldo + movs[i - 1].importe)) < 0.005) antes++;
+  }
+  if (antes > despues) movs.forEach(m => { if (m.saldo !== null) m.saldo = redondear_(m.saldo + m.importe); });
   // si el extracto trae más de un mes (ej. Córdoba bajado con junio y julio), se concilia el último mes
   const ult = movs[movs.length - 1].fecha, mes = m => m.fecha.getFullYear() * 12 + m.fecha.getMonth();
   if (mes(movs[0]) !== mes(movs[movs.length - 1])) {
@@ -2536,6 +2568,28 @@ function netearPendientesFbs_(items) {
   });
 }
 
+/**
+ * Nación: el Nº del valor de 4 dígitos suele ser la fecha de la transferencia ("Nº 2905-BANCO NACION(1103062)-06/07/2026" =
+ * 29/05). Contra pendientes anteriores del banco: misma fecha exacta e importe, único en los dos lados. Va antes que los
+ * lotes del día para que dos recibos de junio no se sumen contra otra transferencia del mes.
+ */
+function pendientePorNroCorto_(banco, fbs) {
+  const nroCorto = f => {
+    const m = String(f.aux || '').match(/^N[º°o]?\s*(\d{4})\s*-/i);
+    return m ? fechaCorta_(m[1], f.fechaRef2 || f.fecha) : null;
+  };
+  const ant = banco.filter(p => p.match === null && p.origen === 'Arrastre');
+  const libres = fbs.filter(f => f.match === null && f.origen === 'Mes' && f.cuenta === 'E').map(f => ({ f, d: nroCorto(f) })).filter(x => x.d);
+  libres.forEach(({ f, d }) => {
+    if (f.match !== null) return;
+    const igual = x => Math.abs(x.importe - f.importe) <= TOLERANCIA;
+    const bs = ant.filter(b => b.match === null && igual(b) && dias_(b.fecha, d) === 0);
+    if (bs.length !== 1) return;
+    if (libres.filter(x => x.f.match === null && igual(x.f) && dias_(x.d, d) === 0).length !== 1) return;
+    unir_(bs, [f], 'Pendiente anterior: fecha en el Nº del valor + importe');
+  });
+}
+
 function limpiezaO_(banco, oPend) {
   const b = banco.filter(x => x.match === null), o = oPend.filter(x => x.match === null && !x.desfasado);
   pasada_(b, o, MISMO_ID_, 'Limpieza O sin confirmar ↔ banco: CUIT/DNI', VENTANA_ID, false);
@@ -2544,6 +2598,13 @@ function limpiezaO_(banco, oPend) {
   pasada_(b, o, (x, f) => !!f.fechaRef && dias_(f.fechaRef, x.fecha) === 0, 'Limpieza O sin confirmar ↔ banco: fecha del valor + importe', 60, true);
   pasada_(b, o, x => especifico_(x.importe), 'Limpieza O sin confirmar ↔ banco: fecha + importe específico', 0, true);
   importeGrandeUnico_(b, o, 'Limpieza O sin confirmar ↔ banco: ');
+  // pago a otro banco (RM) sin confirmar en E: mismo importe, único en +-3 días en los dos lados (Nación "PAGO FCA PLAN")
+  b.filter(x => x.match === null && x.importe < 0).forEach(x => {
+    const igual = y => y.match === null && Math.abs(y.importe - x.importe) <= TOLERANCIA;
+    const os = o.filter(f => igual(f) && /^RM-/.test(f.texto) && distancia_(x, f) <= 3);
+    if (os.length !== 1 || b.filter(y => igual(y) && distancia_(y, os[0]) <= 3).length !== 1) return;
+    unir_([x], os, 'Limpieza O sin confirmar ↔ banco: pago (RM) con importe único en +-3 días (revisar)');
+  });
   // varias líneas de O (mismo comprobante o mismo asiento) contra uno o varios débitos del banco del mismo día y causal
   const grupos = new Map();
   o.forEach(f => {
@@ -2613,13 +2674,15 @@ function gastosBancarios_(movs) {
     else if (m.causal === '1479') g.sellos += d;
     else if (m.cat === 'GASTOS BANCARIOS') {
       // Patagonia: sin código, por la descripción
-      if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES')) g.imp += d;
+      if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES') || t.startsWith('GRAVAMEN LEY 25413') ||
+        t.startsWith('GRAVAMEN IBTC')) g.imp += d;   // Nación: "GRAVAMEN LEY 25413 S/DEB", "GRAVAMEN IBTC S/CRED"
+      else if (t.startsWith('RETEN. I.V.A')) g.perc += d;   // Nación: percepción IVA RG 2408
       else if (t.includes('SIRCREB')) g.sircreb += d;
       else if (t.includes('IIBB TUCUMAN')) g.tuc += d;
       else if (t.includes('SELLOS')) g.sellos += d;
       else if (t.startsWith('INTERES')) g.int += d;
       else if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
-      else if (t.includes('IVA')) { if (m.causal === '5') g.iva105 += d; else g.iva += d; }
+      else if (t.includes('IVA') || t.includes('I.V.A.')) { if (m.causal === '5') g.iva105 += d; else g.iva += d; }
       else if (m.causal === '5') g.int += d;
       else g.com += d;
     }
@@ -2918,6 +2981,7 @@ function conciliarTodo_(entrada, redondoUnico) {
       (entrada.base ? ' en "' + HOJA.parametros + '"' : '') + ' (tienen que ser los saldos al cierre del mes anterior) y los pendientes ' +
       'anteriores. Esa misma diferencia se arrastra al control del mes.');
   }
+  pendientePorNroCorto_(banco, fbs);
   const difGastos = conciliar_(banco, fbs);
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
@@ -2979,4 +3043,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
