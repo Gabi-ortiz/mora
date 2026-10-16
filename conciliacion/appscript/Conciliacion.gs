@@ -2643,6 +2643,23 @@ function cierrePendientes_(banco, fbs, oPend) {
     const combo = sumaExacta_(dia, -r.importe, 4);
     if (combo) compensar_([r].concat(combo), 'Neteo S3 ↔ S4: pago a banco (RM) igual a la suma de registros del día (revisar)');
   });
+  // pendientes de meses anteriores con importe redondo repetido: si en un mismo mes hay la misma cantidad de partidas del
+  // banco y de FBS por ese importe (3 transferencias de $5.800.000 de julio y 3 recibos de $5.800.000 de julio), se netean
+  // todas juntas. Solo dentro del mismo mes: un pendiente de 2025 no se cruza con uno de 2026.
+  const mes = x => x.fecha.getFullYear() * 12 + x.fecha.getMonth();
+  const grupos = new Map();
+  const agregar = (x, lado) => {
+    const k = mes(x) + '|' + x.importe.toFixed(2);
+    if (!grupos.has(k)) grupos.set(k, { b: [], f: [] });
+    grupos.get(k)[lado].push(x);
+  };
+  B().filter(x => x.origen === 'Arrastre').forEach(x => agregar(x, 'b'));
+  F().filter(x => x.origen === 'Arrastre').forEach(x => agregar(x, 'f'));
+  grupos.forEach(g => {
+    if (g.b.length < 2 || g.b.length !== g.f.length) return;   // una sola partida por lado ya la vieron los criterios anteriores
+    unir_(g.b, g.f, 'Pendientes anteriores: misma cantidad de partidas del mismo importe en el mismo mes (' + g.b.length + ' y ' +
+      g.f.length + ') (revisar)');
+  });
   // lo que quedó con un solo candidato después de netear (ej. dos recibos de $14.000.000 iguales: uno se anuló con su RM)
   pasada_(B(), F(), (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
 }
