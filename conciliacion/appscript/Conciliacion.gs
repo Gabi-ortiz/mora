@@ -1483,7 +1483,15 @@ function netear_(lista) {
   });
   let resto = libres.filter(x => x.match === null);
   if (resto.length > 1 && Math.abs(resto.reduce((x, p) => x + p.importe, 0)) <= TOLERANCIA) { resto.forEach(usar); resto = []; }
-  return resto;
+  // pendiente anterior cargado sin centavos (ej. 456.048.014 en la lista y 456.048.014,26 en FBS): mismo comprobante,
+  // hasta $1 de diferencia
+  resto.filter(a => a.origen === 'Arrastre').forEach(a => {
+    if (a.match !== null) return;
+    const b = resto.find(x => x.match === null && x.origen === 'Mes' && (x.importe > 0) !== (a.importe > 0) &&
+      Math.abs(x.importe + a.importe) <= 1 && x.texto.replace(/\s+/g, ' ').trim() === a.texto.replace(/\s+/g, ' ').trim());
+    if (b) [a, b].forEach(x => { x.match = []; x.metodo = 'Confirmado en O (pendiente anterior con importe redondeado)'; });
+  });
+  return resto.filter(x => x.match === null);
 }
 
 /**
