@@ -401,3 +401,8 @@ todo en una pantalla: RESUMEN B 110 px, C:L y N 94 px; INFORME B 110 px, C:K
 - **Incentivos esperados** (M, cuadro por familia) = Incentivos / bonus -
   Descuentos de la proyección. La PROYECCION del cuadro por modelo pasó de N
   a M (justo debajo) y la celda oculta del mes pasó a **Z1**.
+- (16/10/2026) La PROYECCION del cuadro por modelo quedó igual a la de
+  familia: M:P = Cantidad, Descuentos, Incentivos / bonus, Incentivos
+  esperados (calculados desde BASE por Modelo PEDIDO). La de familia (J:M)
+  ahora suma la de sus modelos. "Bonificaciones" se llama **Descuentos** en
+  los dos cuadros.
