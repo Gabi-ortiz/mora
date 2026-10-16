@@ -66,13 +66,69 @@ const VENTANA_DIAS = 10;
 const VENTANA_ID = 31;
 const TOLERANCIA = 0.02;
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
-const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972'];   // van al asiento mensual de gastos
+const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972',   // Macro: van al asiento mensual de gastos
+  '907176', '907376', '917376', '907173', '905130'];                            // Galicia: imp. déb./créd., IIBB, sellos
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
 
 const EMPRESAS_INICIALES = [['30669400167', 'TURIN SA'], ['30681026386', 'CHEXA SA']];
 
 // Código causal | Sentido (Débito/Crédito/Ambos) | Patrón en concepto (regex, vacío = todos) | Categoría | Descripción
+/** Galicia: "Código causal" = número de la columna "Concepto" del Excel de Office Banking (ej. "907173 - ING. BRUTOS S/ CRED"). */
+const REGLAS_GALICIA = [
+  ["917151", "Crédito", "", "COBRANZA CLIENTES", "Transferencia de terceros"],
+  ["917123", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Servicio pago a proveedores (cobro de empresas)"],
+  ["917187", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago a proveedores factura (cobro de empresas)"],
+  ["917193", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Transferencias cash proveedores (cobro de empresas)"],
+  ["917115", "Crédito", "", "COBRANZA TARJETAS", "Acreditamiento Prisma comercios"],
+  ["917102", "Crédito", "", "DEPOSITOS EN EFECTIVO", "Depósito en efectivo"],
+  ["917302", "Crédito", "", "DEPOSITOS EN EFECTIVO", "Depósito efectivo en autoservicio"],
+  ["917195", "Crédito", "", "CHEQUES", "Gestión de cheque / echeq depositado"],
+  ["917169", "Crédito", "", "CHEQUES", "Gestión de cheque"],
+  ["917118", "Crédito", "", "CHEQUES", "Acreditamiento canje Galicia"],
+  ["907281", "Débito", "", "CHEQUES", "Rechazo de cheque depositado"],
+  ["907282", "Débito", "", "CHEQUES", "Compra / cesión de cheques"],
+  ["907364", "Débito", "", "CHEQUES", "Echeq propio debitado (Galicia)"],
+  ["907365", "Débito", "", "CHEQUES", "Echeq propio debitado (48 hs)"],
+  ["917133", "Crédito", "", "FINANCIACION / PRESTAMOS", "Crédito por descuento de documentos"],
+  ["907751", "Débito", "", "GASTOS BANCARIOS", "Interés nominal (descuento de documentos)"],
+  ["917138", "Crédito", "", "INVERSIONES (FCI)", "Rescate FIMA"],
+  ["907237", "Débito", "", "INVERSIONES (FCI)", "Suscripción FIMA"],
+  ["917152", "Crédito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia de cuenta propia"],
+  ["917154", "Crédito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transfer cash misma titularidad"],
+  ["917312", "Crédito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia cuentas propias"],
+  ["907268", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia inmediata a cuenta propia"],
+  ["907297", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia cuentas propias"],
+  ["907316", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia cuentas propias"],
+  ["907178", "Débito", "", "PAGO PROVEEDORES", "Transferencia a terceros"],
+  ["907179", "Débito", "", "PAGO PROVEEDORES", "Transferencia a terceros"],
+  ["907232", "Débito", "", "PAGO PROVEEDORES", "Transferencia inmediata a proveedores"],
+  ["907269", "Débito", "", "PAGO PROVEEDORES", "Transferencia inmediata a proveedores"],
+  ["907104", "Débito", "", "PAGO PROVEEDORES", "Pago de servicios"],
+  ["907154", "Débito", "", "PAGO PROVEEDORES", "Pago tarjeta Visa empresa"],
+  ["907213", "Débito", "", "DEBITOS AUTOMATICOS", "Débito automático de servicios"],
+  ["907139", "Débito", "", "SUELDOS", "Acreditamiento de haberes"],
+  ["907255", "Débito", "", "IMPUESTOS Y RETENCIONES", "Transferencia AFIP (VEP)"],
+  ["907176", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre débitos"],
+  ["907376", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre créditos"],
+  ["917376", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Devolución impuesto Ley 25.413"],
+  ["907173", "Débito", "", "IMPUESTOS Y RETENCIONES", "Ingresos brutos s/ créditos (SIRCREB / Tucumán)"],
+  ["905130", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos"],
+  ["907171", "Débito", "", "GASTOS BANCARIOS", "IVA 21% sobre comisiones"],
+  ["907307", "Débito", "", "GASTOS BANCARIOS", "IVA 10,5% sobre intereses"],
+  ["907118", "Débito", "", "GASTOS BANCARIOS", "Intereses sobre saldos deudores"],
+  ["907138", "Débito", "", "GASTOS BANCARIOS", "Comisión transferencia entre bancos"],
+  ["907188", "Débito", "", "GASTOS BANCARIOS", "Comisión depósito de cheque"],
+  ["907189", "Débito", "", "GASTOS BANCARIOS", "Comisión rechazo de cheques"],
+  ["907291", "Débito", "", "GASTOS BANCARIOS", "Comisión depósito de cheque en otra sucursal"],
+  ["907394", "Débito", "", "GASTOS BANCARIOS", "Comisión servicio de cuenta"],
+];
+
+/** Reglas iniciales según el banco de la planilla (fila "Cuenta bancaria" de Parámetros). */
+function reglasDelBanco_(nombreBanco) {
+  return /galicia/i.test(String(nombreBanco || '')) ? REGLAS_GALICIA : REGLAS_INICIALES;
+}
+
 const REGLAS_INICIALES = [
   ["493", "Ambos", "", "COBRANZA CLIENTES", "Transferencia recibida (otros bancos)"],
   ["893", "Ambos", "", "COBRANZA CLIENTES", "Transferencia recibida (otros bancos)"],
@@ -240,7 +296,20 @@ function crearHojasEntrada() {
   if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
   if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [COLS_PEND]);
   limpiarHojasSobrantes_(ss);
-  crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(REGLAS_INICIALES));
+  // el banco define las reglas iniciales: se pregunta la primera vez (cuando todavía no hay Parámetros)
+  if (!ss.getSheetByName(HOJA.parametros)) {
+    const ui = SpreadsheetApp.getUi();
+    const r = ui.prompt('Banco de esta planilla', 'Escribí el nombre de la cuenta (ej. "Banco Macro", "Banco Galicia"):', ui.ButtonSet.OK);
+    crearParametros_(ss);
+    const nombre = String(r.getResponseText() || '').trim();
+    if (nombre) {
+      const par = ss.getSheetByName(HOJA.parametros), v = par.getDataRange().getValues();
+      const i = v.findIndex(x => /^cuenta bancaria$/i.test(String(x[0])));
+      if (i >= 0) par.getRange(i + 1, 2).setValue(nombre);
+    }
+  }
+  const banco = paramDe_(ss.getSheetByName(HOJA.parametros).getDataRange().getValues(), '^cuenta bancaria$');
+  crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(reglasDelBanco_(banco)));
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
   crearParametros_(ss);
   SpreadsheetApp.getUi().alert('Hojas de entrada listas. Cargá el link de la base FBS de la empresa en "' + HOJA.parametros + '", el extracto y los pendientes anteriores ' +
@@ -951,10 +1020,14 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
 function leerExtracto_(filas, reglas, empresas) {
   const h = encabezados_(filas, {
-    fecha: /^fecha$/, ref: /referencia/, causal: /causal/, concepto: /^concepto/, importe: /^importe/,
-    debito: /^debito/, credito: /^credito/, saldo: /^saldo/,
-  }, ['fecha', 'concepto', 'saldo']);
-  if (!h) throw new Error('Extracto: no encuentro los encabezados (Fecha, Concepto, Saldo).');
+    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal/, concepto: /^concepto/, importe: /^importe/,
+    debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
+    ley1: /^leyendas? adicional(es)?\s*1/, ley2: /^leyendas? adicional(es)?\s*2/, ley3: /^leyendas? adicional(es)?\s*3/,
+    ley4: /^leyendas? adicional(es)?\s*4/,
+  }, ['fecha', 'saldo']);
+  if (!h || (h.col.concepto === undefined && h.col.descripcion === undefined)) {
+    throw new Error('Extracto: no encuentro los encabezados (Fecha, Concepto o Descripción, Saldo).');
+  }
   const c = h.col, info = {}, movs = [];
   filas.forEach((r, i) => {
     const t0 = String(r[0] || '');
@@ -969,13 +1042,25 @@ function leerExtracto_(filas, reglas, empresas) {
     } else {
       deb = Math.abs(parseNum_(r[c.debito]) || 0); cred = Math.abs(parseNum_(r[c.credito]) || 0);
     }
-    const concepto = String(r[c.concepto] || '').trim();
-    const causal = c.causal !== undefined ? String(r[c.causal]).trim() : '';
+    let concepto, causal, nombre;
+    if (c.descripcion !== undefined) {
+      // Galicia (Office Banking): Descripción + leyendas (nombre, CUIT, motivo, banco); el código de "Concepto" es el causal
+      const ley = ['ley1', 'ley2', 'ley3', 'ley4'].map(k => (c[k] !== undefined ? String(r[c[k]] == null ? '' : r[c[k]]).trim() : ''));
+      concepto = [String(r[c.descripcion] || '').trim()].concat(ley.filter(x => x && x !== '0')).join(' ').replace(/\s+/g, ' ');
+      const cod = c.concepto !== undefined ? String(r[c.concepto] || '').match(/^\s*(\d{4,})/) : null;
+      causal = cod ? cod[1] : (c.causal !== undefined ? String(r[c.causal]).trim() : '');
+      nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : '';
+    } else {
+      concepto = String(r[c.concepto] || '').trim();
+      causal = c.causal !== undefined ? String(r[c.causal]).trim() : '';
+      nombre = extraerNombre_(concepto);
+    }
     const importe = redondear_(cred - deb);
     const cuit = extraerCuit_(concepto);
     const [cat, desc] = clasificar_(reglas, empresas, causal, concepto, importe, cuit);
-    movs.push({ fecha, ref: c.ref !== undefined ? String(r[c.ref]).trim() : '', causal, concepto, importe,
-      saldo: parseNum_(r[c.saldo]), cat, desc, cuit, nombre: extraerNombre_(concepto) });
+    const ref = c.ref !== undefined ? String(r[c.ref] == null ? '' : r[c.ref]).trim() : '';
+    movs.push({ fecha, ref: ref === '0' ? '' : ref, causal, concepto, importe,
+      saldo: parseNum_(r[c.saldo]), cat, desc, cuit, nombre });
   });
   if (!movs.length) throw new Error('Extracto: no hay movimientos con fecha debajo de los encabezados.');
   if (movs[0].fecha > movs[movs.length - 1].fecha) movs.reverse();   // el banco lo entrega del más nuevo al más viejo
@@ -2073,7 +2158,11 @@ function gastosBancarios_(movs) {
   const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
   movs.forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
-    if (m.causal === '1684' || m.causal === '1685') g.imp += d;
+    if (['1684', '1685', '907176', '907376', '917376'].includes(m.causal)) g.imp += d;
+    else if (m.causal === '907173') { if (t.includes('TUCUMAN')) g.tuc += d; else g.sircreb += d; }
+    else if (m.causal === '905130') g.sellos += d;
+    else if (m.causal === '907307') g.iva105 += d;
+    else if (m.causal === '907118' || m.causal === '907751') g.int += d;
     else if (m.causal === '1297') g.sircreb += d;
     else if (m.causal === '4145') g.ret += d;
     else if (m.causal === '1972') g.tuc += d;
@@ -2087,7 +2176,7 @@ function gastosBancarios_(movs) {
   });
   const filas = [['Comisiones', g.com], ['IVA 21%', g.iva], ['Intereses', g.int], ['IVA 10,5%', g.iva105],
     ['Percepciones IVA', g.perc], ['Percepciones IIBB (SIRCREB)', g.sircreb], ['Retenciones IIBB rentas financieras', g.ret],
-    ['Percepciones IIBB Tucumán', g.tuc], ['DGR Sellos Córdoba', g.sellos], ['Imp. créditos y débitos (total)', g.imp],
+    ['Percepciones IIBB Tucumán', g.tuc], ['Impuesto de sellos', g.sellos], ['Imp. créditos y débitos (total)', g.imp],
     ['    Crédito computable 33%', g.imp * 0.33], ['    Imp. créditos y débitos (gasto 67%)', g.imp * 0.67]];
   const total = g.com + g.iva + g.int + g.iva105 + g.perc + g.sircreb + g.ret + g.tuc + g.sellos + g.imp;
   return filas.filter(f => Math.abs(f[1]) > 0.004).concat([['TOTAL (debe coincidir con el asiento de FBS)', total]]);
@@ -2267,7 +2356,9 @@ function agregarReglasNuevas() {
   if (!sh) throw new Error('Falta la hoja "' + HOJA.reglas + '". Corré "1. Crear hojas de entrada".');
   const clave = r => [String(r[0]).trim(), normalizar_(r[1]).charAt(0), String(r[2] || '').trim()].join('|');
   const existentes = new Set(sh.getDataRange().getValues().slice(1).map(clave));
-  const nuevas = REGLAS_INICIALES.filter(r => !existentes.has(clave(r)));
+  const par = ss.getSheetByName(HOJA.parametros);
+  const banco = par ? paramDe_(par.getDataRange().getValues(), '^cuenta bancaria$') : '';
+  const nuevas = reglasDelBanco_(banco).filter(r => !existentes.has(clave(r)));
   if (nuevas.length) sh.getRange(sh.getLastRow() + 1, 1, nuevas.length, 5).setValues(nuevas);
   SpreadsheetApp.getUi().alert(nuevas.length + ' reglas nuevas agregadas a "' + HOJA.reglas + '".');
 }
@@ -2424,4 +2515,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
