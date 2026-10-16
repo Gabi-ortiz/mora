@@ -634,7 +634,7 @@ function armarCuatroPuntas_(res) {
     // una partida agrupada (liquidación + comisiones, operación) se muestra con sus líneas originales
     const expandir = l => [].concat.apply([], orden(l).map(p => (p.lineas && p.lineas.length > 1
       ? p.lineas.slice().sort((x, y) => (p.importe < 0 ? x.importe - y.importe : y.importe - x.importe)).map((x, i) => ({ fecha: x.fecha, texto: x.texto, valor: p.importe < 0 ? -x.importe : x.importe, p: i ? null : p }))
-      : [{ fecha: p.fecha, texto: p.texto, valor: Math.abs(p.importe), p }])));
+      : [{ fecha: p.fecha, texto: p.texto, valor: valorSector_(p), p }])));
     const iz = expandir(res.pend[si]), de = expandir(res.pend[sd]);
     add([ni, '', '', '', nd, '', ''], 'cuadro');
     add(['Fecha', 'Concepto', 'Importe', '', 'Fecha', 'Concepto', 'Importe'], 'cab');
@@ -757,9 +757,9 @@ function escribirPendientes_(ss, nombre, res, items, titulo) {
   SECTORES.forEach(([s, n]) => { nombres[s] = n; });
   const filas = items.slice().sort((a, b) => sector_(a).localeCompare(sector_(b)) || a.fecha - b.fecha).map(p => [
     sector_(p), nombres[sector_(p)], p.fecha, dias_(res.corte, p.fecha), p.origen === 'Arrastre' ? 'Mes anterior' : 'Mes',
-    p.texto, Math.abs(p.importe), p.cat, p.cuit || p.dni, p.asiento || p.ref, p.cuenta || '', observacion_(p), p.cruces || '']);
+    p.texto, valorSector_(p), p.cat, p.cuit || p.dni, p.asiento || p.ref, p.cuenta || '', observacion_(p), p.cruces || '']);
   const porSector = {};
-  items.forEach(p => { const k = sector_(p); porSector[k] = porSector[k] || [0, 0]; porSector[k][0]++; porSector[k][1] += Math.abs(p.importe); });
+  items.forEach(p => { const k = sector_(p); porSector[k] = porSector[k] || [0, 0]; porSector[k][0]++; porSector[k][1] += valorSector_(p); });
   const total = Object.keys(porSector).sort().map(k => nombres[k] + ': ' + porSector[k][0] + ' partidas, ' + formato_(porSector[k][1])).join('   |   ');
   sh.getRange(1, 1).setValue(titulo + '   —   ' + (total || 'sin partidas')).setFontWeight('bold');
   sh.getRange(2, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
@@ -1543,6 +1543,23 @@ function pasesSinOrigen_(ao, asientosE) {
 }
 
 /**
+ * Registros de E que son el pase de un movimiento de O cargado antes (mismo comentario, mismo importe y sentido): el
+ * banco lo movió en la fecha de O (ej. pago CIG FIAT del 13/07 en O, pasado a E el 23/07). Esa fecha también vale para
+ * los cruces.
+ */
+function fechaEnO_(eItems, asientosO) {
+  const antes = new Map();
+  asientosO.forEach(a => {
+    const k = String(a.comentario).trim() + '|' + redondear_(a.debe - a.haber).toFixed(2);
+    if (!antes.has(k) || a.fecha < antes.get(k)) antes.set(k, a.fecha);
+  });
+  eItems.forEach(p => {
+    const f = antes.get(String(p.texto).trim() + '|' + p.importe.toFixed(2));
+    if (f && f < p.fecha) p.fechaO = f;
+  });
+}
+
+/**
  * Paso 2: la cuenta E se cruza con el banco. Las líneas de una misma liquidación de tarjeta (la "Confirmación de
  * Valores Agrupados" del asiento que confirma la liquidación en O, y el asiento con el número de liquidación) se
  * juntan en un solo neto, que es lo que acredita el banco.
@@ -1674,12 +1691,15 @@ function distancia_(a, b) {
   if (b.fechaRef) d = Math.min(d, dias_(a.fecha, b.fechaRef));
   if (a.fechaRef2) d = Math.min(d, dias_(a.fechaRef2, b.fecha));
   if (b.fechaRef2) d = Math.min(d, dias_(a.fecha, b.fechaRef2));
+  if (a.fechaO) d = Math.min(d, dias_(a.fechaO, b.fecha));
+  if (b.fechaO) d = Math.min(d, dias_(a.fecha, b.fechaO));
   return d;
 }
 
 /** Última fecha dd/mm o dd/mm/aaaa escrita en un comentario (sin tomar "30052/9" ni "7/2026"). */
 function fechaEnTexto_(texto, base) {
-  const re = /(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?![\d\/])/g;
+  // "3/7/-/2026" también vale (barra suelta después del mes)
+  const re = /(?:^|[^\d\/])(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?!\d|\/\d)/g;
   let m, ult = null;
   while ((m = re.exec(texto)) !== null) {
     const d = Number(m[1]), mes = Number(m[2]);
@@ -1699,8 +1719,25 @@ function fechaEnTexto_(texto, base) {
     }
   }
   if (!ult) {
-    // "Nº 4080226", "Nº 21082026", "Nº 210820261", "25082026-Vta Cheques": día + mes + año pegados
-    const c = String(texto).match(/(?:Nº\s*|^)(\d{6,9})(?!\d)/);
+    // "07-7-26-dep e cheq": día-mes-año con guiones al principio del comentario
+    const g = String(texto).match(/^(\d{1,2})-(\d{1,2})-(\d{2}|\d{4})(?!\d)/);
+    if (g) {
+      let a = Number(g[3]); if (a < 100) a += 2000;
+      const f = new Date(a, Number(g[2]) - 1, Number(g[1]));
+      if (Number(g[1]) <= 31 && Number(g[2]) >= 1 && Number(g[2]) <= 12 && dias_(f, base) <= 62) ult = f;
+    }
+  }
+  if (!ult) {
+    // "7130269950-DP CHEQUES" (Galicia): mes + día + número de boleta de 7 dígitos
+    const g = String(texto).match(/^([1-9])(\d{2})\d{7}-/);
+    if (g) {
+      const f = new Date(base.getFullYear(), Number(g[1]) - 1, Number(g[2]));
+      if (Number(g[2]) >= 1 && Number(g[2]) <= 31 && dias_(f, base) <= 62) ult = f;
+    }
+  }
+  if (!ult) {
+    // "Nº 4080226", "Nº 21082026", "Nº 210820261", "25082026-Vta Cheques", "14726-dep. echeq": día + mes + año pegados
+    const c = String(texto).match(/(?:Nº\s*|^)(\d{5,9})(?!\d)/);
     if (c) {
       const t = c[1];
       busca: for (const [ld, lm] of [[2, 2], [1, 2], [2, 1], [1, 1]]) {
@@ -1746,10 +1783,14 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
     }));
     if (!cands.length) return;
     if (unico && cands.length > 1) {
-      // valores de Dome Taller: varios candidatos iguales (mismo importe y misma fecha del valor) y la misma cantidad de
-      // movimientos iguales en el banco (ej. dos valores de $145.000 del 22/06 y dos transferencias de $145.000 el 22/06)
+      // candidatos intercambiables: mismo importe y la misma cantidad de movimientos iguales en el banco ese día. Valen los
+      // valores de Dome Taller con la misma fecha del valor (dos de $145.000 del 22/06 y dos transferencias de $145.000 el
+      // 22/06) y registros con el mismo detalle, del día del banco (tres cheques de $400.000 de "02/07-vta ch" y tres
+      // créditos del 02/07). Recibos de personas distintas no.
       const dia = f => (f.fechaRef || f.fecha).getTime();
-      const iguales = cands.every(f => f.cc && CC_NUMERO_ES_FECHA.test(f.cc) && Math.abs(f.importe - cands[0].importe) < 0.005 && dia(f) === dia(cands[0]));
+      const detalle = f => (f.texto.split(' / ').slice(1).join(' / ') || f.texto).replace(/\s+/g, ' ').trim().toUpperCase();
+      const iguales = cands.every(f => Math.abs(f.importe - cands[0].importe) < 0.005 &&
+        (f.cc && CC_NUMERO_ES_FECHA.test(f.cc) ? dia(f) === dia(cands[0]) : distancia_(b, f) === 0 && detalle(f) === detalle(cands[0])));
       const gemelos = banco.filter(x => x.match === null && Math.abs(x.importe - b.importe) < 0.005 && x.fecha.getTime() === b.fecha.getTime());
       if (!iguales || gemelos.length !== cands.length) return;
     }
@@ -1759,6 +1800,57 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
       if (d1 < d0 || (d1 === d0 && Math.abs(f.importe - b.importe) < Math.abs(mejor.importe - b.importe))) mejor = f;
     });
     unir_([b], [mejor], metodo);
+  });
+}
+
+/** "ECHEQ 48 HS. NRO. 558" en el banco contra "RM-388142 / GERARDO JUAN GIECO Nº 558." en FBS. */
+function MISMO_NUMERO_(b, f) {
+  const nb = b.texto.match(/\bNRO\.?:?\s*(\d{1,8})\b/i), nf = f.texto.match(/Nº\s*(\d{1,8})\.?\s*$/);
+  return !!nb && !!nf && Number(nb[1]) === Number(nf[1]);
+}
+
+/**
+ * Varias líneas de un lado que suman un movimiento (o un grupo del día con el mismo código) del otro, todas con la misma
+ * fecha: la del banco, la escrita en el comentario de FBS o la del movimiento original en O. Ej.: un crédito por
+ * descuento de documentos = varias líneas "02/07-vta ch"; una línea "Nº 3/7/-/2026" = tres transferencias del 03/07;
+ * los tres pagos CIG FIAT del 13/07 = cuatro pases de O del 13/07. Importes redondos: solo un movimiento (no un grupo),
+ * contra líneas con la fecha escrita y hasta 3 líneas.
+ */
+function combinacionesFechaEscrita_(banco, fbs) {
+  const fechasFbs = f => [f.fechaRef, f.fechaO].filter(Boolean).map(x => x.getTime());
+  const unidades = [];
+  const grupos = new Map();
+  banco.forEach(b => {
+    if (b.match !== null || b.origen !== 'Mes') return;
+    unidades.push([b]);
+    const k = b.fecha.getTime() + '|' + b.causal + '|' + (b.importe > 0);
+    grupos.set(k, (grupos.get(k) || []).concat([b]));
+  });
+  grupos.forEach(g => { if (g.length > 1) unidades.push(g); });
+  const total = l => redondear_(l.reduce((x, p) => x + p.importe, 0));
+  // banco (uno o un grupo del día) = varias líneas de FBS
+  unidades.sort((x, y) => Math.abs(total(y)) - Math.abs(total(x))).forEach(u => {
+    if (u.some(b => b.match !== null)) return;
+    const t = total(u), d = u[0].fecha.getTime(), esp = especifico_(t);
+    if (u.length > 1 && !esp) return;   // grupos del día solo con total específico
+    const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && (f.importe > 0) === (t > 0) &&
+      Math.abs(f.importe) <= Math.abs(t) + TOLERANCIA && (esp ? fechasFbs(f) : [f.fechaRef && f.fechaRef.getTime()]).indexOf(d) >= 0).slice(0, 25);
+    for (let n = u.length > 1 ? 1 : 2; n <= (esp ? 5 : 3) && cands.length >= n; n++) {
+      const combo = primeraCombinacion_(cands, n, t);
+      if (combo) { unir_(u, combo, 'Suma de registros con la misma fecha (escrita o de O) (revisar)'); break; }
+    }
+  });
+  // una línea de FBS con fecha escrita = varios movimientos del banco de ese día
+  fbs.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(f => {
+    if (f.match !== null || f.origen !== 'Mes' || !especifico_(f.importe)) return;
+    const ds = fechasFbs(f);
+    if (!ds.length) return;
+    const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && (b.importe > 0) === (f.importe > 0) &&
+      Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0).slice(0, 25);
+    for (let n = 2; n <= 4 && cands.length >= n; n++) {
+      const combo = primeraCombinacion_(cands, n, f.importe);
+      if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); break; }
+    }
   });
 }
 
@@ -1958,6 +2050,14 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
   pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
+  // depósitos de cheques: el comentario trae la fecha del depósito y el banco lo acredita hasta 5 días después (fines de semana)
+  // (importes redondos solo si es un cheque / depósito / canje)
+  pasada_(banco, fbs, (b, f) => !!f.fechaRef && b.fecha >= f.fechaRef && dias_(f.fechaRef, b.fecha) <= 5 &&
+    (especifico_(b.importe) || /CHEQ|CANJE|BOLETA|DEP/i.test(b.texto + ' ' + f.texto)),
+    '3. Fecha escrita en el comprobante + importe, acreditado hasta 5 días después', 60, true);
+  pasada_(banco, fbs, MISMO_NUMERO_, '3. Número de cheque + importe', 45, true);
+  combinacionesFechaEscrita_(banco, fbs);
+  pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
   compensacionesFbs_(fbs, true);
@@ -1969,8 +2069,9 @@ function conciliar_(banco, fbs) {
     pasada_(banco, fbs, (b, f) => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat) && /PASE|FONDO|BANCO|RESCATE|SUSCRIP|FCI/i.test(f.texto),
       '4c. Transferencia propia / FCI contra pase de E (revisar)', 3, true);
   }
-  if (CRUZAR_REDONDO_UNICO_DIA >= 3) ventanaUnica_(banco, fbs, 3);
+  if (CRUZAR_REDONDO_UNICO_DIA >= 3) { ventanaUnica_(banco, fbs, 3); mismaCantidad_(banco, fbs, 3); }
   lotes_(banco, fbs);
+  importeGrandeUnico_(banco, fbs, '');
   asientosNetos_(banco, fbs);
   reversionesFbs_(fbs);
   if (gastos && gastos.ajuste) fbs.push(gastos.ajuste);   // se agrega al final para que ninguna pasada la cruce
@@ -1995,6 +2096,47 @@ function unicoDelDia_(banco, fbs) {
   cb.forEach((bs, k) => {
     const fs = cf.get(k) || [];
     if (bs.length === 1 && fs.length === 1 && bs[0].match === null && fs[0].match === null) unir_(bs, fs, '4b. Fecha + importe redondo, único en el día (revisar)');
+  });
+}
+
+/**
+ * Mismo importe repetido: si dentro de +-dias hay la misma cantidad en el banco y en FBS (ej. tres débitos de $5.000.000
+ * el 13/07 y tres registros del 10/07 y 13/07), se cruzan en orden de fecha. El grupo no puede abarcar más de 7 días.
+ */
+function mismaCantidad_(banco, fbs, d) {
+  banco.filter(b => b.match === null && b.origen === 'Mes').forEach(b => {
+    if (b.match !== null) return;
+    const igual = x => x.match === null && Math.abs(x.importe - b.importe) <= TOLERANCIA;
+    let bs = [b], fs = [];
+    for (let vuelta = 0; vuelta < 4; vuelta++) {
+      const nf = fbs.filter(f => igual(f) && bs.some(x => distancia_(x, f) <= d));
+      const nb = banco.filter(x => igual(x) && x.origen === 'Mes' && nf.some(f => distancia_(x, f) <= d));
+      if (nf.length === fs.length && nb.length === bs.length) break;
+      fs = nf; bs = nb.length ? nb : bs;
+    }
+    if (bs.length < 2 || bs.length !== fs.length) return;
+    // importe redondo: solo registros que no son de personas (no recibos) y con el mismo detalle ("BANCO GALICIA Nº ...")
+    const detalle = f => (f.texto.split(' / ').slice(1).join(' / ') || f.texto).replace(/Nº.*$/, '').replace(/\s+/g, ' ').trim().toUpperCase();
+    if (!especifico_(b.importe) && fs.some(f => /^RC-/.test(f.texto) || detalle(f) !== detalle(fs[0]))) return;
+    const fechas = bs.map(x => x.fecha.getTime()).concat(fs.map(f => f.fecha.getTime()));
+    if ((Math.max.apply(null, fechas) - Math.min.apply(null, fechas)) / 864e5 > 7) return;
+    const orden = (x, y) => x.fecha - y.fecha;
+    fs.sort(orden);
+    bs.sort(orden).forEach(x => {
+      const f = fs.filter(y => y.match === null).sort((p, q) => distancia_(x, p) - distancia_(x, q))[0];
+      unir_([x], [f], '4d. Mismo importe, misma cantidad en +-' + d + ' días (revisar)');
+    });
+  });
+}
+
+/** Importes grandes (desde $10.000.000) que aparecen una sola vez en cada lado dentro del mes, aunque las fechas difieran. */
+function importeGrandeUnico_(banco, fbs, prefijo) {
+  banco.filter(b => b.match === null && Math.abs(b.importe) >= 1e7).forEach(b => {
+    const igual = x => x.match === null && Math.abs(x.importe - b.importe) <= TOLERANCIA;
+    const fs = fbs.filter(f => igual(f) && distancia_(b, f) <= 31);
+    if (fs.length !== 1) return;
+    if (banco.filter(x => igual(x) && distancia_(x, fs[0]) <= 31).length !== 1) return;
+    unir_([b], fs, prefijo + 'Importe grande único en el mes (revisar fechas)');
   });
 }
 
@@ -2027,6 +2169,9 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
     'Pendiente anterior: fecha del comentario + importe', v, true);
   // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
   pasada_(antBanco, eItems, (b, f) => f.tardio && especifico_(b.importe), 'Pendiente anterior: registro tardío + importe', 5, true);
+  // importe con centavos, un solo candidato en +-15 días (ej. descuento de documento del 25/06 y "01072026-G. de Echeq")
+  pasada_(antBanco, eItems, b => Math.round(Math.abs(b.importe) * 100) % 100 !== 0,
+    'Pendiente anterior: importe con centavos, único en +-15 días (revisar)', 15, true);
   antFbs.forEach(a => {
     if (a.match !== null) return;
     const f = eItems.find(x => x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
@@ -2090,6 +2235,23 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
  * de comprobante): se anulan entre sí y no quedan pendientes. Ej. "Rv Degra pase a Chexa" en el debe de O y en el haber
  * de E; "Canje de Valor - BANCO MACRO-liq. naranja fix" contra "13072026-liq. naranja fix 13/7".
  */
+/** S1 ↔ S2: una anulación / reversa del banco contra el movimiento que anula (ej. "ANULACION DEBITOS ACRED.HABERES" de
+ *  $1.068.330 del 30/06 y el débito de haberes por el mismo importe del 01/07). */
+function netearPendientesBanco_(items) {
+  const anula = p => /ANULAC|REVERS|DEVOLUC|RECHAZ|CONTRASIENTO/i.test(p.texto);
+  items.filter(anula).forEach(a => {
+    if (a.match !== null) return;
+    const k = tokens_(a.texto.replace(/ANULACI\S*|REVERS\S*|DEVOLUCI\S*|RECHAZ\S*|CONTRASIENTO/gi, ''));
+    const b = items.filter(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
+      dias_(x.fecha, a.fecha) <= 45 && comparten_(k, tokens_(x.texto)))
+      .sort((x, y) => dias_(x.fecha, a.fecha) - dias_(y.fecha, a.fecha))[0];
+    if (!b) return;
+    const metodo = 'Neteo S1 ↔ S2: anulación del banco y el movimiento anulado';
+    [a, b].forEach(x => { x.match = []; x.metodo = metodo; });
+    CRUCES_.push({ metodo, banco: [a, b], fbs: [] });
+  });
+}
+
 function netearPendientesFbs_(items) {
   const genericas = new Set(['CANJE', 'VALOR', 'VALORES', 'LIQ', 'CONFIRMACI', 'AGRUPADOS', 'PASE', 'DIFERENCIA', 'AJUSTAR']);
   const claves = p => {
@@ -2097,6 +2259,7 @@ function netearPendientesFbs_(items) {
     const out = new Set();
     tokens_(t).forEach(x => { if (!genericas.has(x)) out.add(x); });
     (t.match(/\d{5,}/g) || []).forEach(n => out.add(n));
+    (t.match(/Nº\s*\d+/g) || []).forEach(n => out.add('Nº' + n.replace(/\D/g, '')));   // "RM-389384 / FORD ... Nº 562." y "RM-389888 / ... Nº 562."
     return out;
   };
   const libres = items.filter(p => !/^Diferencia (de redondeo|asiento gastos)/.test(p.texto))
@@ -2120,6 +2283,7 @@ function limpiezaO_(banco, oPend) {
   pasada_(b, o, POR_NOMBRE_, 'Limpieza O sin confirmar ↔ banco: nombre', 15, false);
   pasada_(b, o, (x, f) => !!f.fechaRef && dias_(f.fechaRef, x.fecha) === 0, 'Limpieza O sin confirmar ↔ banco: fecha del valor + importe', 60, true);
   pasada_(b, o, x => especifico_(x.importe), 'Limpieza O sin confirmar ↔ banco: fecha + importe específico', 0, true);
+  importeGrandeUnico_(b, o, 'Limpieza O sin confirmar ↔ banco: ');
   // varias líneas de O (mismo comprobante o mismo asiento) contra uno o varios débitos del banco del mismo día y causal
   const grupos = new Map();
   o.forEach(f => {
@@ -2151,8 +2315,16 @@ function limpiezaO_(banco, oPend) {
 }
 
 function sector_(p) {
+  // un pendiente anterior queda en el sector donde estaba (ej. la comisión de una liquidación listada en negativo en S3)
+  if (p.origen === 'Arrastre' && p.sectorOriginal) return p.sectorOriginal;
   if (p.lado === 'BANCO') return p.importe > 0 ? 'S1' : 'S2';
   return p.importe > 0 ? 'S3' : 'S4';
+}
+
+/** Importe de la partida en su sector: positivo, salvo un pendiente anterior que estaba en negativo. */
+function valorSector_(p) {
+  const s = sector_(p);
+  return redondear_(s === 'S1' || s === 'S3' ? p.importe : -p.importe);
 }
 
 function gastosBancarios_(movs) {
@@ -2445,6 +2617,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const asientosE = pasesSinOrigen_(ao, e.asientos);
   // PASO 2: cuenta E -> primero contra los pendientes anteriores, después contra el extracto
   const eItems = partidasE_(asientosE, o.asientos);
+  fechaEnO_(eItems, o.asientos);
   const antFbsRestantes = anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0);
   cruzarAnteriores_(eItems, anterioresBanco, antFbsRestantes);
   const banco = bancoMes.concat(anterioresBanco);
@@ -2463,6 +2636,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const difGastos = conciliar_(banco, fbs);
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
+  netearPendientesBanco_(banco.filter(p => p.match === null));
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
@@ -2470,7 +2644,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   banco.concat(fbs).forEach(p => { if (p.match === null) pend[sector_(p)].push(p); });
   ao.pendientes.forEach(p => pend[sector_(p)].push(p));   // no confirmados en O: directo a pendientes
   const tot = {};
-  Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + Math.abs(p.importe), 0)); });
+  Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + valorSector_(p), 0)); });
   const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
   const enE = fbsPend.filter(p => p.cuenta === 'E' && !/Diferencia asiento gastos/.test(p.texto));
   const dup = fbsPend.filter(p => p.alerta);
