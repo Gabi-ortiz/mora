@@ -131,6 +131,7 @@ function reglasDelBanco_(nombreBanco) {
   if (/galicia/i.test(n)) return REGLAS_GALICIA;
   if (/santander|r[ií]o\b/i.test(n)) return REGLAS_SANTANDER;
   if (/patagonia/i.test(n)) return REGLAS_PATAGONIA;
+  if (/c[oó]rdoba|bancor/i.test(n)) return REGLAS_CORDOBA;
   return REGLAS_INICIALES;
 }
 
@@ -147,11 +148,34 @@ function asegurarReglasDelBanco_(ss, banco) {
   const hay = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().filter(r => String(r[0]).trim()) : [];
   const claves = new Set(hay.map(clave));
   if (delBanco.some(r => claves.has(clave(r)))) return;
-  const deFabrica = new Set([].concat(REGLAS_INICIALES, REGLAS_GALICIA, REGLAS_SANTANDER, REGLAS_PATAGONIA).map(clave));
+  const deFabrica = new Set([].concat(REGLAS_INICIALES, REGLAS_GALICIA, REGLAS_SANTANDER, REGLAS_PATAGONIA, REGLAS_CORDOBA).map(clave));
   if (hay.every(r => deFabrica.has(clave(r))) && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
   const desde = hay.every(r => deFabrica.has(clave(r))) ? 2 : sh.getLastRow() + 1;
   sh.getRange(desde, 1, delBanco.length, 5).setValues(delBanco);
 }
+
+/** Banco de Córdoba: "Concepto" es el tipo de operación (sin código) y "Descripcion" trae CUIT y nombre. */
+const REGLAS_CORDOBA = [
+  ["*", "Crédito", "^CR[EÉ]DITO TRANSFERENCIA CAJERO", "COBRANZA CLIENTES", "Crédito transferencia cajero / homebanking"],
+  ["*", "Crédito", "^TRANSF\\.? ?RECIBIDA", "COBRANZA CLIENTES", "Transferencia recibida"],
+  ["*", "Crédito", "^TRANSF\\.? ?CREDITO HB", "COBRANZA CLIENTES", "Transferencia crédito homebanking"],
+  ["*", "Crédito", "^CREDIN", "COBRANZA CLIENTES", "Credin (transferencia recibida)"],
+  ["*", "Crédito", "^CREDITO PARA TRANSFERENCIA INTERNA MODO", "COBRANZA CLIENTES", "Transferencia MODO"],
+  ["*", "Crédito", "^TRANSF\\. MODO", "COBRANZA CLIENTES", "Transferencia MODO"],
+  ["*", "Crédito", "^DEP[OÓ]SITO", "DEPOSITOS EN EFECTIVO", "Depósito"],
+  ["*", "Crédito", "^ACREDITACION A COMER", "COBRANZA EMPRESAS / ASEGURADORAS", "Acreditación a comercio (UNA)"],
+  ["*", "Crédito", "^LIQUIDACI[OÓ]N DE PR[EÉ]STAMOS", "COBRANZA EMPRESAS / ASEGURADORAS", "Liquidación de préstamos comercios aliados"],
+  ["*", "Crédito", "^CR[EÉ]DITO PROVEEDORES", "COBRANZA EMPRESAS / ASEGURADORAS", "Crédito proveedores (Ministerio)"],
+  ["*", "Crédito", "^TRANSF\\.CRED\\. IB PLAN", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago a proveedores (Interbanking)"],
+  ["*", "Débito", "^TRANSFERENCIA HOMEBANKING", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia homebanking (pase)"],
+  ["*", "Débito", "^PAGO AUTOMATICO DE SERVICIOS", "DEBITOS AUTOMATICOS", "Pago automático de servicios"],
+  ["*", "Débito", "^DEBITO PAGOS COMARB", "IMPUESTOS Y RETENCIONES", "Pago IIBB Convenio Multilateral"],
+  ["*", "Débito", "^IMPUESTO SOBRE OPERACIONES", "GASTOS BANCARIOS", "Impuesto Ley 25.413 (débitos y créditos)"],
+  ["*", "Débito", "^RECAUDACIONES SIRCREB", "GASTOS BANCARIOS", "Recaudación IIBB SIRCREB"],
+  ["*", "Débito", "^GASTOS DE MANTENIMIENTO", "GASTOS BANCARIOS", "Gastos de mantenimiento"],
+  ["*", "Débito", "^IVA", "GASTOS BANCARIOS", "IVA (comisiones y percepción)"],
+  ["*", "Débito", "^COMISI", "GASTOS BANCARIOS", "Comisiones"],
+];
 
 /** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
 const REGLAS_PATAGONIA = [
@@ -1059,7 +1083,9 @@ function extraerNombre_(concepto) {
     /ING TRANSF:(.+?)-\d{11}/, /^TRANSF (.+?) \d{11}/, /TEF DATANET \w+ (.+?)\s+\d{11}/,
     /^CCERR (.+?) \d{11}/, /^TRMIN (.+?) \d{11}/, /^TRPRO (.+?) \d{11}/, /^\d{11} (.+?) DL1/, /Transf\. \w+ (.+?)\s+\d{11}/,
     // Patagonia (al final, para no pisar a Macro): "... VAR 20323224545  LEANDRO JESUS GRASSI", "... 30500007539 MAPFRE ARG SEGUR"
-    /^(?:CREDITO POR|TRANSFERENCIA|TRANSF\.).*?\d{11}\s+([A-ZÑ][A-ZÑ .,]+?)\s*$/i];
+    /^(?:CREDITO POR|TRANSFERENCIA|TRANSF\.).*?\d{11}\s+([A-ZÑ][A-ZÑ .,]+?)\s*$/i,
+    // Córdoba: "... 20340699379-ERIC MAXIMILIANO HERRE-VAR"
+    /\d{11}\s*-\s*(.+?)\s*-\s*(?:VAR|CUO|FAC)/i];
   for (const p of pats) {
     const m = concepto.match(p);
     if (m) return m[1].replace(/\s+/g, ' ').replace(/^[ /,]+|[ /,]+$/g, '');
@@ -1084,7 +1110,7 @@ function leerReglas_(filas) {
     return {
       cod: String(r[0]).trim(),
       sentido: sen.startsWith('d') ? 'D' : sen.startsWith('c') ? 'C' : null,
-      patron: pat && pat !== '(todos)' ? new RegExp(pat) : null,
+      patron: pat && pat !== '(todos)' ? new RegExp(pat, 'i') : null,   // sin distinguir mayúsculas (Córdoba: "Recaudaciones SIRCREB")
       cat: String(r[3] || '').trim(),
       desc: String(r[4] || '').trim(),
     };
@@ -1115,7 +1141,7 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
 function leerExtracto_(filas, reglas, empresas) {
   const h = encabezados_(filas, {
-    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe/,
+    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe|^monto/,
     debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
     ley1: /^leyendas? adicional(es)?\s*1/, ley2: /^leyendas? adicional(es)?\s*2/, ley3: /^leyendas? adicional(es)?\s*3/,
     ley4: /^leyendas? adicional(es)?\s*4/,
@@ -1153,8 +1179,12 @@ function leerExtracto_(filas, reglas, empresas) {
       const extra = sinLey && c.ref !== undefined ? [String(r[c.ref] == null ? '' : r[c.ref]).trim()] : [];
       concepto = [String(r[c.descripcion] || '').trim()].concat(ley.filter(x => x && x !== '0'), extra).join(' ').replace(/\s+/g, ' ').trim();
       const cod = c.concepto !== undefined ? String(r[c.concepto] || '').match(/^\s*(\d{4,})/) : null;
+      // Córdoba: "Concepto" es el tipo de operación (texto, sin código) y va adelante de la descripción
+      if (c.concepto !== undefined && !cod && String(r[c.concepto] || '').trim()) {
+        concepto = (String(r[c.concepto]).trim() + ' ' + concepto).replace(/\s+/g, ' ').trim();
+      }
       causal = cod ? cod[1] : (c.causal !== undefined ? String(r[c.causal]).trim() : '');
-      nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : (extra.length ? extraerNombre_(concepto) : '');
+      nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : extraerNombre_(concepto);
     } else {
       concepto = String(r[c.concepto] || '').trim();
       causal = c.causal !== undefined ? String(r[c.causal]).trim() : '';
@@ -1169,6 +1199,12 @@ function leerExtracto_(filas, reglas, empresas) {
   });
   if (!movs.length) throw new Error('Extracto: no hay movimientos con fecha debajo de los encabezados.');
   if (movs[0].fecha > movs[movs.length - 1].fecha) movs.reverse();   // el banco lo entrega del más nuevo al más viejo
+  // si el extracto trae más de un mes (ej. Córdoba bajado con junio y julio), se concilia el último mes
+  const ult = movs[movs.length - 1].fecha, mes = m => m.fecha.getFullYear() * 12 + m.fecha.getMonth();
+  if (mes(movs[0]) !== mes(movs[movs.length - 1])) {
+    info.mesesAnteriores = movs.filter(m => mes(m) !== mes(movs[movs.length - 1])).length;
+    return { info, movs: movs.filter(m => mes(m) === ult.getFullYear() * 12 + ult.getMonth()) };
+  }
   return { info, movs };
 }
 
@@ -2577,7 +2613,7 @@ function gastosBancarios_(movs) {
     else if (m.causal === '1479') g.sellos += d;
     else if (m.cat === 'GASTOS BANCARIOS') {
       // Patagonia: sin código, por la descripción
-      if (t.startsWith('IMP.DB/CR')) g.imp += d;
+      if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES')) g.imp += d;
       else if (t.includes('SIRCREB')) g.sircreb += d;
       else if (t.includes('IIBB TUCUMAN')) g.tuc += d;
       else if (t.includes('SELLOS')) g.sellos += d;
@@ -2849,6 +2885,8 @@ function conciliarTodo_(entrada, redondoUnico) {
     if (movs[i].saldo !== null && movs[i - 1].saldo !== null && Math.abs(movs[i - 1].saldo + movs[i].importe - movs[i].saldo) > 0.005) quiebres++;
   }
   if (quiebres) avisos.push('Extracto: ' + quiebres + ' filas donde el saldo no sigue a la anterior (¿faltan movimientos?).');
+  if (ext.info.mesesAnteriores) avisos.push('Extracto: trae ' + ext.info.mesesAnteriores + ' movimientos de meses anteriores; ' +
+    'se concilia solo el último mes.');
   const nuevos = movs.filter(m => m.desc === 'Código causal nuevo');
   if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos con código causal sin regla (' +
     Array.from(new Set(nuevos.map(m => m.causal))).join(', ') + '). Agregalos en "' + HOJA.reglas + '".');
@@ -2941,4 +2979,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
