@@ -134,6 +134,25 @@ function reglasDelBanco_(nombreBanco) {
   return REGLAS_INICIALES;
 }
 
+/**
+ * La hoja Reglas tiene que tener las reglas del banco de "Cuenta bancaria". Si no tiene ninguna (ej. quedó con las de
+ * Macro al crear la planilla): si todas las que hay son las de fábrica de otro banco, se reemplazan; si alguien agregó
+ * reglas propias, se suman las del banco sin borrar nada.
+ */
+function asegurarReglasDelBanco_(ss, banco) {
+  const sh = ss.getSheetByName(HOJA.reglas);
+  if (!sh) return;
+  const clave = r => String(r[0]).trim() + '|' + String(r[2] || '').trim();
+  const delBanco = reglasDelBanco_(banco);
+  const hay = sh.getLastRow() > 1 ? sh.getRange(2, 1, sh.getLastRow() - 1, 5).getValues().filter(r => String(r[0]).trim()) : [];
+  const claves = new Set(hay.map(clave));
+  if (delBanco.some(r => claves.has(clave(r)))) return;
+  const deFabrica = new Set([].concat(REGLAS_INICIALES, REGLAS_GALICIA, REGLAS_SANTANDER, REGLAS_PATAGONIA).map(clave));
+  if (hay.every(r => deFabrica.has(clave(r))) && sh.getLastRow() > 1) sh.getRange(2, 1, sh.getLastRow() - 1, sh.getLastColumn()).clearContent();
+  const desde = hay.every(r => deFabrica.has(clave(r))) ? 2 : sh.getLastRow() + 1;
+  sh.getRange(desde, 1, delBanco.length, 5).setValues(delBanco);
+}
+
 /** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
 const REGLAS_PATAGONIA = [
   ["*", "Crédito", "^CREDITO POR TRANSFERENCIA", "COBRANZA CLIENTES", "Crédito por transferencia"],
@@ -302,7 +321,7 @@ function crearParametros_(ss) {
     ['Cuenta O', 'COMPLETAR'],
     ['Saldo inicial cuenta E', ''],
     ['Saldo inicial cuenta O', ''],
-    ['Cuenta bancaria', 'Banco Macro'],
+    ['Cuenta bancaria', 'COMPLETAR'],
     ['Base FBS (link o ID)', ''],
     ['Hoja de la base', 'MOVIMIENTOS'],
     ['Carpeta de cierres (link o ID)', ''],
@@ -372,8 +391,10 @@ function crearHojasEntrada() {
       if (i >= 0) par.getRange(i + 1, 2).setValue(nombre);
     }
   }
+  SpreadsheetApp.flush();
   const banco = paramDe_(ss.getSheetByName(HOJA.parametros).getDataRange().getValues(), '^cuenta bancaria$');
   crear(HOJA.reglas, [['Código causal', 'Sentido', 'Patrón en concepto', 'Categoría', 'Descripción']].concat(reglasDelBanco_(banco)));
+  asegurarReglasDelBanco_(ss, banco);
   crear(HOJA.empresas, [['CUIT', 'Razón social']].concat(EMPRESAS_INICIALES));
   crearParametros_(ss);
   SpreadsheetApp.getUi().alert('Hojas de entrada listas. Cargá el link de la base FBS de la empresa en "' + HOJA.parametros + '", el extracto y los pendientes anteriores ' +
@@ -404,16 +425,8 @@ function procesar_(ss) {
   const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
   const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
   const extracto = leer(hojaExtracto), empresas = leer(HOJA.empresas);
-  let reglas = leer(HOJA.reglas);
-  // si la hoja Reglas no tiene ninguna regla del banco de "Cuenta bancaria" (ej. quedó con las de Macro al crear la
-  // planilla), se agregan las de ese banco
-  const delBanco = reglasDelBanco_(paramDe_(parametros, '^cuenta bancaria$'));
-  const codigos = new Set(reglas.slice(1).map(r => String(r[0]).trim()));
-  if (!delBanco.some(r => codigos.has(r[0]))) {
-    const shR = ss.getSheetByName(HOJA.reglas);
-    shR.getRange(shR.getLastRow() + 1, 1, delBanco.length, 5).setValues(delBanco);
-    reglas = leer(HOJA.reglas);
-  }
+  asegurarReglasDelBanco_(ss, paramDe_(parametros, '^cuenta bancaria$'));
+  const reglas = leer(HOJA.reglas);
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null;
   if (idBase) {
