@@ -128,7 +128,7 @@ const REGLAS_GALICIA = [
 /** Reglas iniciales según el banco de la planilla (fila "Cuenta bancaria" de Parámetros). */
 function reglasDelBanco_(nombreBanco) {
   const n = String(nombreBanco || '');
-  if (/galicia/i.test(n)) return REGLAS_GALICIA;
+  if (/galicia|hsbc/i.test(n)) return REGLAS_GALICIA;   // HSBC pasó a Galicia: mismo Excel de Office Banking y mismos códigos
   if (/santander|r[ií]o\b/i.test(n)) return REGLAS_SANTANDER;
   if (/patagonia/i.test(n)) return REGLAS_PATAGONIA;
   if (/c[oó]rdoba|bancor/i.test(n)) return REGLAS_CORDOBA;
