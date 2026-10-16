@@ -1759,8 +1759,9 @@ function pasesSinOrigen_(ao, asientosE, posterioresO) {
   const comprobante = t => String(t || '').split(' / ')[0].trim().toUpperCase();
   ao.pendientes.forEach(p => {
     if (p.origen !== 'Mes' || p.importe >= 0) return;
-    // el ingreso en O del mismo recibo tiene fecha del mes siguiente: también queda en S4 hasta que entre
-    const post = comprobante(p.texto) && (posterioresO || []).find(x => !x.usado && comprobante(x.texto) === comprobante(p.texto) &&
+    // el ingreso en O del mismo recibo (RC) tiene fecha del mes siguiente: también queda en S4 hasta que entre. Solo
+    // recibos: un RM de O tiene su propio circuito (devoluciones, confirmación del pago)
+    const post = /^RC-/i.test(comprobante(p.texto)) && (posterioresO || []).find(x => !x.usado && comprobante(x.texto) === comprobante(p.texto) &&
       Math.abs(x.importe + p.importe) <= TOLERANCIA);
     if (post) { post.usado = true; p.desfasado = true; p.fechaRef2 = post.fecha; return; }
     if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) {
@@ -2596,11 +2597,12 @@ function sumaExacta_(items, total, max) {
  *  - importe con hasta $0,10 de diferencia, único en +-5 días (tarjeta Naranja vs "Confirmación de Valores Agrupados"):
  *    la diferencia queda como ajuste
  */
-function cierrePendientes_(banco, fbs, oPend) {
+function cierrePendientes_(banco, fbs, oPend, empresas) {
   const B = () => banco.filter(x => x.match === null);
   const F = () => fbs.concat(oPend).filter(x => x.match === null && !x.desfasado && !/^Diferencia (de redondeo|asiento gastos)/.test(x.texto));
   const rmBanco = f => /^RM-\d+\s*\/\s*BANCO/i.test(f.texto);
-  const propia = b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat);
+  // los pendientes de meses anteriores no traen categoría: se reconocen por el CUIT de una empresa del grupo
+  const propia = b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat) || !!(b.cuit && empresas && empresas[b.cuit]);
   const unico = (cond, ventana, tol, metodo) => B().forEach(b => {
     if (b.match !== null) return;
     const igual = (x, y) => Math.abs(x.importe - y.importe) <= tol;
@@ -2619,8 +2621,15 @@ function cierrePendientes_(banco, fbs, oPend) {
   unico(b => especifico_(b.importe), 62, TOLERANCIA, 'Pendientes: importe específico, único en +-62 días (revisar)');
   unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 3, TOLERANCIA,
     'Pendientes: transferencia propia contra pase de E, importe único en +-3 días (revisar)');
-  unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 31, TOLERANCIA,
-    'Pendientes: transferencia propia contra pase de E, importe único en el mes (revisar)');
+  // hasta 31 días: si hay más de una transferencia propia por ese importe, vale la única del mismo mes que el registro de E
+  F().filter(f => f.importe > 0 && /PASE|FONDO|BANCO/i.test(f.texto)).forEach(f => {
+    if (f.match !== null) return;
+    const igual = x => Math.abs(x.importe - f.importe) <= TOLERANCIA && distancia_(x, f) <= 31;
+    if (F().filter(igual).length !== 1) return;
+    let bs = B().filter(igual);
+    if (bs.length > 1) bs = bs.filter(b => b.fecha.getFullYear() === f.fecha.getFullYear() && b.fecha.getMonth() === f.fecha.getMonth());
+    if (bs.length === 1 && propia(bs[0])) unir_(bs, [f], 'Pendientes: transferencia propia contra pase de E, importe único en el mes (revisar)');
+  });
   unico((b, f) => rmBanco(f), 31, TOLERANCIA, 'Pendientes: pago a banco (RM), importe único en el mes (revisar)');
   unico((b, f) => Math.abs(b.importe) >= 100000 && Math.abs(b.importe - f.importe) > TOLERANCIA, 5, 0.10,
     'Pendientes: importe con centavos de diferencia, único en +-5 días (revisar)');
@@ -3106,7 +3115,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
-  cierrePendientes_(banco, fbs, ao.pendientes);
+  cierrePendientes_(banco, fbs, ao.pendientes, empresas);
   // pendientes anteriores del banco que recién quedan libres después de netear FBS (ej. tarjeta cargada, anulada y
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
