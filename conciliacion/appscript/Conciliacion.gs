@@ -476,7 +476,7 @@ function procesar_(ss) {
   asegurarReglasDelBanco_(ss, paramDe_(parametros, '^cuenta bancaria$'));
   const reglas = leer(HOJA.reglas);
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
-  let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null;
+  let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null, posterioresO = null;
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
     const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas)).movs;
@@ -486,6 +486,7 @@ function procesar_(ss) {
     const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
     const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
     base = r.filas; saldosIniciales = r.saldos; ctxBase = r.ctx || null; hastaBase = hasta;
+    if (r.ctx) posterioresO = ingresosOPosteriores_(r.ctx, hasta);
     // movimientos de meses cerrados cargados o modificados después del cierre anterior
     const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
     const foto = leerFotoBase_(ss);
@@ -505,7 +506,7 @@ function procesar_(ss) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
   const res = conciliarTodo_({
-    extracto, base, saldosIniciales, avisosBase, tardios,
+    extracto, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: leer(hojaAnteriores),
@@ -1317,7 +1318,7 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
   const col = re => { const i = cab.findIndex(h => re.test(h)); return i < 0 ? null : letra_(i + 1); };
   const L = { id: col(/^detmovid$/), plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/),
-    asiento: col(/^detmovnro$/) };
+    asiento: col(/^detmovnro$/), comenta: col(/^detcomenta$/) };
   if (!L.plan || !L.fecha || !L.debe || !L.haber) throw new Error('La base FBS no tiene las columnas DETPLAN, DETFECHA, DETDEBE y DETHABER.');
   const cuentas = [ctas.E].concat(ctas.O ? [ctas.O] : []);
   const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
@@ -1345,6 +1346,23 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
     });
     return { filas, saldos: { E: redondear_(saldos.E), O: redondear_(saldos.O) } };
   }
+}
+
+/**
+ * Ingresos en la cuenta O con fecha posterior al mes (hasta 62 días): detectan pases de O a E del mes cuyo recibo se
+ * registró con fecha del mes siguiente (agosto Macro: pase del 19/08, ingreso en O del 01/09). Devuelve
+ * [{ texto, importe, fecha }] o null si no se pudo consultar.
+ */
+function ingresosOPosteriores_(ctx, hasta) {
+  const L = ctx.L;
+  if (!ctx.ctas.O || !L.comenta) return null;
+  const hasta2 = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate() + 62);
+  try {
+    const filas = consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.comenta + ', ' + L.debe + ', ' + L.fecha + ' where ' + L.plan + ' = ' +
+      Number(ctx.ctas.O) + ' and ' + L.fecha + ' > ' + fechaGviz_(hasta) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta2) +
+      ' and ' + L.debe + ' > 0' + ctx.vigente);
+    return filas.slice(1).map(r => ({ texto: String(r[0] || ''), importe: Number(r[1] || 0), fecha: parseFecha_(r[2]) }));
+  } catch (e) { return null; }
 }
 
 /**
@@ -1736,10 +1754,15 @@ function analisisO_(asientosO, anterioresFbs) {
  *    se anulan entre sí y no se cruzan con el banco.
  * Devuelve las líneas de E que quedan para cruzar.
  */
-function pasesSinOrigen_(ao, asientosE) {
+function pasesSinOrigen_(ao, asientosE, posterioresO) {
   const usadas = new Set();
+  const comprobante = t => String(t || '').split(' / ')[0].trim().toUpperCase();
   ao.pendientes.forEach(p => {
     if (p.origen !== 'Mes' || p.importe >= 0) return;
+    // el ingreso en O del mismo recibo tiene fecha del mes siguiente: también queda en S4 hasta que entre
+    const post = comprobante(p.texto) && (posterioresO || []).find(x => !x.usado && comprobante(x.texto) === comprobante(p.texto) &&
+      Math.abs(x.importe + p.importe) <= TOLERANCIA);
+    if (post) { post.usado = true; p.desfasado = true; p.fechaRef2 = post.fecha; return; }
     if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) {
       // confirmado con fecha del mes pero el ingreso en O se registró después del cierre: el pase queda en S4
       // hasta que el mes próximo entre el ingreso (con el mismo comprobante) y se netee en O
@@ -2011,7 +2034,11 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
       const iguales = cands.every(f => Math.abs(f.importe - cands[0].importe) < 0.005 &&
         (f.cc && CC_NUMERO_ES_FECHA.test(f.cc) ? dia(f) === dia(cands[0]) : distancia_(b, f) === 0 && detalle(f) === detalle(cands[0])));
       const gemelos = banco.filter(x => x.match === null && Math.abs(x.importe - b.importe) < 0.005 && x.fecha.getTime() === b.fecha.getTime());
-      if (!iguales || gemelos.length !== cands.length) return;
+      // registros duplicados en FBS (mismo detalle, fecha, Nº e importe; ej. RM-390702 y RM-390995 "BANCO MACRO Nº 20082026"
+      // contra un solo débito): se cruza uno y el otro queda pendiente marcado como duplicado
+      const duplicados = gemelos.length === 1 && !!detalle(cands[0]) && cands.every(f => Math.abs(f.importe - cands[0].importe) < 0.005 &&
+        f.fecha.getTime() === cands[0].fecha.getTime() && String(f.aux || '') === String(cands[0].aux || '') && detalle(f) === detalle(cands[0]));
+      if ((!iguales || gemelos.length !== cands.length) && !duplicados) return;
     }
     let mejor = cands[0];
     cands.forEach(f => {
@@ -2300,7 +2327,7 @@ function difCentavos_(banco, fbs, ventana) {
     const f = cands[0], dif = redondear_(b.importe - f.importe);
     unir_([b], [f], 'Mismo CUIT o nombre, importe con centavos de diferencia (dif. ' + formato_(dif) + ')');
     const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.slice(0, 40) + ' - ajustar',
-      referencia: '', asiento: f.asiento, debe: Math.max(dif, 0), haber: Math.max(-dif, 0) }, 'Mes');
+      referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
     a.cuenta = 'E';
     ajustes.push(a);
   });
@@ -2542,6 +2569,82 @@ function netearPendientesBanco_(items) {
     [a, b].forEach(x => { x.match = []; x.metodo = metodo; });
     CRUCES_.push({ metodo, banco: [a, b], fbs: [] });
   });
+}
+
+/** Subconjunto de 2 a "max" partidas que suma "total" (o null). */
+function sumaExacta_(items, total, max) {
+  const r = (desde, falta, elegidos) => {
+    if (elegidos.length >= 2 && Math.abs(falta) <= TOLERANCIA) return elegidos;
+    if (elegidos.length >= max) return null;
+    for (let i = desde; i < items.length; i++) {
+      if (items[i].importe > falta + TOLERANCIA) continue;
+      const x = r(i + 1, redondear_(falta - items[i].importe), elegidos.concat([items[i]]));
+      if (x) return x;
+    }
+    return null;
+  };
+  return r(0, total, []);
+}
+
+/**
+ * Última vuelta sobre todo lo que quedó pendiente (del mes, de meses anteriores y O sin confirmar), con criterios que solo
+ * son seguros cuando el importe no se repite (agosto Macro, contra la conciliación manual):
+ *  - banco ↔ FBS: importe específico único en +-62 días (transferencia de julio y su "Canje de Valor"; recibo de O que se
+ *    acreditó un mes después); transferencia propia contra "BANCO MACRO"/pase de E y RM a banco, importe único en el mes
+ *  - FBS ↔ FBS: RM a banco que devuelve un recibo (mismo día o fecha del Nº, recibo duplicado o importe específico único) y
+ *    RM a banco igual a la suma de registros del mismo día (liquidaciones de gastos de la cuenta)
+ *  - importe con hasta $0,10 de diferencia, único en +-5 días (tarjeta Naranja vs "Confirmación de Valores Agrupados"):
+ *    la diferencia queda como ajuste
+ */
+function cierrePendientes_(banco, fbs, oPend) {
+  const B = () => banco.filter(x => x.match === null);
+  const F = () => fbs.concat(oPend).filter(x => x.match === null && !x.desfasado && !/^Diferencia (de redondeo|asiento gastos)/.test(x.texto));
+  const rmBanco = f => /^RM-\d+\s*\/\s*BANCO/i.test(f.texto);
+  const propia = b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat);
+  const unico = (cond, ventana, tol, metodo) => B().forEach(b => {
+    if (b.match !== null) return;
+    const igual = (x, y) => Math.abs(x.importe - y.importe) <= tol;
+    const fs = F().filter(f => igual(b, f) && distancia_(b, f) <= ventana);
+    if (fs.length !== 1 || !cond(b, fs[0])) return;
+    if (B().filter(x => igual(x, fs[0]) && distancia_(x, fs[0]) <= ventana).length !== 1) return;
+    const dif = redondear_(b.importe - fs[0].importe);
+    unir_([b], fs, metodo + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
+    if (Math.abs(dif) > 0.005) {
+      const a = partidaFbs_({ fecha: fs[0].fecha, comentario: 'Diferencia de redondeo ' + fs[0].texto.slice(0, 40) + ' - ajustar',
+        referencia: '', asiento: fs[0].asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');   // compensa la diferencia en el control
+      a.cuenta = 'E';
+      fbs.push(a);
+    }
+  });
+  unico(b => especifico_(b.importe), 62, TOLERANCIA, 'Pendientes: importe específico, único en +-62 días (revisar)');
+  unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 3, TOLERANCIA,
+    'Pendientes: transferencia propia contra pase de E, importe único en +-3 días (revisar)');
+  unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 31, TOLERANCIA,
+    'Pendientes: transferencia propia contra pase de E, importe único en el mes (revisar)');
+  unico((b, f) => rmBanco(f), 31, TOLERANCIA, 'Pendientes: pago a banco (RM), importe único en el mes (revisar)');
+  unico((b, f) => Math.abs(b.importe) >= 100000 && Math.abs(b.importe - f.importe) > TOLERANCIA, 5, 0.10,
+    'Pendientes: importe con centavos de diferencia, único en +-5 días (revisar)');
+  // FBS ↔ FBS: RM a banco contra un recibo
+  F().filter(r => r.importe < 0 && rmBanco(r)).forEach(r => {
+    if (r.match !== null) return;
+    const cs = F().filter(p => p.importe > 0 && Math.abs(p.importe + r.importe) <= TOLERANCIA);
+    if (!cs.length) return;
+    const mismoDia = cs.filter(p => [r.fecha, r.fechaRef].some(d => d && dias_(d, p.fecha) === 0));
+    const dup = cs.filter(p => /duplicado/i.test(p.alerta || ''));
+    const el = mismoDia.length === 1 ? mismoDia[0] : dup.length ? dup[0] : (cs.length === 1 && especifico_(r.importe) ? cs[0] : null);
+    if (el) compensar_([r, el], 'Neteo S3 ↔ S4: pago a banco (RM) contra recibo' + (el.alerta ? ' duplicado' : '') + ' (revisar)');
+  });
+  // FBS ↔ FBS: RM a banco igual a la suma de registros del mismo día
+  F().filter(r => r.importe < 0 && rmBanco(r)).forEach(r => {
+    if (r.match !== null) return;
+    const dia = F().filter(p => p.importe > 0 && p.importe < -r.importe && dias_(p.fecha, r.fecha) === 0)
+      .sort((a, b) => b.importe - a.importe);
+    if (dia.length < 2 || dia.length > 15) return;
+    const combo = sumaExacta_(dia, -r.importe, 4);
+    if (combo) compensar_([r].concat(combo), 'Neteo S3 ↔ S4: pago a banco (RM) igual a la suma de registros del día (revisar)');
+  });
+  // lo que quedó con un solo candidato después de netear (ej. dos recibos de $14.000.000 iguales: uno se anuló con su RM)
+  pasada_(B(), F(), (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
 }
 
 function netearPendientesFbs_(items) {
@@ -2962,7 +3065,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const anterioresFbs = anteriores.filter(p => p.lado === 'FBS');
   // PASO 1: cuenta O sola, neteando por comprobante / liquidación junto con los pendientes anteriores
   const ao = analisisO_(o.asientos, anterioresFbs);
-  const asientosE = pasesSinOrigen_(ao, e.asientos);
+  const asientosE = pasesSinOrigen_(ao, e.asientos, entrada.posterioresO);
   // PASO 2: cuenta E -> primero contra los pendientes anteriores, después contra el extracto
   const eItems = partidasE_(asientosE, o.asientos);
   fechaEnO_(eItems, o.asientos);
@@ -2986,6 +3089,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
+  cierrePendientes_(banco, fbs, ao.pendientes);
   // pendientes anteriores del banco que recién quedan libres después de netear FBS (ej. tarjeta cargada, anulada y
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
