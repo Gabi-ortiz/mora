@@ -2669,6 +2669,21 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     unir_(g.b, g.f, 'Pendientes anteriores: misma cantidad de partidas del mismo importe en el mismo mes (' + g.b.length + ' y ' +
       g.f.length + ') (revisar)');
   });
+  // en el mes que se concilia, lo mismo pero solo el mismo día (2 transferencias de $460.000 del 28/08 y 2 recibos del 28/08);
+  // para FBS vale la fecha escrita en el comprobante si la tiene
+  const dias = new Map();
+  const agregarDia = (x, d, lado) => {
+    const k = d.getTime() + '|' + x.importe.toFixed(2);
+    if (!dias.has(k)) dias.set(k, { b: [], f: [] });
+    dias.get(k)[lado].push(x);
+  };
+  B().filter(x => x.origen === 'Mes').forEach(x => agregarDia(x, x.fecha, 'b'));
+  F().filter(x => x.origen === 'Mes').forEach(x => agregarDia(x, x.fechaRef || x.fecha, 'f'));
+  dias.forEach(g => {
+    if (g.b.length < 2 || g.b.length !== g.f.length) return;
+    unir_(g.b, g.f, 'Pendientes del mes: misma cantidad de partidas del mismo importe el mismo día (' + g.b.length + ' y ' +
+      g.f.length + ') (revisar)');
+  });
   // lo que quedó con un solo candidato después de netear (ej. dos recibos de $14.000.000 iguales: uno se anuló con su RM)
   pasada_(B(), F(), (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
 }
