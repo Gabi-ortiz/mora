@@ -293,7 +293,7 @@ function crearHojasEntrada() {
     return sh;
   };
   // solo crea lo que falta. FBS se lee de la base de la empresa (link en Parámetros); los mayores E y O ya no se usan
-  if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto de Macro desde A1 (Excel "Últimos Movimientos" o CSV "Resumen")']]);
+  if (!hojaDe_(ss, nombresExtracto_())) crear(HOJA.extractoAlt[0], [['Pegar acá el extracto del banco desde A1, con la fila de encabezados (Macro: Excel "Últimos Movimientos" o CSV "Resumen"; Galicia: Excel de Office Banking)']]);
   if (!hojaDe_(ss, nombresAnteriores_())) crear(HOJA.anterioresAlt[0], [COLS_PEND]);
   limpiarHojasSobrantes_(ss);
   // el banco define las reglas iniciales: se pregunta la primera vez (cuando todavía no hay Parámetros)
