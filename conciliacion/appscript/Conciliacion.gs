@@ -575,14 +575,19 @@ function pasarPendientes_(ss, corte) {
       previo[ids[i]] = [r[ix('Estado')], r[ix('Responsable')], r[ix('Comentario')]];
     });
   }
-  if (!sh) sh = ss.insertSheet(HOJA.anterioresAlt[0]);
-  if (sh.getName() !== HOJA.anterioresAlt[0] && !ss.getSheetByName(HOJA.anterioresAlt[0])) sh.setName(HOJA.anterioresAlt[0]);
+  // se escribe siempre en "Pendientes en trabajo"; la lista vieja ("Pend mes anterior") ya quedó absorbida y se borra
+  const destino = ss.getSheetByName(HOJA.anterioresAlt[0]);
+  if (destino && sh && destino.getName() !== sh.getName()) { ss.deleteSheet(sh); sh = destino; }
+  if (!sh) sh = destino || ss.insertSheet(HOJA.anterioresAlt[0]);
+  if (sh.getName() !== HOJA.anterioresAlt[0]) sh.setName(HOJA.anterioresAlt[0]);
+  nombresAnteriores_().forEach(n => { const otra = ss.getSheetByName(n); if (otra && otra.getName() !== sh.getName()) ss.deleteSheet(otra); });
   const ids = idsPend_(nuevas);
   const filas = nuevas.map((r, i) => {
     const p = previo[ids[i]] || [];
     const f = parseFecha_(r[1]);
     const estado = p[0] && !/^Resuelto/i.test(p[0]) ? p[0] : 'Pendiente';
-    return [r[0], r[1], r[2], Math.abs(parseNum_(r[3]) || 0), ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', ''];
+    // con signo: un pendiente anterior en negativo (comisión de una liquidación en S3) sigue en negativo
+    return [r[0], r[1], r[2], parseNum_(r[3]) || 0, ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', ''];
   });
   escribirPendTrabajo_(sh, filas);
   return filas.length;
@@ -2441,11 +2446,12 @@ function revisarPendientesCore_(pend, movs, cierre) {
   CORTE_ = null;
   const out = pend.map(() => ({ tipo: '', texto: '' }));
   const items = pend.map((r, i) => {
-    const sec = String(r[0] || '').trim().toUpperCase(), imp = Math.abs(parseNum_(r[3]) || 0);
+    const sec = String(r[0] || '').trim().toUpperCase(), imp = parseNum_(r[3]) || 0;   // negativo: invierte el sentido
     const fecha = parseFecha_(r[1]) || cierre, texto = String(r[2] || '');
     let p = null;
-    if (sec === 'S1' || sec === 'S2') p = partidaBanco_({ fecha, concepto: texto, importe: sec === 'S1' ? imp : -imp, ref: '', nombre: '' }, 'Arrastre');
-    else if (sec === 'S3' || sec === 'S4') p = partidaFbs_({ fecha, comentario: texto, referencia: '', debe: sec === 'S3' ? imp : 0, haber: sec === 'S4' ? imp : 0 }, 'Arrastre');
+    const v = sec === 'S1' || sec === 'S3' ? imp : -imp;
+    if (sec === 'S1' || sec === 'S2') p = partidaBanco_({ fecha, concepto: texto, importe: v, ref: '', nombre: '' }, 'Arrastre');
+    else if (sec === 'S3' || sec === 'S4') p = partidaFbs_({ fecha, comentario: texto, referencia: '', debe: Math.max(v, 0), haber: Math.max(-v, 0) }, 'Arrastre');
     if (p) { p.idx = i; p.sec = sec; }
     return p;
   });
