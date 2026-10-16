@@ -67,7 +67,8 @@ const VENTANA_ID = 31;
 const TOLERANCIA = 0.02;
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
 const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972',   // Macro: van al asiento mensual de gastos
-  '907176', '907376', '917376', '907173', '905130'];                            // Galicia: imp. déb./créd., IIBB, sellos
+  '907176', '907376', '917376', '907173', '905130',                             // Galicia: imp. déb./créd., IIBB, sellos
+  '4637', '4633', '1384', '566'];                                               // Santander: imp. déb./créd., SIRCREB, Tucumán
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
 
@@ -126,8 +127,43 @@ const REGLAS_GALICIA = [
 
 /** Reglas iniciales según el banco de la planilla (fila "Cuenta bancaria" de Parámetros). */
 function reglasDelBanco_(nombreBanco) {
-  return /galicia/i.test(String(nombreBanco || '')) ? REGLAS_GALICIA : REGLAS_INICIALES;
+  const n = String(nombreBanco || '');
+  if (/galicia/i.test(n)) return REGLAS_GALICIA;
+  if (/santander|r[ií]o\b/i.test(n)) return REGLAS_SANTANDER;
+  return REGLAS_INICIALES;
 }
+
+/** Santander Río: "Cod. Operativo" del Excel de Últimos Movimientos. */
+const REGLAS_SANTANDER = [
+  ["4805", "Crédito", "", "COBRANZA CLIENTES", "Transferencia recibida"],
+  ["4806", "Crédito", "", "COBRANZA CLIENTES", "Transferencia recibida"],
+  ["2767", "Crédito", "", "COBRANZA CLIENTES", "Transferencia recibida (DEBIN / credin)"],
+  ["3413", "Crédito", "", "COBRANZA CLIENTES", "Transferencia recibida desde CVU (billetera)"],
+  ["1430", "Crédito", "", "COBRANZA CLIENTES", "Transferencia ctas mobile banking"],
+  ["1253", "Crédito", "", "COBRANZA CLIENTES", "Crédito transferencia online banking empresas"],
+  ["1257", "Crédito", "", "COBRANZA CLIENTES", "Crédito transferencia online banking"],
+  ["2377", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago a proveedores recibido (cobro de empresas)"],
+  ["3002", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Transferencia pagos a terceros (cobro de empresas)"],
+  ["1970", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Servicios de pago (aseguradoras)"],
+  ["2602", "Crédito", "", "COBRANZA TARJETAS", "Acreditación comercio Payway (Prisma)"],
+  ["2604", "Crédito", "", "COBRANZA TARJETAS", "Acreditación comercio Fiserv (First Data)"],
+  ["2571", "Débito", "", "COBRANZA TARJETAS", "Débito comercio Fiserv (First Data)"],
+  ["2574", "Débito", "", "COBRANZA TARJETAS", "Débito comercio Payway (Prisma)"],
+  ["3372", "Débito", "", "COBRANZA TARJETAS", "Débito comercio Getnet"],
+  ["1397", "Crédito", "", "FINANCIACION / PRESTAMOS", "Liquidación de préstamo"],
+  ["2327", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Pago a cuentas propias (Interbanking)"],
+  ["2393", "Crédito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Cobro desde cuentas propias (Interbanking)"],
+  ["4713", "Débito", "", "PAGO PROVEEDORES", "Pago Interbanking B2B"],
+  ["1852", "Débito", "", "PAGO PROVEEDORES", "Servicio Interbanking (abono)"],
+  ["4712", "Débito", "", "IMPUESTOS Y RETENCIONES", "Pago AFIP por Interbanking (VEP)"],
+  ["4637", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre créditos"],
+  ["4633", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre débitos"],
+  ["1384", "Débito", "", "IMPUESTOS Y RETENCIONES", "Recaudación IIBB SIRCREB"],
+  ["566", "Débito", "", "IMPUESTOS Y RETENCIONES", "Adelanto IIBB Tucumán"],
+  ["3254", "Débito", "", "GASTOS BANCARIOS", "IVA 21% sobre comisiones"],
+  ["2872", "Débito", "", "GASTOS BANCARIOS", "Comisión pago servicio Interbanking"],
+  ["2960", "Débito", "", "GASTOS BANCARIOS", "Comisión por servicio de cuenta"],
+];
 
 const REGLAS_INICIALES = [
   ["493", "Ambos", "", "COBRANZA CLIENTES", "Transferencia recibida (otros bancos)"],
@@ -968,7 +1004,8 @@ function extraerCuit_(texto) {
 }
 
 function extraerNombre_(concepto) {
-  const pats = [/ING TRANSF:(.+?)-\d{11}/, /^TRANSF (.+?) \d{11}/, /TEF DATANET \w+ (.+?)\s+\d{11}/,
+  const pats = [/\s-\s+De\s+(.+?)\s*\//i, /^(?:Pago a proveedores recibido|Transferencia pagos a terceros|Servicios de pago) - (.+?)\s{2,}/i,
+    /ING TRANSF:(.+?)-\d{11}/, /^TRANSF (.+?) \d{11}/, /TEF DATANET \w+ (.+?)\s+\d{11}/,
     /^CCERR (.+?) \d{11}/, /^TRMIN (.+?) \d{11}/, /^TRPRO (.+?) \d{11}/, /^\d{11} (.+?) DL1/, /Transf\. \w+ (.+?)\s+\d{11}/];
   for (const p of pats) {
     const m = concepto.match(p);
@@ -1025,7 +1062,7 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
 function leerExtracto_(filas, reglas, empresas) {
   const h = encabezados_(filas, {
-    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal/, concepto: /^concepto/, importe: /^importe/,
+    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe/,
     debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
     ley1: /^leyendas? adicional(es)?\s*1/, ley2: /^leyendas? adicional(es)?\s*2/, ley3: /^leyendas? adicional(es)?\s*3/,
     ley4: /^leyendas? adicional(es)?\s*4/,
@@ -1034,12 +1071,19 @@ function leerExtracto_(filas, reglas, empresas) {
     throw new Error('Extracto: no encuentro los encabezados (Fecha, Concepto o Descripción, Saldo).');
   }
   const c = h.col, info = {}, movs = [];
+  // Santander: el Excel trae primero "Movimientos del Día" (sin saldo, todavía no contabilizados) y después
+  // "Últimos Movimientos"; solo se toma el segundo bloque
+  let delDia = false;
   filas.forEach((r, i) => {
     const t0 = String(r[0] || '');
     if (/^Empresa:/i.test(t0)) info.empresa = t0.split(':').slice(1).join(':').trim();
-    if (i <= h.fila) return;
+    if (/^movimientos del d[ií]a/i.test(t0)) delDia = true;
+    if (/^[úu]ltimos movimientos/i.test(t0)) delDia = false;
+    if (i <= h.fila || delDia) return;
     const fecha = parseFecha_(r[c.fecha]);
     if (!fecha) return;
+    // filas sueltas con solo una fecha (ej. fecha y hora de la descarga al pie)
+    if (!String(r[c.concepto !== undefined ? c.concepto : c.descripcion] || '').trim()) return;
     let deb, cred;
     if (c.importe !== undefined) {
       const imp = parseNum_(r[c.importe]) || 0;
@@ -1312,14 +1356,16 @@ function leerBase_(filas, cuentaE, cuentaO) {
 const CC_NUMERO_ES_FECHA = /DOME TALLER/i;
 
 function fechaCorta_(nro, base) {
-  const opciones = nro.length === 5 ? [[1, 2, 2], [2, 1, 2]] : nro.length === 4 ? [[2, 2, 0], [1, 2, 1]] : nro.length === 3 ? [[1, 2, 0], [2, 1, 0]] : [];
+  // "96" = 9/6, "2206" = 22/06, "19066" = 19/06 (dígito de más), "5062026" = 5/06/2026, "22062026" = 22/06/2026
+  const opciones = { 2: [[1, 1, 0]], 3: [[1, 2, 0], [2, 1, 0]], 4: [[2, 2, 0], [1, 2, 1]], 5: [[1, 2, 2], [2, 1, 2], [2, 2, -1]],
+    7: [[1, 2, 4]], 8: [[2, 2, 4]] }[nro.length] || [];
   for (const [ld, lm, la] of opciones) {
-    if (ld + lm + la !== nro.length) continue;
+    if (la >= 0 && ld + lm + la !== nro.length) continue;
     const d = Number(nro.slice(0, ld)), mes = Number(nro.slice(ld, ld + lm));
     if (d < 1 || d > 31 || mes < 1 || mes > 12) continue;
-    let a = la === 2 ? 2000 + Number(nro.slice(ld + lm)) : base.getFullYear();
+    let a = la === 2 ? 2000 + Number(nro.slice(ld + lm)) : la === 4 ? Number(nro.slice(ld + lm)) : base.getFullYear();
     let f = new Date(a, mes - 1, d);
-    if (!la && f > base) f = new Date(a - 1, mes - 1, d);
+    if (la <= 0 && f > base) f = new Date(a - 1, mes - 1, d);
     if (f <= base && dias_(f, base) <= 180) return f;
   }
   return null;
@@ -1350,7 +1396,7 @@ function datosAux_(aux, base, cc) {
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
     out.fecha = dm(nro);
     if (/^\d{5,}$/.test(nro)) out.numero = nro;
-    if (!out.fecha && cc && CC_NUMERO_ES_FECHA.test(cc) && /^\d{3,5}$/.test(nro)) {
+    if (!out.fecha && cc && CC_NUMERO_ES_FECHA.test(cc) && /^\d{2,5}$/.test(nro)) {
       out.fecha = fechaCorta_(nro, out.fecha2 || base);
       if (out.fecha) out.numero = '';
     }
@@ -2045,6 +2091,67 @@ function liquidacionesTarjeta_(banco, fbs) {
   return ajustes;
 }
 
+/**
+ * Liquidación de tarjeta con el mismo número en el banco y en FBS (Santander: "Acreditacion a comercio fiserv ...
+ * nro.liq. 00340801/..." y "340801-LIQ.- VISA 07/8"), aunque la fecha escrita en FBS no sea la del banco. Hasta $1 de
+ * diferencia: queda una línea de ajuste.
+ */
+function liquidacionPorNumero_(banco, fbs) {
+  const ajustes = [];
+  const nroBanco = b => { const m = b.texto.match(/nro\.?\s*liq\.?\s*0*(\d{4,})/i); return m ? m[1] : null; };
+  // "340801-LIQ.- VISA 07/8"; también "338370-arreglo liq. mal. 338370 02/06" (cualquier número largo si dice liq)
+  const nrosFbs = f => (/liq/i.test(f.texto) ? f.texto.match(/\d{5,}/g) || [] : []).map(x => x.replace(/^0+/, ''));
+  fbs.forEach(f => {
+    if (f.match !== null || f.importe <= 0) return;
+    const nros = nrosFbs(f);
+    if (!nros.length) return;
+    const cands = banco.filter(b => b.match === null && b.importe > 0 && nros.indexOf(nroBanco(b)) >= 0 &&
+      Math.abs(b.importe - f.importe) <= 1 && dias_(b.fecha, f.fecha) <= 60);
+    if (cands.length !== 1) return;
+    const dif = redondear_(cands[0].importe - f.importe);
+    unir_(cands, [f], 'Liquidación de tarjeta: mismo número de liquidación' + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
+    if (Math.abs(dif) > 0.005) {
+      const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo liquidación tarjeta ' + nros[0] + ' - ajustar',
+        referencia: '', asiento: f.asiento, debe: Math.max(dif, 0), haber: Math.max(-dif, 0) }, 'Mes');
+      a.cuenta = 'E';
+      ajustes.push(a);
+    }
+  });
+  // el crédito del banco = líneas de FBS con ese número de liquidación + una Confirmación de Valores Agrupados sin número
+  // (ej. 293.855,49 = 343.000 confirmados en junio - 49.144,51 "338370-arreglo liq. mal")
+  banco.forEach(b => {
+    const n = b.match === null && b.importe > 0 ? nroBanco(b) : null;
+    if (!n) return;
+    const L = fbs.filter(f => f.match === null && nrosFbs(f).indexOf(n) >= 0);
+    if (!L.length) return;
+    const resto = redondear_(b.importe - L.reduce((x, f) => x + f.importe, 0));
+    if (Math.abs(resto) <= TOLERANCIA) { unir_([b], L, 'Liquidación de tarjeta: mismo número de liquidación'); return; }
+    const g = fbs.filter(f => f.match === null && L.indexOf(f) < 0 && Math.abs(f.importe - resto) <= TOLERANCIA &&
+      /CONFIRMACI|AGRUPADOS|LIQ/i.test(f.texto) && dias_(f.fecha, b.fecha) <= 60);
+    if (g.length === 1) unir_([b], L.concat(g), 'Liquidación de tarjeta: mismo número de liquidación + confirmación de valores (revisar)');
+  });
+  return ajustes;
+}
+
+/** Mismo CUIT / nombre e importe con centavos de diferencia (hasta $1): ej. "veronesi" 298.280 y el recibo 298.280,13. */
+function difCentavos_(banco, fbs, ventana) {
+  const ajustes = [];
+  banco.slice().sort((a, b) => a.fecha - b.fecha).forEach(b => {
+    if (b.match !== null) return;
+    const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && (f.importe > 0) === (b.importe > 0) &&
+      Math.abs(f.importe - b.importe) > 0.005 && Math.abs(f.importe - b.importe) <= 1 && distancia_(b, f) <= ventana &&
+      (MISMO_ID_(b, f) || POR_NOMBRE_(b, f)));
+    if (cands.length !== 1) return;
+    const f = cands[0], dif = redondear_(b.importe - f.importe);
+    unir_([b], [f], 'Mismo CUIT o nombre, importe con centavos de diferencia (dif. ' + formato_(dif) + ')');
+    const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.slice(0, 40) + ' - ajustar',
+      referencia: '', asiento: f.asiento, debe: Math.max(dif, 0), haber: Math.max(-dif, 0) }, 'Mes');
+    a.cuenta = 'E';
+    ajustes.push(a);
+  });
+  return ajustes;
+}
+
 function gastosAsiento_(banco, fbs) {
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)));
   // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
@@ -2064,7 +2171,7 @@ function gastosAsiento_(banco, fbs) {
 
 function conciliar_(banco, fbs) {
   // las liquidaciones de tarjeta van primero y solo contra movimientos de tarjeta del día de la liquidación
-  const ajustesTarjeta = liquidacionesTarjeta_(banco, fbs);
+  const ajustesTarjeta = liquidacionPorNumero_(banco, fbs).concat(liquidacionesTarjeta_(banco, fbs));
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
@@ -2090,6 +2197,7 @@ function conciliar_(banco, fbs) {
   }
   if (CRUZAR_REDONDO_UNICO_DIA >= 3) { ventanaUnica_(banco, fbs, 3); mismaCantidad_(banco, fbs, 3); }
   lotes_(banco, fbs);
+  difCentavos_(banco, fbs, 400).forEach(a => ajustesTarjeta.push(a));
   importeGrandeUnico_(banco, fbs, '');
   asientosNetos_(banco, fbs);
   reversionesFbs_(fbs);
@@ -2188,6 +2296,9 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
     'Pendiente anterior: fecha del comentario + importe', v, true);
   // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
   pasada_(antBanco, eItems, (b, f) => f.tardio && especifico_(b.importe), 'Pendiente anterior: registro tardío + importe', 5, true);
+  // valores de Dome Taller: el Nº es la fecha de la transferencia ("Nº 96" = 9/6), aunque el importe sea redondo
+  pasada_(antBanco, eItems, (b, f) => !!f.cc && CC_NUMERO_ES_FECHA.test(f.cc) && !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 3,
+    'Pendiente anterior: valor de Dome Taller (fecha del Nº) + importe', v, true);
   // importe con centavos, un solo candidato en +-15 días (ej. descuento de documento del 25/06 y "01072026-G. de Echeq")
   pasada_(antBanco, eItems, b => Math.round(Math.abs(b.importe) * 100) % 100 !== 0,
     'Pendiente anterior: importe con centavos, único en +-15 días (revisar)', 15, true);
@@ -2350,7 +2461,9 @@ function gastosBancarios_(movs) {
   const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
   movs.forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
-    if (['1684', '1685', '907176', '907376', '917376'].includes(m.causal)) g.imp += d;
+    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633'].includes(m.causal)) g.imp += d;
+    else if (m.causal === '1384') g.sircreb += d;   // Santander
+    else if (m.causal === '566') g.tuc += d;        // Santander
     else if (m.causal === '907173') { if (t.includes('TUCUMAN')) g.tuc += d; else g.sircreb += d; }
     else if (m.causal === '905130') g.sellos += d;
     else if (m.causal === '907307') g.iva105 += d;
@@ -2657,6 +2770,10 @@ function conciliarTodo_(entrada, redondoUnico) {
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
+  // pendientes anteriores del banco que recién quedan libres después de netear FBS (ej. tarjeta cargada, anulada y
+  // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
+  pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
+    (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), 'Pendiente anterior: fecha del comentario + importe', 400, true);
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
@@ -2710,4 +2827,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
