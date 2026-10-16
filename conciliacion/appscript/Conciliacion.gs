@@ -2410,7 +2410,9 @@ function unicoDelDia_(banco, fbs) {
   fbs.forEach(f => { if (f.origen === 'Mes') cf.set(clave(f), (cf.get(clave(f)) || []).concat([f])); });
   cb.forEach((bs, k) => {
     const fs = cf.get(k) || [];
-    if (bs.length === 1 && fs.length === 1 && bs[0].match === null && fs[0].match === null) unir_(bs, fs, '4b. Fecha + importe redondo, único en el día (revisar)');
+    if (bs.length === 1 && fs.length === 1 && bs[0].match === null && fs[0].match === null && !fechaEscritaContradice_(bs[0], fs[0], 3)) {
+      unir_(bs, fs, '4b. Fecha + importe redondo, único en el día (revisar)');
+    }
   });
 }
 
@@ -2458,9 +2460,15 @@ function importeGrandeUnico_(banco, fbs, prefijo) {
 }
 
 /** Importe (aunque sea redondo) único en ambos lados dentro de +-dias. */
+/** El registro de FBS tiene escrita la fecha de otro valor (Nº 26/06 en un pase del 01/07): no se cruza por cercanía de fecha. */
+function fechaEscritaContradice_(b, f, d) {
+  return !!f.fechaRef && dias_(f.fechaRef, b.fecha) > d && !(f.fechaRef2 && dias_(f.fechaRef2, b.fecha) <= d);
+}
+
 function ventanaUnica_(banco, fbs, d) {
   banco.filter(b => b.match === null && b.origen === 'Mes').forEach(b => {
-    const fs = fbs.filter(f => f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= d);
+    const fs = fbs.filter(f => f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= d &&
+      !fechaEscritaContradice_(b, f, d));
     if (fs.length !== 1) return;
     const bs = banco.filter(x => x.match === null && Math.abs(x.importe - b.importe) <= TOLERANCIA && distancia_(x, fs[0]) <= d);
     if (bs.length === 1) unir_([b], fs, '4d. Importe único en +-' + d + ' días (revisar)');
