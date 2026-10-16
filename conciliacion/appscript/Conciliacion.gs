@@ -1638,11 +1638,12 @@ function leerAnteriores_(filas, desde) {
     if (!/^S[1-4]$/.test(sec) || imp === null) return;
     const fecha = parseFecha_(r[1]) || new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() - 1);
     const texto = String(r[2] || '');
-    const v = Math.abs(imp);
+    // el importe va en positivo; uno negativo invierte el sentido (ej. la comisión de una liquidación listada en S3)
+    const v = sec === 'S1' || sec === 'S3' ? imp : -imp;
     if (sec === 'S1' || sec === 'S2') {
-      out.push(partidaBanco_({ fecha, concepto: texto, importe: sec === 'S1' ? v : -v, ref: '', nombre: '' }, 'Arrastre'));
+      out.push(partidaBanco_({ fecha, concepto: texto, importe: v, ref: '', nombre: '' }, 'Arrastre'));
     } else {
-      out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: sec === 'S3' ? v : 0, haber: sec === 'S4' ? v : 0 }, 'Arrastre'));
+      out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: Math.max(v, 0), haber: Math.max(-v, 0) }, 'Arrastre'));
     }
     out[out.length - 1].sectorOriginal = sec;
   });
