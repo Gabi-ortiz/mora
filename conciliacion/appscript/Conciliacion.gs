@@ -1892,6 +1892,8 @@ function escribirAnalisisO_(ss, res) {
 /** Hoja "Pendientes anteriores": Sector (S1..S4), Fecha, Concepto, Importe (positivo). */
 function leerAnteriores_(filas, desde) {
   const out = [];
+  // "Pendientes en trabajo": la columna Estado la pone el usuario (Resuelto en FBS / Error de la lista se respetan al procesar)
+  const cEst = (filas[0] || []).map(x => String(x).trim()).indexOf('Estado');
   filas.slice(1).forEach(r => {
     const sec = String(r[0] || '').trim().toUpperCase();
     const imp = parseNum_(r[3]);
@@ -1906,6 +1908,7 @@ function leerAnteriores_(filas, desde) {
       out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: Math.max(v, 0), haber: Math.max(-v, 0) }, 'Arrastre'));
     }
     out[out.length - 1].sectorOriginal = sec;
+    if (cEst >= 0) out[out.length - 1].estado = String(r[cEst] || '').trim();
   });
   return out;
 }
@@ -2921,10 +2924,8 @@ function revisarPendientes() {
   sh.getRange(2, cFecha + 1, rev.length, 1).setValues(fec).setNumberFormat('dd/mm/yyyy hh:mm');
   const colores = res.map(x => [x.tipo === 'resuelto' ? '#C6EFCE' : x.tipo === 'posible' ? '#FFEB9C' : null]);
   sh.getRange(2, cRev + 1, rev.length, 1).setBackgrounds(colores);
-  if (cEst >= 0) {
-    const est = v.slice(1).map((x, i) => [res[i].tipo === 'resuelto' && (!x[cEst] || x[cEst] === 'Pendiente') ? 'Resuelto en FBS' : x[cEst]]);
-    sh.getRange(2, cEst + 1, est.length, 1).setValues(est);
-  }
+  // el Estado lo decide el usuario: "Resuelto en FBS" saca el pendiente de la conciliación si el proceso no lo cruza,
+  // así que la revisión automática no lo cambia (solo informa en su columna, en verde)
   const n = { resuelto: 0, posible: 0 };
   res.forEach(x => { if (n[x.tipo] !== undefined) n[x.tipo]++; });
   sh.activate();
@@ -3165,8 +3166,18 @@ function conciliarTodo_(entrada, redondoUnico) {
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
   const pend = { S1: [], S2: [], S3: [], S4: [] };
-  banco.concat(fbs).forEach(p => { if (p.match === null) pend[sector_(p)].push(p); });
-  ao.pendientes.forEach(p => pend[sector_(p)].push(p));   // no confirmados en O: directo a pendientes
+  // pendientes anteriores que el usuario marcó "Resuelto en FBS" o "Error de la lista" y el proceso no cruzó: salen de la
+  // conciliación (si la corrección no está en FBS, la diferencia de control cambia en lo que se sacó)
+  const quitados = [];
+  const sacar = p => p.origen === 'Arrastre' && /^(Resuelto|Error)/i.test(p.estado || '');
+  banco.concat(fbs).forEach(p => { if (p.match === null) (sacar(p) ? quitados : pend[sector_(p)]).push(p); });
+  ao.pendientes.forEach(p => (sacar(p) ? quitados : pend[sector_(p)]).push(p));   // no confirmados en O: directo a pendientes
+  if (quitados.length) {
+    const neto = redondear_(quitados.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
+    avisos.push(quitados.length + ' pendientes anteriores marcados "Resuelto en FBS" o "Error de la lista" en "' + HOJA.anterioresAlt[0] +
+      '" salieron de la conciliación (' + quitados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + ')' +
+      (Math.abs(neto) > 0.005 ? '. Neto ' + formato_(neto) + ': si no está corregido en FBS, la diferencia de control cambia en ese importe.' : '. Se compensan entre sí: el control no cambia.'));
+  }
   const tot = {};
   Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + valorSector_(p), 0)); });
   const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
