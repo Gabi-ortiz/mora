@@ -375,7 +375,17 @@ function procesar_(ss) {
   const hojaExtracto = (hojaDe_(ss, nombresExtracto_()) || { getName: () => HOJA.extracto }).getName();
   const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
   const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
-  const extracto = leer(hojaExtracto), reglas = leer(HOJA.reglas), empresas = leer(HOJA.empresas);
+  const extracto = leer(hojaExtracto), empresas = leer(HOJA.empresas);
+  let reglas = leer(HOJA.reglas);
+  // si la hoja Reglas no tiene ninguna regla del banco de "Cuenta bancaria" (ej. quedó con las de Macro al crear la
+  // planilla), se agregan las de ese banco
+  const delBanco = reglasDelBanco_(paramDe_(parametros, '^cuenta bancaria$'));
+  const codigos = new Set(reglas.slice(1).map(r => String(r[0]).trim()));
+  if (!delBanco.some(r => codigos.has(r[0]))) {
+    const shR = ss.getSheetByName(HOJA.reglas);
+    shR.getRange(shR.getLastRow() + 1, 1, delBanco.length, 5).setValues(delBanco);
+    reglas = leer(HOJA.reglas);
+  }
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null;
   if (idBase) {
