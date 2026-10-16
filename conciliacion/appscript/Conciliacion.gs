@@ -234,8 +234,8 @@ function crearMenu() {
 function crearParametros_(ss) {
   const filas = [
     ['Parámetro', 'Valor'],
-    ['Cuenta E', 1103013],
-    ['Cuenta O', 1103012],
+    ['Cuenta E', 'COMPLETAR'],
+    ['Cuenta O', 'COMPLETAR'],
     ['Saldo inicial cuenta E', ''],
     ['Saldo inicial cuenta O', ''],
     ['Cuenta bancaria', 'Banco Macro'],
@@ -1083,7 +1083,13 @@ function cuentasDe_(parametros) {
   const limpio = v => String(v).replace(/\.0+$/, '').trim();
   const pE = paramDe_(parametros, '^cuenta e$'), pO = paramDe_(parametros, '^cuenta o$');
   const sinO = pO !== null && (String(pO).trim() === '' || /^no$/i.test(String(pO).trim()));
-  return { E: limpio(pE || 1103013), O: sinO ? null : limpio(pO || 1103012) };
+  const E = limpio(pE === null ? '' : pE), O = sinO ? null : limpio(pO === null ? '' : pO);
+  // sin valores por defecto: una planilla nueva no puede quedar leyendo las cuentas de otro banco
+  if (!/^\d+$/.test(E) || (O !== null && !/^\d+$/.test(O))) {
+    throw new Error('Completá "Cuenta E" y "Cuenta O" en "' + HOJA.parametros + '" con los números de cuenta de FBS de este banco ' +
+      '(ej. Galicia: 1103098 y 1103097). Si no se usa la cuenta O, poné NO.');
+  }
+  return { E, O };
 }
 
 function idDeLink_(v) {
