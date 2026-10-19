@@ -774,15 +774,18 @@ function armarResumen(ss, listas) {
   const cierreMes = `(${r['Mes cierre']}=${M})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
   const aj = `${HOJA_AJUSTES}!`;
   const pr = `${HOJA_PRECIOS}!`;
-  // PROYECCION: operaciones con Modelo PEDIDO cargado y Carpeta vacía (de cualquier acto). Solo se
+  // PROYECCION: operaciones con Modelo PEDIDO cargado que todavía no son neto (de cualquier acto). Solo se
   // muestra cuando el mes elegido es el mes en curso; esos modelos se suman a la lista.
   const nombresMes = MESES.map((x) => `"${x}"`).join(',');
   const mesEnCurso = `(${M}=CHOOSE(MONTH(TODAY()),${nombresMes})&" "&RIGHT(YEAR(TODAY()),2))`;
   const mped = r['Modelo PEDIDO'];
+  // Pendiente = Modelo PEDIDO cargado, todavía no es neto (falta Pedido APROBADO o Carpeta APROBADA)
+  // y no es BAJA ADJ. De cualquier acto.
+  const pendiente = `(${mped}<>"")*(1-(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA"))*(${r.Pedido}<>"BAJA ADJ")`;
   sh.getRange('B51').setFormula(
     `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",${cierreMes}),"");` +
     `IFERROR(FILTER(${aj}B2:B,${aj}A2:A=${M},${aj}C2:C<>"",${aj}C2:C<>0),"");` +
-    `IF(${mesEnCurso},IFERROR(FILTER(${mped},${mped}<>"",${r.Carpeta}=""),""),"")}),SORT(FILTER(u,u<>""))),"")`);
+    `IF(${mesEnCurso},IFERROR(FILTER(${mped},${pendiente}>0),""),"")}),SORT(FILTER(u,u<>""))),"")`);
   // Familia: la del modelo en el mes; si ese mes no la tiene, la de cualquier otro mes.
   const fam = `${pr}$${COL_FAMILIA}$2:$${COL_FAMILIA}`;
   sh.getRange('C51').setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",IFERROR(INDEX(FILTER(${fam},` +
@@ -805,7 +808,7 @@ function armarResumen(ss, listas) {
   formatoTabla(50, 97, 10, [5, 6, 9, 10, 11], [7, 8]);
 
   // PROYECCION al lado de cada cuadro (M:P por modelo, J:M por familia): operaciones de BASE con
-  // Modelo PEDIDO cargado y Carpeta vacía. Cantidad, Descuentos ($ descuento), Incentivos / bonus
+  // Modelo PEDIDO cargado que todavía no son neto (ver pendiente). Cantidad, Descuentos ($ descuento), Incentivos / bonus
   // (Prec CC s/IVA del mes × (Bonus pedidos I23 + Inc pedido)) e Incentivos esperados (incentivos -
   // descuentos). Solo en el mes en curso.
   const proyeccion = (fTitulo, fTotal, fUlt, col) => {
@@ -817,8 +820,8 @@ function armarResumen(ss, listas) {
       .setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center')
       .setVerticalAlignment('middle')
       .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
-    sh.getRange(fTitulo + 1, col).setNote('Operaciones de BASE (de cualquier acto) con Modelo PEDIDO cargado y ' +
-      'Carpeta vacía. Solo se muestra en el mes en curso.');
+    sh.getRange(fTitulo + 1, col).setNote('Operaciones de BASE (de cualquier acto) con Modelo PEDIDO cargado que ' +
+      'todavía no son neto (falta Pedido APROBADO o Carpeta APROBADA), sin BAJA ADJ. Solo en el mes en curso.');
     sh.getRange(fTitulo + 1, col + 2).setNote('Prec CC s/IVA del mes × (Bonus pedidos + Inc pedido) de cada ' +
       'operación proyectada.');
     sh.getRange(fTitulo + 1, col + 3).setNote('Incentivos / bonus - Descuentos.');
@@ -838,9 +841,9 @@ function armarResumen(ss, listas) {
   // Por modelo (M:P), desde BASE.
   const fuera = `OR(m="",NOT(${mesEnCurso}))`;
   sh.getRange('M51').setFormula(`=MAP(${lista},LAMBDA(m,IF(${fuera},"",` +
-    `SUMPRODUCT((${mped}=m)*(${r.Carpeta}="")))))`);
+    `SUMPRODUCT((${mped}=m)*${pendiente}))))`);
   sh.getRange('N51').setFormula(`=LET(d,ARRAYFORMULA(IFERROR(--${r['$ descuento']},0)),MAP(${lista},LAMBDA(m,` +
-    `IF(${fuera},"",SUMPRODUCT((${mped}=m)*(${r.Carpeta}="")*d)))))`);
+    `IF(${fuera},"",SUMPRODUCT((${mped}=m)*${pendiente}*d)))))`);
   sh.getRange('O51').setFormula(`=MAP(${lista},M51:M97,LAMBDA(m,q,IF(q="","",q*` +
     `SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,m)*` +
     `(N($I$23)+SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)))))`);

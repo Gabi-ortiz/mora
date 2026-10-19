@@ -406,3 +406,9 @@ todo en una pantalla: RESUMEN B 110 px, C:L y N 94 px; INFORME B 110 px, C:K
   esperados (calculados desde BASE por Modelo PEDIDO). La de familia (J:M)
   ahora suma la de sus modelos. "Bonificaciones" se llama **Descuentos** en
   los dos cuadros.
+- (19/10/2026) **Regla de la PROYECCION cambiada**: ya no "Carpeta vacía"
+  sino operaciones con Modelo PEDIDO cargado que **todavía no son neto**
+  (falta Pedido APROBADO o Carpeta APROBADA), de cualquier acto, sin BAJA ADJ.
+  Así entran planes de actos anteriores que pueden cerrar en el mes (p. ej.
+  sept: NC1 con Pedido PENDIENTE y carpeta aprobada; DT1→PC5 suspendido con
+  carpeta rechazada). Probado: NC1 1, PC5 3, MB1 2, AC1 1.
