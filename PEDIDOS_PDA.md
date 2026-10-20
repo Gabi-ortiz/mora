@@ -412,3 +412,11 @@ todo en una pantalla: RESUMEN B 110 px, C:L y N 94 px; INFORME B 110 px, C:K
   Así entran planes de actos anteriores que pueden cerrar en el mes (p. ej.
   sept: NC1 con Pedido PENDIENTE y carpeta aprobada; DT1→PC5 suspendido con
   carpeta rechazada). Probado: NC1 1, PC5 3, MB1 2, AC1 1.
+
+## Objetivo "PEDIDOS" (20/10/2026)
+La carta 10/2026 trae el indicador como **PEDIDOS** (no PEDIDOS TOTALES) y el
+archivo de pedidos solo importaba PEDIDOS TOTALES: octubre quedaba sin
+objetivo. Ahora OBJETIVOS!A2 acepta los dos nombres (ya aplicado en el
+archivo) y el lector de cartas (`normalizarIndicador`, senales.gs) guarda
+"PEDIDOS" como "PEDIDOS TOTALES". En el archivo de objetivos se renombraron
+las dos filas de octubre (TURIN y JEA). Octubre: objetivo 39, categoría A.

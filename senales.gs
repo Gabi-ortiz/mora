@@ -585,7 +585,9 @@ function mesesComoTextoObj(rango) {
 }
 
 function normalizarIndicador(nombre) {
-  return nombre.replace(/\s+/g, ' ').replace(/[ .:]+$/, '').trim().toUpperCase();
+  const n = nombre.replace(/\s+/g, ' ').replace(/[ .:]+$/, '').trim().toUpperCase();
+  // La carta 10/2026 trae "PEDIDOS" solo: es el total (el archivo de pedidos busca PEDIDOS TOTALES).
+  return n === 'PEDIDOS' ? 'PEDIDOS TOTALES' : n;
 }
 
 // ---------------------------------------------------------------------------

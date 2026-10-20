@@ -495,7 +495,8 @@ function armarObjetivos(ss) {
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
   sh.getRange('A2').setFormula(
     `=IFERROR(QUERY(IMPORTRANGE("${ID_ARCHIVO_OBJETIVOS}","OBJETIVOS!A2:F"),` +
-    `"select Col1, Col5, Col6 where Col4 = 'PEDIDOS TOTALES' and Col3 = 'FIAT'",0),` +
+    // La carta lo trae como "PEDIDOS TOTALES" o solo "PEDIDOS" (octubre 2026).
+    `"select Col1, Col5, Col6 where (Col4 = 'PEDIDOS TOTALES' or Col4 = 'PEDIDOS') and Col3 = 'FIAT'",0),` +
     `"Hacer clic acá y elegir Permitir acceso al archivo de objetivos")`);
   // Objetivos de pedidos por modelo (p. ej. PEDIDOS CRONOS 27 y PEDIDOS TITANO 4 dentro de los 54).
   sh.getRange(1, 5, 1, 3).setValues([['Mes', 'Indicador', 'Objetivo']])
