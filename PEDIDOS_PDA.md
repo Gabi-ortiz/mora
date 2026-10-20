@@ -458,3 +458,9 @@ al precio CE s/IVA de su modelo base: el LI1 (ahorro LI1) se pagó a precio de
 NC1 y el TI1 (ahorro TI1) a precio de DT1. Con la regla nueva el informe da lo
 mismo que Fiat (diferencias de centavos por redondeo). Es lo mismo que hacía el
 archivo de agosto (todos los Cronos a precio NC1).
+
+**Adelanto de margen septiembre vs Fiat (21/10/2026):** Fiat liquidó 59
+operaciones ($ 188.478.807,94) y el cierre tiene 62 ($ 201.192.074,94). Las
+59 comunes coinciden al centavo (Fiat: (público s/IVA − CE s/IVA) × 60% =
+14% × 60%). No liquidadas: 9275455 y 9268260 (acto agosto, DT1→PT1) y
+9258524 (FO1). Columna Acto del Detalle ahora en formato texto.

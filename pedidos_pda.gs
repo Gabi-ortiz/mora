@@ -1613,6 +1613,7 @@ function crearArchivoInforme(d) {
   det.getRange(1, 1, 1, enc.length).setValues([enc]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
     .setFontColor('white').setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
   det.setFrozenRows(1);
+  det.getRange('A:A').setNumberFormat('@'); // Acto como texto (si no, Sheets convierte "JULIO 26" en fecha)
   const n = d.filas.length;
   if (n) {
     det.getRange(2, 1, n, enc.length).setValues(d.filas.map((f, i) => {
