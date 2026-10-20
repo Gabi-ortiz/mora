@@ -1437,7 +1437,9 @@ function valoresLista(ss, encabezado) {
 // - 2B Pedidos adicionales: % según categoría × precio CE sin IVA de NC1, por cada pedido sobre el
 //   objetivo (solo si se cumplió el objetivo de pedidos).
 // - 2C Extra bonus pedidos: Inc pedido (PRECIOS) del modelo PEDIDO × precio CE sin IVA del modelo
-//   de AHORRO. Solo si se cumplió patentamientos. Excluye Cronos 90/10 (B90) desde el grupo 18002.
+//   base de la familia del pedido (MODELO_BASE_FAMILIA: Cronos = NC1, Titano = DT1...), que es como
+//   liquida Fiat (septiembre 2026: un LI1 y un TI1 se pagaron a precio de NC1 y DT1). Solo si se
+//   cumplió patentamientos. Excluye Cronos 90/10 (B90) desde el grupo 18002.
 // - Adelanto de margen: precio público SIN IVA del modelo PEDIDO × 14% × 60%.
 
 const CARPETA_INFORMES = 'Informes de incentivos';
@@ -1445,6 +1447,13 @@ const MARGEN_COMISIONAL = 0.14;
 const ADELANTO_MARGEN = 0.6;
 const GRUPO_DESDE_B90 = 18002;
 const FAMILIAS_IVA_REDUCIDO = ['FIORINO', 'STRADA', 'TORO', 'TITANO'];
+// Modelo de ahorro de referencia de cada familia: el 2C se paga a su precio CE sin IVA.
+// Verificado con la liquidación de Fiat de septiembre 2026 (Cronos, Titano, Toro, Fiorino) y con el
+// archivo de agosto (Strada, Fastback, Pulse, Argo). Si la familia no está, se usa el modelo de ahorro.
+const MODELO_BASE_FAMILIA = {
+  CRONOS: 'NC1', TITANO: 'DT1', TORO: 'NT3', FIORINO: 'FO1', STRADA: 'FS1', FASTBACK: 'FT3', PULSE: 'FP3',
+  ARGO: 'AR2', MOBI: 'MB1',
+};
 
 function generarInforme() {
   const ss = SpreadsheetApp.getActive();
@@ -1553,10 +1562,11 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
     const ahorro = String(f[c('Modelo ahorro')]).trim();
     const pedido = String(f[c('Modelo PEDIDO')]).trim() || ahorro;
     const pp = precio[pedido] || {};
-    const pa = precio[ahorro] || {};
-    if (!num(pp.pub)) faltan.add(`${pedido} (precio público)`);
-    if (!num(pa.ceSin)) faltan.add(`${ahorro} (precio CE sin IVA)`);
     const fam = familia[pedido] || familia[ahorro] || '';
+    const modeloBase = MODELO_BASE_FAMILIA[String(fam).toUpperCase()] || ahorro;
+    const pb = precio[modeloBase] || {};
+    if (!num(pp.pub)) faltan.add(`${pedido} (precio público)`);
+    if (!num(pb.ceSin)) faltan.add(`${modeloBase} (precio CE sin IVA)`);
     const concepto = String(f[c('Concepto de venta')]);
     const grupo = num(f[c('Grupo')]);
     const b90 = /CRONOS/i.test(fam) && /^\s*90\s*\/\s*10/.test(concepto) && grupo >= GRUPO_DESDE_B90;
@@ -1568,7 +1578,7 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
     return {
       acto: textoMes(f[c('Acto')]), solicitud: f[c('Solicitud')], grupo: f[c('Grupo')], orden: f[c('Orden')],
       nombre: f[c('Apellido, Nombre')], concepto, ahorro, pedido, familia: fam,
-      pub: num(pp.pub), ivaPed: ivaDe(pedido), pct2A, ceSinAhorro: num(pa.ceSin), pct2C,
+      pub: num(pp.pub), ivaPed: ivaDe(pedido), pct2A, modeloBase, ceSinBase: num(pb.ceSin), pct2C,
       descuento: num(f[c('$ descuento')]), nota: notas.join('. '),
     };
   });
@@ -1598,8 +1608,8 @@ function crearArchivoInforme(d) {
   const det = nuevo.getSheets()[0].setName('Detalle');
   const enc = ['Acto', 'Solicitud', 'Grupo', 'Orden', 'Apellido, Nombre', 'Concepto de venta', 'Modelo ahorro',
     'Modelo pedido', 'Familia', 'Precio público c/IVA (pedido)', '% IVA', 'Precio público s/IVA (pedido)',
-    '% 2A cumplimiento', '2A Bonus cumplimiento', 'Precio CE s/IVA (ahorro)', '% 2C (Inc pedido)',
-    '2C Extra bonus', 'Adelanto margen (14% × 60%)', '$ descuento', 'Nota'];
+    '% 2A cumplimiento', '2A Bonus cumplimiento', 'Modelo base 2C (familia)', 'Precio CE s/IVA (modelo base)',
+    '% 2C (Inc pedido)', '2C Extra bonus', 'Adelanto margen (14% × 60%)', '$ descuento', 'Nota'];
   det.getRange(1, 1, 1, enc.length).setValues([enc]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
     .setFontColor('white').setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
   det.setFrozenRows(1);
@@ -1608,27 +1618,28 @@ function crearArchivoInforme(d) {
     det.getRange(2, 1, n, enc.length).setValues(d.filas.map((f, i) => {
       const r = i + 2;
       return [f.acto, f.solicitud, f.grupo, f.orden, f.nombre, f.concepto, f.ahorro, f.pedido, f.familia,
-        f.pub, f.ivaPed, `=J${r}/(1+K${r})`, f.pct2A, `=J${r}*M${r}`, f.ceSinAhorro, f.pct2C, `=O${r}*P${r}`,
-        `=L${r}*${MARGEN_COMISIONAL}*${ADELANTO_MARGEN}`, f.descuento, f.nota];
+        f.pub, f.ivaPed, `=J${r}/(1+K${r})`, f.pct2A, `=J${r}*M${r}`, f.modeloBase, f.ceSinBase, f.pct2C,
+        `=P${r}*Q${r}`, `=L${r}*${MARGEN_COMISIONAL}*${ADELANTO_MARGEN}`, f.descuento, f.nota];
     }));
     const t = n + 2;
     det.getRange(t, 1, 1, enc.length).setValues([['TOTAL', `=COUNTA(B2:B${n + 1})`, '', '', '', '', '', '', '', '',
-      '', '', '', `=SUM(N2:N${n + 1})`, '', '', `=SUM(Q2:Q${n + 1})`, `=SUM(R2:R${n + 1})`, `=SUM(S2:S${n + 1})`, '']])
+      '', '', '', `=SUM(N2:N${n + 1})`, '', '', '', `=SUM(R2:R${n + 1})`, `=SUM(S2:S${n + 1})`,
+      `=SUM(T2:T${n + 1})`, '']])
       .setFontWeight('bold').setBackground(FONDO_TOTAL);
-    ['J', 'L', 'N', 'O', 'Q', 'R', 'S'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat(pesos));
-    ['K', 'M', 'P'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat('0.0%'));
+    ['J', 'L', 'N', 'P', 'R', 'S', 'T'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat(pesos));
+    ['K', 'M', 'Q'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat('0.0%'));
   }
   det.setColumnWidth(5, 220);
   det.setColumnWidth(6, 200);
-  det.setColumnWidth(20, 260);
+  det.setColumnWidth(21, 260);
 
   // Resumen.
   const res = nuevo.insertSheet('Resumen', 0);
   const fin = n + 1;
   const tot2A = n ? `=Detalle!N${fin + 1}` : 0;
-  const tot2C = n ? `=Detalle!Q${fin + 1}` : 0;
-  const totMargen = n ? `=Detalle!R${fin + 1}` : 0;
-  const totDesc = n ? `=Detalle!S${fin + 1}` : 0;
+  const tot2C = n ? `=Detalle!R${fin + 1}` : 0;
+  const totMargen = n ? `=Detalle!S${fin + 1}` : 0;
+  const totDesc = n ? `=Detalle!T${fin + 1}` : 0;
   const siNo = (b) => (b ? 'Sí' : 'No');
   res.getRange('A1').setValue(`Incentivos pedidos FIAT - ${d.mes}`).setFontSize(16).setFontWeight('bold')
     .setFontColor(COLOR_ENCABEZADO);
@@ -1652,7 +1663,7 @@ function crearArchivoInforme(d) {
     ['2B Pedidos adicionales al objetivo', `${d.adicionales} pedido(s) × ${(d.pct2B * 100).toFixed(2)}%`,
       'Precio CE s/IVA de NC1', d.adicionales * d.pct2B * d.ceNC1],
     ['2C Extra bonus pedidos', `100% patentamientos (${siNo(d.patentamientos)})`,
-      'Inc pedido del modelo pedido × CE s/IVA del modelo de ahorro', tot2C],
+      'Inc pedido del modelo pedido × CE s/IVA del modelo base de la familia (Cronos NC1, Titano DT1...)', tot2C],
     ['Total incentivos', '', '', '=D13+D14+D15'],
     ['Descuentos otorgados', '', '$ descuento de BASE', totDesc],
     ['Total incentivos - descuentos', '', '', '=D16-D17'],
@@ -1670,7 +1681,7 @@ function crearArchivoInforme(d) {
     res.getRange(23, 1, fams.length, 6).setFormulas(fams.map((fa) => {
       const crit = fa === 'Sin familia' ? '""' : `"${fa}"`;
       const s = (l) => `=SUMIF(Detalle!$I$2:$I$${fin},${crit},Detalle!$${l}$2:$${l}$${fin})`;
-      return [`="${fa}"`, `=COUNTIF(Detalle!$I$2:$I$${fin},${crit})`, s('N'), s('Q'), s('R'), s('S')];
+      return [`="${fa}"`, `=COUNTIF(Detalle!$I$2:$I$${fin},${crit})`, s('N'), s('R'), s('S'), s('T')];
     }));
     res.getRange(23, 3, fams.length, 4).setNumberFormat(pesos);
   }

@@ -443,10 +443,18 @@ Reglas (señal 1599 + archivo "Márgenes e incentivos Agosto 2026"):
 |---|---|---|
 | 2A Bonus cumplimiento pedidos totales | INCENTIVOS según categoría; solo si netos >= objetivo y suscripciones Sí | Precio público c/IVA del **modelo pedido** |
 | 2B Pedidos adicionales | INCENTIVOS según categoría × pedidos sobre el objetivo | Precio CE s/IVA de **NC1** |
-| 2C Extra bonus pedidos | **Inc pedido** (PRECIOS) del **modelo pedido**; solo si patentamientos Sí; sin Cronos 90/10 B90 desde grupo 18002 | Precio CE s/IVA del **modelo de ahorro** (la señal lo dice) |
+| 2C Extra bonus pedidos | **Inc pedido** (PRECIOS) del **modelo pedido**; solo si patentamientos Sí; sin Cronos 90/10 B90 desde grupo 18002 | Precio CE s/IVA del **modelo base de la familia** del pedido (`MODELO_BASE_FAMILIA`: Cronos NC1, Titano DT1, Toro NT3, Fiorino FO1, Strada FS1, Fastback FT3, Pulse FP3, Argo AR2, Mobi MB1) |
 | Adelanto de margen | 14% × 60% | Precio público s/IVA del **modelo pedido** (IVA 10,5% en Fiorino/Strada/Toro/Titano) |
 
 Septiembre 26 (simulado con los datos reales, A, 62/60, suscripciones y
 patentamientos Sí): 2A $ 27.812.100; 2B $ 266.884; 2C $ 68.641.084 (6
 operaciones Cronos 90/10 B90 sin 2C); adelanto de margen $ 201.192.075.
 Inc pedido de septiembre cargado en PRECIOS desde la señal 1599.
+
+**Corrección 2C (21/10/2026):** comparado con la liquidación de Fiat de
+septiembre (Fiorino $ 258.233,48; Toro $ 12.510.081,45; Titano
+$ 46.483.972,85; Cronos $ 9.607.834,71), Fiat paga todo el 2C de una familia
+al precio CE s/IVA de su modelo base: el LI1 (ahorro LI1) se pagó a precio de
+NC1 y el TI1 (ahorro TI1) a precio de DT1. Con la regla nueva el informe da lo
+mismo que Fiat (diferencias de centavos por redondeo). Es lo mismo que hacía el
+archivo de agosto (todos los Cronos a precio NC1).
