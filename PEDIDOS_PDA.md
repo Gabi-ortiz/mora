@@ -420,3 +420,33 @@ objetivo. Ahora OBJETIVOS!A2 acepta los dos nombres (ya aplicado en el
 archivo) y el lector de cartas (`normalizarIndicador`, senales.gs) guarda
 "PEDIDOS" como "PEDIDOS TOTALES". En el archivo de objetivos se renombraron
 las dos filas de octubre (TURIN y JEA). Octubre: objetivo 39, categoría A.
+
+## Informe de incentivos (20/10/2026)
+Menú **Pedidos > Generar informe de incentivos** (reemplaza "Ordenar BASE por
+acto", que se sigue haciendo sola al agregar un acto). Pide:
+1. Período (mes de cierre; sugiere el mes anterior).
+2. Mails (separados por coma; se recuerdan para la próxima vez).
+3. ¿Se cumplió el 100% de suscripciones? / ¿Y de patentamientos? (este
+   archivo no los mide).
+
+Crea un Google Sheet nuevo "Incentivos pedidos FIAT - MES AA" en la
+subcarpeta **"Informes de incentivos"** de la carpeta de este archivo, lo
+comparte (lectura) con los mails y les manda el link con los totales.
+- **Detalle**: una fila por neto del mes (BASE: Mes cierre = mes, Pedido
+  APROBADO, Carpeta APROBADA). Precios y % como valores; importes como
+  fórmulas.
+- **Resumen**: categoría, objetivo, netos, condiciones, importes por concepto,
+  descuentos, total neto y adelanto de margen; cuadro por familia; avisos.
+
+Reglas (señal 1599 + archivo "Márgenes e incentivos Agosto 2026"):
+| Concepto | % | Base |
+|---|---|---|
+| 2A Bonus cumplimiento pedidos totales | INCENTIVOS según categoría; solo si netos >= objetivo y suscripciones Sí | Precio público c/IVA del **modelo pedido** |
+| 2B Pedidos adicionales | INCENTIVOS según categoría × pedidos sobre el objetivo | Precio CE s/IVA de **NC1** |
+| 2C Extra bonus pedidos | **Inc pedido** (PRECIOS) del **modelo pedido**; solo si patentamientos Sí; sin Cronos 90/10 B90 desde grupo 18002 | Precio CE s/IVA del **modelo de ahorro** (la señal lo dice) |
+| Adelanto de margen | 14% × 60% | Precio público s/IVA del **modelo pedido** (IVA 10,5% en Fiorino/Strada/Toro/Titano) |
+
+Septiembre 26 (simulado con los datos reales, A, 62/60, suscripciones y
+patentamientos Sí): 2A $ 27.812.100; 2B $ 266.884; 2C $ 68.641.084 (6
+operaciones Cronos 90/10 B90 sin 2C); adelanto de margen $ 201.192.075.
+Inc pedido de septiembre cargado en PRECIOS desde la señal 1599.

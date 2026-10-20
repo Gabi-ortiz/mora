@@ -160,10 +160,11 @@ function onOpen() {
     .createMenu('Pedidos')
     .addItem('Agregar acto pegado a BASE', 'agregarActoPegado')
     .addItem('Actualizar informe', 'actualizarInforme')
-    .addItem('Ordenar BASE por acto', 'ordenarBase')
+    .addItem('Generar informe de incentivos', 'generarInforme')
     .addSeparator()
     .addItem('Armar / reparar estructura', 'armarEstructura')
     .addToUi();
+  // ordenarBase() salió del menú (se sigue usando sola al agregar un acto).
   // importarHistorico() ya se usó (agosto y septiembre en BASE): quedó fuera del menú.
   // Si hiciera falta de nuevo, se corre desde el editor de Apps Script (no duplica).
 }
@@ -1422,4 +1423,287 @@ function valoresLista(ss, encabezado) {
   if (!c) return [];
   return sh.getRange(2, c, sh.getMaxRows() - 1, 1).getValues()
     .map((f) => f[0]).filter((v) => v !== '');
+}
+
+// ---------------------------------------------------------------------------
+// Informe de incentivos (menú Pedidos > Generar informe de incentivos)
+// ---------------------------------------------------------------------------
+//
+// Arma un Google Sheet nuevo por período (subcarpeta "Informes de incentivos", en la misma carpeta
+// que este archivo) con una fila por cada neto del mes y lo envía por mail. Reglas (señal 1599 y
+// archivo "Márgenes e incentivos" de agosto):
+// - 2A Bonus cumplimiento pedidos totales: % según categoría (INCENTIVOS) × precio público CON IVA
+//   del modelo PEDIDO. Solo si netos >= objetivo de pedidos y se cumplió suscripciones.
+// - 2B Pedidos adicionales: % según categoría × precio CE sin IVA de NC1, por cada pedido sobre el
+//   objetivo (solo si se cumplió el objetivo de pedidos).
+// - 2C Extra bonus pedidos: Inc pedido (PRECIOS) del modelo PEDIDO × precio CE sin IVA del modelo
+//   de AHORRO. Solo si se cumplió patentamientos. Excluye Cronos 90/10 (B90) desde el grupo 18002.
+// - Adelanto de margen: precio público SIN IVA del modelo PEDIDO × 14% × 60%.
+
+const CARPETA_INFORMES = 'Informes de incentivos';
+const MARGEN_COMISIONAL = 0.14;
+const ADELANTO_MARGEN = 0.6;
+const GRUPO_DESDE_B90 = 18002;
+const FAMILIAS_IVA_REDUCIDO = ['FIORINO', 'STRADA', 'TORO', 'TITANO'];
+
+function generarInforme() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const props = PropertiesService.getDocumentProperties();
+
+  // 1) Período.
+  const meses = mesesConDatos(ss).filter((m) => valoresColumnaBase(ss, 'Mes cierre').indexOf(m) >= 0);
+  const hoy = new Date();
+  const anterior = etiquetaMes((hoy.getMonth() + 11) % 12, (hoy.getFullYear() - (hoy.getMonth() === 0 ? 1 : 0)) % 100);
+  const sugerido = meses.indexOf(anterior) >= 0 ? anterior : meses[meses.length - 1];
+  const r1 = ui.prompt('Generar informe de incentivos',
+    `Período (mes de cierre). Meses con netos: ${meses.join(', ')}.\n` +
+    `Aceptar sin escribir nada = ${sugerido}.`, ui.ButtonSet.OK_CANCEL);
+  if (r1.getSelectedButton() !== ui.Button.OK) return;
+  const mes = textoMes(r1.getResponseText()) || sugerido;
+  if (meses.indexOf(mes) < 0) {
+    ui.alert(`"${mes}" no tiene netos en BASE. Usá el formato MES AA, por ejemplo SEPTIEMBRE 26.`);
+    return;
+  }
+
+  // 2) Mails (se recuerdan para la próxima vez).
+  const mailsGuardados = props.getProperty('MAILS_INFORME') || '';
+  const r2 = ui.prompt('Generar informe de incentivos',
+    'Mails a los que se envía, separados por coma.' +
+    (mailsGuardados ? `\nAceptar sin escribir nada = ${mailsGuardados}` : ''), ui.ButtonSet.OK_CANCEL);
+  if (r2.getSelectedButton() !== ui.Button.OK) return;
+  const mails = (r2.getResponseText().trim() || mailsGuardados).split(/[,;\s]+/)
+    .map((m) => m.trim()).filter((m) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(m));
+  if (!mails.length) {
+    ui.alert('No hay ningún mail válido.');
+    return;
+  }
+  props.setProperty('MAILS_INFORME', mails.join(', '));
+
+  // 3) Condiciones que este archivo no mide.
+  const suscripciones = ui.alert('Generar informe de incentivos',
+    `¿Se cumplió el 100% del objetivo de SUSCRIPCIONES en ${mes}?\n(Si no, el bonus 2A va en $0.)`,
+    ui.ButtonSet.YES_NO) === ui.Button.YES;
+  const patentamientos = ui.alert('Generar informe de incentivos',
+    `¿Se cumplió el 100% del objetivo de PATENTAMIENTOS en ${mes}?\n(Si no, el extra bonus 2C va en $0.)`,
+    ui.ButtonSet.YES_NO) === ui.Button.YES;
+
+  const datos = calcularIncentivos(ss, mes, suscripciones, patentamientos);
+  const archivo = crearArchivoInforme(datos);
+  enviarInforme(archivo, datos, mails);
+  ui.alert(`Informe de ${mes} generado y enviado a ${mails.join(', ')}.\n\n${archivo.getUrl()}` +
+    (datos.avisos.length ? `\n\nAtención:\n• ${datos.avisos.join('\n• ')}` : ''));
+}
+
+/** Calcula el detalle (una fila por neto de BASE) y los totales del período. */
+function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
+  const avisos = [];
+  // PRECIOS del mes y familia de cada modelo.
+  const pr = ss.getSheetByName(HOJA_PRECIOS).getDataRange().getValues().slice(1);
+  const precio = {};
+  const familia = {};
+  pr.forEach((f) => {
+    const m = textoMes(f[0]);
+    const mod = String(f[1]).trim();
+    if (!mod) return;
+    if (f[7] && (!familia[mod] || m === mes)) familia[mod] = String(f[7]).trim();
+    if (m === mes) precio[mod] = { inc: f[3], pub: f[4], ceIva: f[5], ceSin: f[6] };
+  });
+  const num = (v) => (typeof v === 'number' ? v : Number(String(v).replace(/[^\d.-]/g, '')) || 0);
+  const ivaDe = (mod) => {
+    const p = precio[mod];
+    if (p && num(p.ceIva) && num(p.ceSin)) return Math.round((num(p.ceIva) / num(p.ceSin) - 1) * 1000) / 1000;
+    return FAMILIAS_IVA_REDUCIDO.indexOf(String(familia[mod] || '').toUpperCase()) >= 0 ? 0.105 : 0.21;
+  };
+
+  // Objetivo, categoría e incentivos según categoría.
+  const obj = ss.getSheetByName(HOJA_OBJETIVOS).getRange('A2:C').getValues()
+    .find((f) => textoMes(f[0]) === mes) || [];
+  const objetivo = num(obj[1]);
+  const categoria = String(obj[2] || '').trim().toUpperCase();
+  if (!objetivo) avisos.push(`${mes} no tiene objetivo de pedidos cargado: 2A y 2B en $0.`);
+  const inc = ss.getSheetByName(HOJA_INCENTIVOS).getRange('A2:E').getValues()
+    .filter((f) => textoMes(f[0]) === mes);
+  const pctCategoria = (patron) => {
+    const f = inc.find((x) => patron.test(String(x[1]).toUpperCase()));
+    const i = ['A', 'B', 'C'].indexOf(categoria);
+    return f && i >= 0 ? num(f[2 + i]) : 0;
+  };
+
+  // Netos del mes en BASE.
+  const base = ss.getSheetByName(HOJA_BASE);
+  const ultima = ultimaFilaBase(base);
+  const vals = base.getRange(2, 1, ultima - 1, base.getLastColumn()).getValues();
+  const c = (n) => colBase(n) - 1;
+  const netos = vals.filter((f) => textoMes(f[c('Mes cierre')]) === mes &&
+    f[c('Pedido')] === 'APROBADO' && f[c('Carpeta')] === 'APROBADA');
+  const ajustes = ss.getSheetByName(HOJA_AJUSTES).getRange('A2:C').getValues()
+    .filter((f) => textoMes(f[0]) === mes && num(f[2]));
+  const totalNetos = netos.length + ajustes.reduce((a, f) => a + num(f[2]), 0);
+  const cumplePedidos = objetivo > 0 && totalNetos >= objetivo;
+  const pct2A = cumplePedidos && suscripciones ? pctCategoria(/CUMPLIMIENTO/) : 0;
+  const pct2B = cumplePedidos ? pctCategoria(/ADICIONALES/) : 0;
+  if (ajustes.length) {
+    avisos.push(`Hay ${ajustes.length} ajuste(s) de ${mes} en AJUSTES: suman a los netos pero no al detalle ` +
+      '(no tienen cliente ni modelo pedido).');
+  }
+
+  const faltan = new Set();
+  const filas = netos.map((f) => {
+    const ahorro = String(f[c('Modelo ahorro')]).trim();
+    const pedido = String(f[c('Modelo PEDIDO')]).trim() || ahorro;
+    const pp = precio[pedido] || {};
+    const pa = precio[ahorro] || {};
+    if (!num(pp.pub)) faltan.add(`${pedido} (precio público)`);
+    if (!num(pa.ceSin)) faltan.add(`${ahorro} (precio CE sin IVA)`);
+    const fam = familia[pedido] || familia[ahorro] || '';
+    const concepto = String(f[c('Concepto de venta')]);
+    const grupo = num(f[c('Grupo')]);
+    const b90 = /CRONOS/i.test(fam) && /^\s*90\s*\/\s*10/.test(concepto) && grupo >= GRUPO_DESDE_B90;
+    const pct2C = !patentamientos || b90 ? 0 : num(pp.inc);
+    const notas = [];
+    if (b90) notas.push('Cronos 90/10 (B90) desde grupo 18002: sin 2C');
+    if (!String(f[c('Modelo PEDIDO')]).trim()) notas.push('Sin Modelo PEDIDO: se usa el de ahorro');
+    if (pp.inc === '' || pp.inc === undefined) notas.push(`${pedido} sin Inc pedido en PRECIOS`);
+    return {
+      acto: textoMes(f[c('Acto')]), solicitud: f[c('Solicitud')], grupo: f[c('Grupo')], orden: f[c('Orden')],
+      nombre: f[c('Apellido, Nombre')], concepto, ahorro, pedido, familia: fam,
+      pub: num(pp.pub), ivaPed: ivaDe(pedido), pct2A, ceSinAhorro: num(pa.ceSin), pct2C,
+      descuento: num(f[c('$ descuento')]), nota: notas.join('. '),
+    };
+  });
+  if (faltan.size) avisos.push(`Faltan precios de ${mes} en PRECIOS: ${[...faltan].join(', ')}.`);
+
+  const adicionales = cumplePedidos ? totalNetos - objetivo : 0;
+  const ceNC1 = num((precio.NC1 || {}).ceSin);
+  return {
+    mes, categoria, objetivo, totalNetos, cumplePedidos, suscripciones, patentamientos, pct2A, pct2B,
+    adicionales, ceNC1, filas, avisos,
+  };
+}
+
+/** Crea el Sheet del informe (Resumen + Detalle) en la subcarpeta de informes. */
+function crearArchivoInforme(d) {
+  const nuevo = SpreadsheetApp.create(`Incentivos pedidos FIAT - ${d.mes}`);
+  const archivo = DriveApp.getFileById(nuevo.getId());
+  const padre = DriveApp.getFileById(SpreadsheetApp.getActive().getId()).getParents();
+  if (padre.hasNext()) {
+    const carpeta = padre.next();
+    const sub = carpeta.getFoldersByName(CARPETA_INFORMES);
+    archivo.moveTo(sub.hasNext() ? sub.next() : carpeta.createFolder(CARPETA_INFORMES));
+  }
+  const pesos = '$ #,##0';
+
+  // Detalle: insumos como valores, importes como fórmulas (se pueden revisar).
+  const det = nuevo.getSheets()[0].setName('Detalle');
+  const enc = ['Acto', 'Solicitud', 'Grupo', 'Orden', 'Apellido, Nombre', 'Concepto de venta', 'Modelo ahorro',
+    'Modelo pedido', 'Familia', 'Precio público c/IVA (pedido)', '% IVA', 'Precio público s/IVA (pedido)',
+    '% 2A cumplimiento', '2A Bonus cumplimiento', 'Precio CE s/IVA (ahorro)', '% 2C (Inc pedido)',
+    '2C Extra bonus', 'Adelanto margen (14% × 60%)', '$ descuento', 'Nota'];
+  det.getRange(1, 1, 1, enc.length).setValues([enc]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
+    .setFontColor('white').setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
+  det.setFrozenRows(1);
+  const n = d.filas.length;
+  if (n) {
+    det.getRange(2, 1, n, enc.length).setValues(d.filas.map((f, i) => {
+      const r = i + 2;
+      return [f.acto, f.solicitud, f.grupo, f.orden, f.nombre, f.concepto, f.ahorro, f.pedido, f.familia,
+        f.pub, f.ivaPed, `=J${r}/(1+K${r})`, f.pct2A, `=J${r}*M${r}`, f.ceSinAhorro, f.pct2C, `=O${r}*P${r}`,
+        `=L${r}*${MARGEN_COMISIONAL}*${ADELANTO_MARGEN}`, f.descuento, f.nota];
+    }));
+    const t = n + 2;
+    det.getRange(t, 1, 1, enc.length).setValues([['TOTAL', `=COUNTA(B2:B${n + 1})`, '', '', '', '', '', '', '', '',
+      '', '', '', `=SUM(N2:N${n + 1})`, '', '', `=SUM(Q2:Q${n + 1})`, `=SUM(R2:R${n + 1})`, `=SUM(S2:S${n + 1})`, '']])
+      .setFontWeight('bold').setBackground(FONDO_TOTAL);
+    ['J', 'L', 'N', 'O', 'Q', 'R', 'S'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat(pesos));
+    ['K', 'M', 'P'].forEach((l) => det.getRange(`${l}2:${l}${t}`).setNumberFormat('0.0%'));
+  }
+  det.setColumnWidth(5, 220);
+  det.setColumnWidth(6, 200);
+  det.setColumnWidth(20, 260);
+
+  // Resumen.
+  const res = nuevo.insertSheet('Resumen', 0);
+  const fin = n + 1;
+  const tot2A = n ? `=Detalle!N${fin + 1}` : 0;
+  const tot2C = n ? `=Detalle!Q${fin + 1}` : 0;
+  const totMargen = n ? `=Detalle!R${fin + 1}` : 0;
+  const totDesc = n ? `=Detalle!S${fin + 1}` : 0;
+  const siNo = (b) => (b ? 'Sí' : 'No');
+  res.getRange('A1').setValue(`Incentivos pedidos FIAT - ${d.mes}`).setFontSize(16).setFontWeight('bold')
+    .setFontColor(COLOR_ENCABEZADO);
+  res.getRange('A3:B10').setValues([
+    ['Categoría', d.categoria || '—'],
+    ['Objetivo de pedidos', d.objetivo || '—'],
+    ['Netos del mes', d.totalNetos],
+    ['% cumplimiento pedidos', d.objetivo ? d.totalNetos / d.objetivo : ''],
+    ['Pedidos adicionales al objetivo', d.adicionales],
+    ['Cumplió suscripciones (100%)', siNo(d.suscripciones)],
+    ['Cumplió patentamientos (100%)', siNo(d.patentamientos)],
+    ['Generado', Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm')],
+  ]);
+  res.getRange('A3:A10').setFontWeight('bold');
+  res.getRange('B6').setNumberFormat('0%');
+  res.getRange('A12:D12').setValues([['Concepto', 'Condición', 'Base', 'Importe']]).setFontWeight('bold')
+    .setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  res.getRange('A13:D19').setValues([
+    ['2A Bonus cumplimiento pedidos totales', `100% pedidos y suscripciones (${(d.pct2A * 100).toFixed(2)}%)`,
+      'Precio público c/IVA del modelo pedido', tot2A],
+    ['2B Pedidos adicionales al objetivo', `${d.adicionales} pedido(s) × ${(d.pct2B * 100).toFixed(2)}%`,
+      'Precio CE s/IVA de NC1', d.adicionales * d.pct2B * d.ceNC1],
+    ['2C Extra bonus pedidos', `100% patentamientos (${siNo(d.patentamientos)})`,
+      'Inc pedido del modelo pedido × CE s/IVA del modelo de ahorro', tot2C],
+    ['Total incentivos', '', '', '=D13+D14+D15'],
+    ['Descuentos otorgados', '', '$ descuento de BASE', totDesc],
+    ['Total incentivos - descuentos', '', '', '=D16-D17'],
+    ['Adelanto de margen', '60% del 14%', 'Precio público s/IVA del modelo pedido', totMargen],
+  ]);
+  res.getRange('D13:D19').setNumberFormat(pesos);
+  res.getRange('A16:D16').setFontWeight('bold').setBackground(FONDO_TOTAL);
+  res.getRange('A18:D18').setFontWeight('bold').setBackground(FONDO_TOTAL);
+
+  // Por familia (modelo pedido).
+  res.getRange('A22:F22').setValues([['Familia', 'Netos', '2A', '2C', 'Adelanto margen', 'Descuentos']])
+    .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  const fams = [...new Set(d.filas.map((f) => f.familia || 'Sin familia'))].sort();
+  if (n && fams.length) {
+    res.getRange(23, 1, fams.length, 6).setFormulas(fams.map((fa) => {
+      const crit = fa === 'Sin familia' ? '""' : `"${fa}"`;
+      const s = (l) => `=SUMIF(Detalle!$I$2:$I$${fin},${crit},Detalle!$${l}$2:$${l}$${fin})`;
+      return [`="${fa}"`, `=COUNTIF(Detalle!$I$2:$I$${fin},${crit})`, s('N'), s('Q'), s('R'), s('S')];
+    }));
+    res.getRange(23, 3, fams.length, 4).setNumberFormat(pesos);
+  }
+  if (d.avisos.length) {
+    const fa = 24 + fams.length;
+    res.getRange(fa, 1).setValue('Avisos').setFontWeight('bold');
+    res.getRange(fa + 1, 1, d.avisos.length, 1).setValues(d.avisos.map((a) => [a])).setFontColor('#b45f06');
+  }
+  res.setColumnWidth(1, 260);
+  res.setColumnWidth(2, 260);
+  res.setColumnWidth(3, 320);
+  res.setColumnWidth(4, 140);
+  SpreadsheetApp.flush();
+  return nuevo;
+}
+
+/** Comparte el informe con los destinatarios (lectura) y les manda el link con los totales. */
+function enviarInforme(nuevo, d, mails) {
+  const archivo = DriveApp.getFileById(nuevo.getId());
+  mails.forEach((m) => {
+    try { archivo.addViewer(m); } catch (e) { /* p. ej. mail sin cuenta Google: igual recibe el link */ }
+  });
+  const res = nuevo.getSheetByName('Resumen').getRange('A13:D19').getValues();
+  const fmt = (v) => '$ ' + Math.round(Number(v) || 0).toLocaleString('es-AR');
+  const filas = res.map((f) => `<tr><td style="padding:4px 10px">${f[0]}</td>` +
+    `<td style="padding:4px 10px;text-align:right">${fmt(f[3])}</td></tr>`).join('');
+  MailApp.sendEmail({
+    to: mails.join(','),
+    subject: `Incentivos pedidos FIAT - ${d.mes}`,
+    htmlBody: `<p>Informe de incentivos de pedidos FIAT de <b>${d.mes}</b>: ${d.totalNetos} netos` +
+      (d.objetivo ? ` sobre un objetivo de ${d.objetivo} (categoría ${d.categoria})` : '') + '.</p>' +
+      `<table style="border-collapse:collapse">${filas}</table>` +
+      `<p><a href="${nuevo.getUrl()}">Ver el detalle en Google Sheets</a></p>` +
+      (d.avisos.length ? `<p style="color:#b45f06">Atención:<br>${d.avisos.join('<br>')}</p>` : ''),
+  });
 }
