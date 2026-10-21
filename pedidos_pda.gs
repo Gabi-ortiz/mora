@@ -1443,6 +1443,9 @@ function valoresLista(ss, encabezado) {
 //   entregas (hoja SGA del archivo de entregas): si el REU (Fecha Ingreso de SGA) es del mismo mes,
 //   Fiat no adelanta (paga el 100% del margen con la entrega). Tampoco adelanta las operaciones de
 //   otro concesionario.
+// - Margen por entrega (40%): unidades con REU en el mes (Fecha Ingreso de SGA). Precio público SIN IVA
+//   del modelo entregado (FBS -> MODELOS FBS), lista del mes de la "Fecha factura" de SGA × 14% × 40%
+//   (verificado con el detalle de Fiat de septiembre 2026: la fecha que usa Fiat es la de factura).
 
 const ID_INFORME = '14wzzN13YYjYjneehyeZHYQLzFsDlfIXHS2LXo1CX98I';
 const NOMBRE_INFORME = 'Incentivos pedidos FIAT';
@@ -1466,6 +1469,25 @@ const MODELO_BASE_FAMILIA = {
 const INF_RESUMEN = 'Resumen';
 const INF_DETALLE = 'Detalle';
 const INF_PERIODO = 'Por período';
+const INF_ENTREGAS = 'Entregas';
+const MARGEN_ENTREGA = 0.4;
+// Versión entregada (texto de FBS) -> código de modelo, para el margen por entrega. Hoja de este archivo:
+// las versiones nuevas se agregan solas con el código vacío.
+const HOJA_MODELOS_FBS = 'MODELOS FBS';
+const MODELOS_FBS_INICIALES = [
+  ['ARGO DRIVE 1.3 CVT', 'AC1'], ['ARGO DRIVE 1.3 MT', 'AR2'], ['CRONOS 1.3 DRIVE CVT', 'PC5'],
+  ['CRONOS 1.3 LIKE', 'LI1'], ['CRONOS DRIVE 1.3 GSE Bz', 'DP1'], ['CRONOS DRIVE PLUS', 'NC1'],
+  ['CRONOS PRECISION 1.3 GSE CVT Bz', 'CA6'], ['DT1 - TITANO FREEDOM MT 4WD', 'DT1'],
+  ['FASTBACK ABARTH TURBO 270 AT6', 'FA4'], ['FASTBACK TURBO 270 AT6', 'FT3'], ['FIORINO ENDURANCE 1.3L MT', 'FO1'],
+  ['MOBI TREKKING 1.0 MT', 'MB1'], ['MOBI TREKKING 1.0MT5', 'MB1'], ['PULSE ABARTH TURBO 270 AT6', 'UA4'],
+  ['PULSE DRIVE 1.3 CVT', 'UL3'], ['PULSE DRIVE 1.3 MT5', 'FP3'], ['STRADA FREEDOM 1.3 CD', 'FS1'],
+  ['STRADA VOLCANO CD 1.3 8V CVT', 'VS1'], ['TITANO ENDURANCE MT', 'ET1'], ['TITANO ENDURANCE MT 4X4', 'TI1'],
+  ['TITANO FREEDOM PLUS AT8 AWD', 'PT1'], ['TITANO RANCH AT8 AWD', 'AT1'], ['TORO FREEDOM 1.3T AT6 4X2', 'NT3'],
+  ['TORO VOLCANO 1,3T AT6 4X2', 'VT3'], ['TT2 TORO VOLCANO 2,2TD AT9 4X4', 'TT1'],
+];
+const ENC_ENTREGAS = ['Mes (REU)', 'Grupo', 'Orden', 'Cliente', 'Fecha factura (SGA)', 'REU (Fecha ingreso SGA)',
+  'Fecha entrega (SGA)', 'Versión entregada (FBS)', 'Código', 'Familia', 'Mes del precio (factura)',
+  'Precio público c/IVA', '% IVA', 'Precio público s/IVA', 'Margen por entrega (14% × 40%)', 'Nota'];
 const ENC_DETALLE = ['Mes', 'Acto', 'Solicitud', 'Grupo', 'Orden', 'Apellido, Nombre', 'Concesionario',
   'Concepto de venta', 'Modelo ahorro', 'Modelo pedido', 'Familia', 'Precio público c/IVA (pedido)', '% IVA',
   'Precio público s/IVA (pedido)', '% 2A cumplimiento', '2A Bonus cumplimiento', 'Modelo base 2C (familia)',
@@ -1474,7 +1496,7 @@ const ENC_DETALLE = ['Mes', 'Acto', 'Solicitud', 'Grupo', 'Orden', 'Apellido, No
 const ENC_RESUMEN = ['Mes', 'Categoría', 'Objetivo', 'Netos', '% cumpl.', 'Adicionales', 'Suscripciones',
   'Patentamientos', '% 2A', '% 2B', 'CE s/IVA NC1', '2A Bonus cumplimiento', '2B Pedidos adicionales',
   '2C Extra bonus', 'Total incentivos', 'Descuentos', 'Total - descuentos', 'Adelanto margen',
-  'Pedidos con adelanto', 'Generado', 'Avisos'];
+  'Pedidos con adelanto', 'Unidades con REU', 'Margen por entrega (40%)', 'Generado', 'Avisos'];
 
 function generarInforme() {
   const ss = SpreadsheetApp.getActive();
@@ -1533,12 +1555,14 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
   const pr = ss.getSheetByName(HOJA_PRECIOS).getDataRange().getValues().slice(1);
   const precio = {};
   const familia = {};
+  const pubPorMes = {};
   pr.forEach((f) => {
     const m = textoMes(f[0]);
     const mod = String(f[1]).trim();
     if (!mod) return;
     if (f[7] && (!familia[mod] || m === mes)) familia[mod] = String(f[7]).trim();
     if (m === mes) precio[mod] = { inc: f[3], pub: f[4], ceIva: f[5], ceSin: f[6] };
+    if (m) (pubPorMes[m] = pubPorMes[m] || {})[mod] = f[4];
   });
   const num = (v) => (typeof v === 'number' ? v : Number(String(v).replace(/[^\d.-]/g, '')) || 0);
   const ivaDe = (mod) => {
@@ -1584,9 +1608,11 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
   try {
     reu = leerEntregasSGA();
   } catch (e) {
+    reu = null;
     avisos.push(`No se pudo leer la hoja SGA del archivo de entregas (${e.message}): el adelanto no descuenta ` +
-      'las unidades entregadas en el mes.');
+      'las unidades entregadas en el mes, y no se calcula el margen por entrega.');
   }
+  const sga = reu || {};
 
   const faltan = new Set();
   const filas = netos.map((f) => {
@@ -1604,7 +1630,7 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
     const pct2C = !patentamientos || b90 ? 0 : num(pp.inc);
     const conc = String(f[c('Concesionario')]).trim();
     const otroCE = conc !== '' && conc.toUpperCase() !== CONCESIONARIO_PROPIO;
-    const ent = reu[claveGrupoOrden(f[c('Grupo')], f[c('Orden')])] || {};
+    const ent = sga[claveGrupoOrden(f[c('Grupo')], f[c('Orden')])] || {};
     const reuMismoMes = !!ent.ingreso && etiquetaMes(ent.ingreso.getMonth(), ent.ingreso.getFullYear() % 100) === mes;
     const notas = [];
     if (b90) notas.push('Cronos 90/10 (B90) desde grupo 18002: sin 2C');
@@ -1623,12 +1649,111 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
   });
   if (faltan.size) avisos.push(`Faltan precios de ${mes} en PRECIOS: ${[...faltan].join(', ')}.`);
 
+  // Margen por entrega (40%): unidades con REU en el mes.
+  const pedidoDe = {};
+  vals.forEach((f) => {
+    const k = claveGrupoOrden(f[c('Grupo')], f[c('Orden')]);
+    if (k) pedidoDe[k] = String(f[c('Modelo PEDIDO')]).trim() || String(f[c('Modelo ahorro')]).trim();
+  });
+  const entregas = reu ? calcularEntregasMes(ss, mes, sga, pubPorMes, familia, pedidoDe, avisos) : [];
+
   const adicionales = cumplePedidos ? totalNetos - objetivo : 0;
   const ceNC1 = num((precio.NC1 || {}).ceSin);
   return {
     mes, categoria, objetivo, totalNetos, cumplePedidos, suscripciones, patentamientos, pct2A, pct2B,
-    adicionales, ceNC1, filas, avisos,
+    adicionales, ceNC1, filas, entregas, avisos,
   };
+}
+
+/**
+ * Unidades con REU (Fecha Ingreso de SGA) en el mes: modelo entregado (FBS -> MODELOS FBS; si no, el
+ * Modelo PEDIDO de BASE) y precio público de la lista del mes de la factura (si falta, el del mes más
+ * cercano, con nota).
+ */
+function calcularEntregasMes(ss, mes, sga, pubPorMes, familia, pedidoDe, avisos) {
+  const num = (v) => (typeof v === 'number' ? v : Number(String(v).replace(/[^\d.-]/g, '')) || 0);
+  const mesDe = (fecha) => (fecha ? etiquetaMes(fecha.getMonth(), fecha.getFullYear() % 100) : '');
+  const normal = (t) => String(t || '').toUpperCase().replace(/\s+/g, ' ').trim();
+  let fbs = {};
+  try {
+    fbs = leerEntregasFBS();
+  } catch (e) {
+    avisos.push(`No se pudo leer la hoja Base (FBS) del archivo de entregas (${e.message}): el modelo entregado ` +
+      'se toma del Modelo PEDIDO de BASE.');
+  }
+  // Equivalencias versión FBS -> código.
+  let hm = ss.getSheetByName(HOJA_MODELOS_FBS);
+  if (!hm) {
+    hm = ss.insertSheet(HOJA_MODELOS_FBS);
+    hm.getRange(1, 1, 1, 2).setValues([['Versión entregada (FBS)', 'Código']]).setFontWeight('bold')
+      .setBackground(COLOR_ENCABEZADO).setFontColor('white');
+    hm.getRange(2, 1, MODELOS_FBS_INICIALES.length, 2).setValues(MODELOS_FBS_INICIALES);
+    hm.setFrozenRows(1);
+    hm.setColumnWidth(1, 300);
+  }
+  const mapa = {};
+  hm.getDataRange().getValues().slice(1).forEach((f) => {
+    if (normal(f[0])) mapa[normal(f[0])] = String(f[1]).trim();
+  });
+  const familias = [...new Set(Object.values(familia).map((x) => String(x).trim()).filter(String))];
+  const famDeTexto = (t) => familias.find((fa) => normal(t).split(' ').indexOf(fa.toUpperCase()) >= 0) || '';
+  const ordenes = Object.keys(pubPorMes);
+  const pubDe = (m, cod) => {
+    if (num((pubPorMes[m] || {})[cod])) return { mes: m, pub: num(pubPorMes[m][cod]) };
+    const o = ordenMesInforme(m);
+    const otro = ordenes.filter((x) => num((pubPorMes[x] || {})[cod]))
+      .sort((a, b) => (Math.abs(ordenMesInforme(a) - o) - Math.abs(ordenMesInforme(b) - o)) ||
+        (ordenMesInforme(a) - ordenMesInforme(b)))[0];
+    return otro ? { mes: otro, pub: num(pubPorMes[otro][cod]) } : { mes: '', pub: 0 };
+  };
+
+  const nuevas = new Set();
+  const sinCodigo = [];
+  const sinPrecioMes = new Set();
+  const filas = Object.keys(sga).filter((k) => mesDe(sga[k].ingreso) === mes).map((k) => {
+    const s = sga[k];
+    const fb = fbs[k] || {};
+    const texto = fb.modelo || '';
+    if (texto && !(normal(texto) in mapa)) nuevas.add(texto);
+    const cod = mapa[normal(texto)] || pedidoDe[k] || '';
+    const mesPrecio = mesDe(s.factura) || mes;
+    const p = cod ? pubDe(mesPrecio, cod) : { mes: '', pub: 0 };
+    const fam = familia[cod] || famDeTexto(texto);
+    const notas = [];
+    if (!cod) {
+      sinCodigo.push(`${k} ${s.cliente}`);
+      notas.push('Sin código de modelo: completarlo en MODELOS FBS');
+    } else if (!mapa[normal(texto)]) {
+      notas.push(texto ? `Versión "${texto}" sin código en MODELOS FBS: se usa el Modelo PEDIDO` :
+        'No está en FBS: se usa el Modelo PEDIDO');
+    }
+    if (cod && p.mes !== mesPrecio) {
+      sinPrecioMes.add(`${cod} ${mesPrecio}`);
+      notas.push(p.pub ? `Sin precio de ${cod} en ${mesPrecio}: se usa el de ${p.mes}` : `Sin precio de ${cod}`);
+    }
+    if (!s.factura) notas.push('Sin fecha de factura en SGA: precio del mes del REU');
+    const [g, o] = k.split('-');
+    return [mes, Number(g), Number(o), s.cliente, s.factura || '', s.ingreso, s.entrega || '', texto, cod, fam,
+      p.mes, p.pub, FAMILIAS_IVA_REDUCIDO.indexOf(String(fam).toUpperCase()) >= 0 ? 0.105 : 0.21, '', '',
+      notas.join('. ')];
+  }).sort((a, b) => String(a[3]).localeCompare(String(b[3])));
+
+  if (nuevas.size) {
+    hm.getRange(hm.getLastRow() + 1, 1, nuevas.size, 2).setValues([...nuevas].map((t) => [t, '']));
+    avisos.push(`Versiones entregadas nuevas en ${HOJA_MODELOS_FBS} (completar el código): ${[...nuevas].join(', ')}.`);
+  }
+  if (sinCodigo.length) avisos.push(`Entregas sin código de modelo (margen 40% en $0): ${sinCodigo.join(', ')}.`);
+  if (sinPrecioMes.size) {
+    avisos.push(`Margen por entrega: faltan en PRECIOS los precios del mes de factura de ${[...sinPrecioMes].join(', ')} ` +
+      '(se usó el mes más cercano).');
+  }
+  // Entregadas (FBS) en el mes que todavía no están en SGA: se liquidan cuando tengan REU.
+  const pendientes = Object.keys(fbs).filter((k) => !sga[k] && mesDe(fbs[k].entrega) === mes)
+    .map((k) => `${k} ${fbs[k].cliente}`);
+  if (pendientes.length) {
+    avisos.push(`Entregadas en ${mes} sin REU todavía (no están en SGA): ${pendientes.join(', ')}.`);
+  }
+  return filas;
 }
 
 /** Hoja SGA del archivo de entregas: grupo-orden -> {ingreso, entrega} (fechas). */
@@ -1646,10 +1771,41 @@ function leerEntregasSGA() {
   const o = col('Orden');
   const fi = col('Fecha Ingreso');
   const fe = col('Fecha ent.unidad');
+  const ff = enc.indexOf('Fecha factura');
+  const rs = enc.indexOf('Razón social');
   const out = {};
   vals.slice(iEnc + 1).forEach((f) => {
     const k = claveGrupoOrden(f[g], f[o]);
-    if (k) out[k] = { ingreso: aFechaInforme(f[fi]), entrega: aFechaInforme(f[fe]) };
+    if (k) {
+      out[k] = { ingreso: aFechaInforme(f[fi]), entrega: aFechaInforme(f[fe]),
+        factura: ff >= 0 ? aFechaInforme(f[ff]) : null, cliente: rs >= 0 ? String(f[rs]).trim() : '' };
+    }
+  });
+  return out;
+}
+
+/** Hoja Base (FBS) del archivo de entregas: grupo-orden -> {modelo, entrega, cliente}. */
+function leerEntregasFBS() {
+  const vals = SpreadsheetApp.openById(ID_ENTREGAS).getSheetByName('Base').getDataRange().getValues();
+  const enc = vals[0].map((v) => String(v).trim());
+  const col = (n) => {
+    const i = enc.indexOf(n);
+    if (i < 0) throw new Error(`falta la columna "${n}"`);
+    return i;
+  };
+  const g = col('Grupo');
+  const o = col('Orden');
+  const m = col('Modelo');
+  const fe = col('FechaEntrega');
+  const ap = enc.indexOf('Apellido');
+  const no = enc.indexOf('Nombre');
+  const out = {};
+  vals.slice(1).forEach((f) => {
+    const k = claveGrupoOrden(f[g], f[o]);
+    if (k) {
+      out[k] = { modelo: String(f[m]).replace(/\s+/g, ' ').trim(), entrega: aFechaInforme(f[fe]),
+        cliente: [ap >= 0 ? String(f[ap]).trim() : '', no >= 0 ? String(f[no]).trim() : ''].filter(String).join(', ') };
+    }
   });
   return out;
 }
@@ -1695,17 +1851,29 @@ function abrirArchivoInforme(props) {
   return nuevo;
 }
 
-/** Hoja del informe con su encabezado; si el encabezado no es el actual (formato viejo), se rehace. */
+/**
+ * Hoja del informe con su encabezado. Si el encabezado cambió (columnas nuevas), los meses ya generados se
+ * conservan acomodándolos por nombre de columna; si es el formato viejo (sin columna Mes), se rehace vacía.
+ */
 function hojaInforme(inf, nombre, fila, enc) {
   let sh = inf.getSheetByName(nombre);
   if (!sh) sh = inf.insertSheet(nombre);
-  const actual = sh.getLastColumn() >= enc.length && sh.getLastRow() >= fila ?
-    sh.getRange(fila, 1, 1, enc.length).getValues()[0].map(String) : [];
-  if (actual.join('|') !== enc.join('|')) {
-    sh.clear();
-    sh.getRange(fila, 1, 1, enc.length).setValues([enc]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
-      .setFontColor('white').setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
-    sh.setFrozenRows(fila);
+  const ancho = sh.getLastColumn();
+  const actual = ancho && sh.getLastRow() >= fila ? sh.getRange(fila, 1, 1, ancho).getValues()[0].map(String) : [];
+  if (actual.slice(0, enc.length).join('|') === enc.join('|') && actual.length >= enc.length) return sh;
+  let datos = [];
+  if (/^Mes/.test(actual[0] || '') && sh.getLastRow() > fila) {
+    datos = sh.getRange(fila + 1, 1, sh.getLastRow() - fila, ancho).getValues()
+      .filter((f) => String(f[0]).trim() !== '')
+      .map((f) => enc.map((h) => (actual.indexOf(h) >= 0 ? f[actual.indexOf(h)] : '')));
+  }
+  sh.clear();
+  sh.getRange(fila, 1, 1, enc.length).setValues([enc]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
+    .setFontColor('white').setWrap(true).setVerticalAlignment('middle').setHorizontalAlignment('center');
+  sh.setFrozenRows(fila);
+  if (datos.length) {
+    sh.getRange(fila + 1, 1, datos.length, 1).setNumberFormat('@');
+    sh.getRange(fila + 1, 1, datos.length, enc.length).setValues(datos);
   }
   return sh;
 }
@@ -1718,7 +1886,7 @@ function filasSinMes(sh, fila, ancho, mes) {
     .filter((f) => String(f[0]).trim() !== '' && textoMes(f[0]) !== mes);
 }
 
-/** Agrega (o reemplaza) el mes en el Sheet de informes: Detalle, Resumen y Por período. */
+/** Agrega (o reemplaza) el mes en el Sheet de informes: Detalle, Entregas, Resumen y Por período. */
 function escribirInforme(inf, d) {
   const pesos = '$ #,##0';
   if (inf.getName() !== NOMBRE_INFORME) inf.rename(NOMBRE_INFORME);
@@ -1755,16 +1923,44 @@ function escribirInforme(inf, d) {
   if (det.getFilter()) det.getFilter().remove();
   det.getRange(1, 1, Math.max(2, todas.length + 1), ENC_DETALLE.length).createFilter();
 
+  // Entregas: una fila por unidad con REU en el mes (margen por entrega 40%), todos los meses generados.
+  const ent = hojaInforme(inf, INF_ENTREGAS, 1, ENC_ENTREGAS);
+  const todasEnt = filasSinMes(ent, 1, ENC_ENTREGAS.length, d.mes).concat(d.entregas)
+    .sort((a, b) => ordenMesInforme(textoMes(a[0])) - ordenMesInforme(textoMes(b[0])));
+  if (ent.getLastRow() > 1) ent.getRange(2, 1, ent.getLastRow() - 1, ENC_ENTREGAS.length).clearContent();
+  ent.getRange('A:A').setNumberFormat('@');
+  ent.getRange('K:K').setNumberFormat('@');
+  if (todasEnt.length) {
+    ent.getRange(2, 1, todasEnt.length, ENC_ENTREGAS.length).setValues(todasEnt.map((f, i) => {
+      const r = i + 2;
+      const x = f.slice();
+      x[0] = textoMes(x[0]);
+      x[10] = textoMes(x[10]);
+      x[13] = `=L${r}/(1+M${r})`;
+      x[14] = `=N${r}*${MARGEN_COMISIONAL}*${MARGEN_ENTREGA}`;
+      return x;
+    }));
+    const fin = todasEnt.length + 1;
+    ent.getRange(`E2:G${fin}`).setNumberFormat('dd/MM/yyyy');
+    ['L', 'N', 'O'].forEach((l) => ent.getRange(`${l}2:${l}${fin}`).setNumberFormat(pesos));
+    ent.getRange(`M2:M${fin}`).setNumberFormat('0.0%');
+  }
+  ent.setColumnWidth(4, 220);
+  ent.setColumnWidth(8, 240);
+  ent.setColumnWidth(16, 320);
+  if (ent.getFilter()) ent.getFilter().remove();
+  ent.getRange(1, 1, Math.max(2, todasEnt.length + 1), ENC_ENTREGAS.length).createFilter();
+
   // Resumen: una fila por mes. Importes con fórmulas sobre el Detalle.
   const res = hojaInforme(inf, INF_RESUMEN, 3, ENC_RESUMEN);
   inf.setActiveSheet(res);
   inf.moveActiveSheet(1);
   res.getRange('A1').setValue(NOMBRE_INFORME).setFontSize(16).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
   res.getRange('A2').setValue('Una fila por mes (al generar de nuevo un mes, se reemplaza). Detalle por operación ' +
-    'en la hoja Detalle; el resumen de un mes, con el detalle por familia, en "Por período".').setFontSize(9).setFontColor('#666666');
+    'en Detalle, por unidad entregada en Entregas; el resumen de un mes, con el detalle por familia, en "Por período".').setFontSize(9).setFontColor('#666666');
   const siNo = (b) => (b ? 'Sí' : 'No');
   const filaMes = [d.mes, d.categoria || '—', d.objetivo || '', d.totalNetos, '', d.adicionales, siNo(d.suscripciones),
-    siNo(d.patentamientos), d.pct2A, d.pct2B, d.ceNC1, '', '', '', '', '', '', '', '',
+    siNo(d.patentamientos), d.pct2A, d.pct2B, d.ceNC1, '', '', '', '', '', '', '', '', '', '',
     Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'dd/MM/yyyy HH:mm'), d.avisos.join(' • ')];
   const meses = filasSinMes(res, 3, ENC_RESUMEN.length, d.mes).concat([filaMes])
     .sort((a, b) => ordenMesInforme(textoMes(a[0])) - ordenMesInforme(textoMes(b[0])));
@@ -1772,6 +1968,7 @@ function escribirInforme(inf, d) {
     .setFontWeight('normal');
   res.getRange('A:A').setNumberFormat('@');
   const D = `'${INF_DETALLE}'!`;
+  const E = `'${INF_ENTREGAS}'!`;
   const s = (col, r) => `=SUMIFS(${D}${col}:${col},${D}A:A,$A${r})`;
   res.getRange(4, 1, meses.length, ENC_RESUMEN.length).setValues(meses.map((f, i) => {
     const r = i + 4;
@@ -1786,6 +1983,8 @@ function escribirInforme(inf, d) {
     x[16] = `=O${r}-P${r}`;
     x[17] = s('X', r);
     x[18] = `=COUNTIFS(${D}A:A,$A${r},${D}W:W,">0")`;
+    x[19] = `=COUNTIFS(${E}A:A,$A${r})`;
+    x[20] = `=SUMIFS(${E}O:O,${E}A:A,$A${r})`;
     return x;
   }));
   const ultimaRes = meses.length + 3;
@@ -1795,11 +1994,12 @@ function escribirInforme(inf, d) {
   res.getRange(`O4:O${ultimaRes}`).setFontWeight('bold');
   res.getRange(`Q4:Q${ultimaRes}`).setFontWeight('bold');
   res.getRange(`R4:R${ultimaRes}`).setFontWeight('bold').setBackground(FONDO_TOTAL);
-  res.getRange(`U4:U${ultimaRes}`).setFontColor('#b45f06').setFontSize(9).setWrap(true);
+  res.getRange(`U4:U${ultimaRes}`).setNumberFormat(pesos).setFontWeight('bold').setBackground(FONDO_TOTAL);
+  res.getRange(`W4:W${ultimaRes}`).setFontColor('#b45f06').setFontSize(9).setWrap(true);
   res.setColumnWidth(1, 120);
-  for (let col = 2; col <= 19; col++) res.setColumnWidth(col, col >= 11 ? 120 : 90);
-  res.setColumnWidth(20, 120);
-  res.setColumnWidth(21, 420);
+  for (let col = 2; col <= 21; col++) res.setColumnWidth(col, col >= 11 ? 120 : 90);
+  res.setColumnWidth(22, 120);
+  res.setColumnWidth(23, 420);
   res.setRowHeight(3, 45);
 
   // Por período: el resumen de un mes (elegido en B2) con el formato del informe mensual.
@@ -1827,7 +2027,7 @@ function escribirInforme(inf, d) {
     ['Pedidos adicionales al objetivo', `=IFERROR(${dato('F')},"")`],
     ['Cumplió suscripciones (100%)', `=IFERROR(${dato('G')},"")`],
     ['Cumplió patentamientos (100%)', `=IFERROR(${dato('H')},"")`],
-    ['Generado', `=IFERROR(${dato('T')},"")`],
+    ['Generado', `=IFERROR(${dato('V')},"")`],
   ]);
   per.getRange('A4:A11').setFontWeight('bold');
   per.getRange('B4:B11').setHorizontalAlignment('left');
@@ -1835,7 +2035,7 @@ function escribirInforme(inf, d) {
   per.getRange('A13:D13').setValues([['Concepto', 'Condición', 'Base', 'Importe']]).setFontWeight('bold')
     .setBackground(COLOR_ENCABEZADO).setFontColor('white');
   const imp = (col) => `=IFERROR(${dato(col)},0)`;
-  per.getRange('A14:D20').setValues([
+  per.getRange('A14:D21').setValues([
     ['2A Bonus cumplimiento pedidos totales', `=IFERROR("100% pedidos y suscripciones ("&TEXT(${dato('I')},"0.00%")&")","")`,
       'Precio público c/IVA del modelo pedido', imp('L')],
     ['2B Pedidos adicionales al objetivo', `=IFERROR(${dato('F')}&" pedido(s) × "&TEXT(${dato('J')},"0.00%"),"")`,
@@ -1847,16 +2047,20 @@ function escribirInforme(inf, d) {
     ['Total incentivos - descuentos', '', '', '=D17-D18'],
     ['Adelanto de margen', `=IFERROR("60% del 14% · "&${dato('S')}&" de "&${dato('D')}&" pedidos (sin REU en el mes)","")`,
       'Precio público s/IVA del modelo pedido', imp('R')],
+    ['Margen por entrega (40%)', `=IFERROR("40% del 14% · "&${dato('T')}&" unidades con REU en el mes","")`,
+      'Precio público s/IVA del modelo entregado (lista del mes de la factura)', imp('U')],
   ]);
-  per.getRange('D14:D20').setNumberFormat(pesos);
+  per.getRange('D14:D21').setNumberFormat(pesos);
   per.getRange('A17:D17').setFontWeight('bold').setBackground(FONDO_TOTAL);
   per.getRange('A19:D19').setFontWeight('bold').setBackground(FONDO_TOTAL);
 
-  // Por familia (modelo pedido) del mes elegido.
-  const encF = ['Familia', 'Netos', '2A', '2C', 'Adelanto margen', 'Pedidos con adelanto', 'Descuentos'];
+  // Por familia del mes elegido (pedidos: familia del modelo pedido; entregas: del modelo entregado).
+  const encF = ['Familia', 'Netos', '2A', '2C', 'Adelanto margen', 'Pedidos con adelanto', 'Descuentos',
+    'Unidades con REU', 'Margen por entrega (40%)'];
   per.getRange(23, 1, 1, encF.length).setValues([encF]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
     .setFontColor('white');
-  const familias = [...new Set(todas.map((f) => String(f[10] || '').trim() || 'Sin familia'))].sort();
+  const familias = [...new Set(todas.map((f) => String(f[10] || '').trim() || 'Sin familia')
+    .concat(todasEnt.map((f) => String(f[9] || '').trim() || 'Sin familia')))].sort();
   let filaAvisos = 26;
   if (familias.length) {
     const crit = (r) => `IF($A${r}="Sin familia","",$A${r})`;
@@ -1864,25 +2068,28 @@ function escribirInforme(inf, d) {
       const r = i + 24;
       const sf = (col) => `=SUMIFS(${D}${col}:${col},${D}A:A,$B$2,${D}K:K,${crit(r)})`;
       return [fa, `=COUNTIFS(${D}A:A,$B$2,${D}K:K,${crit(r)})`, sf('P'), sf('T'), sf('X'),
-        `=COUNTIFS(${D}A:A,$B$2,${D}K:K,${crit(r)},${D}W:W,">0")`, sf('Y')];
+        `=COUNTIFS(${D}A:A,$B$2,${D}K:K,${crit(r)},${D}W:W,">0")`, sf('Y'),
+        `=COUNTIFS(${E}A:A,$B$2,${E}J:J,${crit(r)})`, `=SUMIFS(${E}O:O,${E}A:A,$B$2,${E}J:J,${crit(r)})`];
     }));
     const t = familias.length + 24;
     per.getRange(t, 1, 1, encF.length).setValues([['TOTAL', `=SUM(B24:B${t - 1})`, `=SUM(C24:C${t - 1})`,
-      `=SUM(D24:D${t - 1})`, `=SUM(E24:E${t - 1})`, `=SUM(F24:F${t - 1})`, `=SUM(G24:G${t - 1})`]])
+      `=SUM(D24:D${t - 1})`, `=SUM(E24:E${t - 1})`, `=SUM(F24:F${t - 1})`, `=SUM(G24:G${t - 1})`,
+      `=SUM(H24:H${t - 1})`, `=SUM(I24:I${t - 1})`]])
       .setFontWeight('bold').setBackground(FONDO_TOTAL);
     per.getRange(24, 3, familias.length + 1, 3).setNumberFormat(pesos);
     per.getRange(24, 7, familias.length + 1, 1).setNumberFormat(pesos);
+    per.getRange(24, 9, familias.length + 1, 1).setNumberFormat(pesos);
     filaAvisos = t + 2;
   }
   per.getRange(filaAvisos, 1).setValue('Avisos').setFontWeight('bold');
-  per.getRange(filaAvisos + 1, 1).setFormula(`=IFERROR(SUBSTITUTE(${dato('U')}," • ",CHAR(10)),"")`)
+  per.getRange(filaAvisos + 1, 1).setFormula(`=IFERROR(SUBSTITUTE(${dato('W')}," • ",CHAR(10)),"")`)
     .setFontColor('#b45f06').setWrap(true);
   per.getRange(filaAvisos + 1, 1, 1, 4).merge();
   per.setColumnWidth(1, 260);
   per.setColumnWidth(2, 260);
   per.setColumnWidth(3, 320);
   per.setColumnWidth(4, 140);
-  for (let col = 5; col <= 7; col++) per.setColumnWidth(col, 130);
+  for (let col = 5; col <= 9; col++) per.setColumnWidth(col, 130);
 
   // Hoja vacía que crea Sheets en un archivo nuevo.
   const vacia = inf.getSheetByName('Hoja 1') || inf.getSheetByName('Sheet1');
@@ -1908,6 +2115,8 @@ function enviarInforme(inf, d, mails) {
     ['2C Extra bonus pedidos', t2C], ['Total incentivos', t2A + t2B + t2C], ['Descuentos otorgados', desc],
     ['Total incentivos - descuentos', t2A + t2B + t2C - desc],
     [`Adelanto de margen (${conAdelanto} de ${d.filas.length} pedidos)`, adelanto],
+    [`Margen por entrega 40% (${d.entregas.length} unidades con REU)`,
+      d.entregas.reduce((a, f) => a + f[11] / (1 + f[12]) * MARGEN_COMISIONAL * MARGEN_ENTREGA, 0)],
   ];
   const fmt = (v) => '$ ' + Math.round(Number(v) || 0).toLocaleString('es-AR');
   const filas = lineas.map((f) => `<tr><td style="padding:4px 10px">${f[0]}</td>` +

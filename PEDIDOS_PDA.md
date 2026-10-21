@@ -491,3 +491,28 @@ nota. Las operaciones de otro concesionario tampoco tienen adelanto.
 Septiembre: 59 de 62 pedidos con adelanto = $ 188.478.808, igual que Fiat
 (sin adelanto: PORTALUPI y PORTILLO, PT1 con REU en septiembre; ZORI, AUTO DEL
 SOL S.A.). Si no se puede leer SGA, el informe se arma igual y lo avisa.
+
+## Margen por entrega 40% en el informe (22/10/2026)
+Verificado con el detalle de la liquidación de Fiat de septiembre (Mg por
+entrega 40%): Fiat paga 14% × 40% del precio público s/IVA del **modelo
+entregado**, con la lista vigente a la **Fecha factura** de SGA (en las 56
+unidades la fecha que informa Fiat es la de factura). Las unidades son las que
+tienen REU en el mes (Fecha Ingreso de SGA): 55 de las 56 que liquidó Fiat
+(ESCANILLA 17982-90, con ingreso 28/8, Fiat la pagó en septiembre).
+
+- Hoja nueva **Entregas** en el archivo de informes (se acumula igual que
+  Detalle): mes del REU, cliente, fechas de factura, ingreso y entrega, versión
+  entregada (FBS), código, familia, mes del precio, precio, IVA y margen 40%.
+- **Resumen**: columnas "Unidades con REU" y "Margen por entrega (40%)". Las
+  filas de los meses ya generados se conservan (se acomodan por nombre de
+  columna).
+- **Por período**: línea "Margen por entrega (40%)" y columnas por familia.
+- Hoja nueva **MODELOS FBS** en este archivo: versión entregada (texto de FBS)
+  → código. Las versiones nuevas se agregan solas con el código vacío. Si una
+  unidad no está en FBS se usa el Modelo PEDIDO de BASE.
+- Si falta el precio del modelo en el mes de factura, se usa el del mes más
+  cercano y se avisa.
+
+Septiembre: las unidades facturadas en septiembre coinciden al peso con Fiat.
+Las facturadas en julio y agosto no, porque los precios de julio y agosto de
+PRECIOS no son los de lista de Fiat (total 98,1 M contra 108,0 M de Fiat).
