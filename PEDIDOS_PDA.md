@@ -464,3 +464,27 @@ operaciones ($ 188.478.807,94) y el cierre tiene 62 ($ 201.192.074,94). Las
 59 comunes coinciden al centavo (Fiat: (público s/IVA − CE s/IVA) × 60% =
 14% × 60%). No liquidadas: 9275455 y 9268260 (acto agosto, DT1→PT1) y
 9258524 (FO1). Columna Acto del Detalle ahora en formato texto.
+
+## Informe de incentivos acumulado + cruce con entregas (21/10/2026)
+**Generar informe de incentivos** ya no crea un archivo por mes: escribe en el
+Sheet **"Incentivos pedidos FIAT"** (`ID_INFORME`, el que se generó para
+septiembre; se renombra solo). Si ese archivo se borra, crea uno nuevo en
+"Informes de incentivos" y recuerda su ID. Al generar un mes que ya estaba, se
+reemplazan sus filas (no se duplica).
+- **Resumen**: una fila por mes: categoría, objetivo, netos, condiciones, % 2A y
+  2B, 2A, 2B, 2C, total, descuentos, total − descuentos, adelanto de margen,
+  pedidos con adelanto, fecha de generación y avisos.
+- **Detalle**: una fila por neto de todos los meses (columna Mes, con filtro).
+  Columnas nuevas: Concesionario, REU (Fecha ingreso SGA), Fecha entrega (SGA) y
+  % adelanto.
+- **Por familia**: elegir el mes en B2.
+- La primera vez, las hojas Resumen y Detalle del formato viejo se rehacen:
+  generar de nuevo julio, agosto y septiembre.
+
+**Cruce con entregas (adelanto de margen):** se lee la hoja SGA del archivo
+"Entregas PDA". Si el pedido tiene REU (Fecha Ingreso de SGA) en el mismo mes,
+Fiat no lo adelanta (paga el 100% del margen con la entrega): % adelanto 0 y
+nota. Las operaciones de otro concesionario tampoco tienen adelanto.
+Septiembre: 59 de 62 pedidos con adelanto = $ 188.478.808, igual que Fiat
+(sin adelanto: PORTALUPI y PORTILLO, PT1 con REU en septiembre; ZORI, AUTO DEL
+SOL S.A.). Si no se puede leer SGA, el informe se arma igual y lo avisa.
