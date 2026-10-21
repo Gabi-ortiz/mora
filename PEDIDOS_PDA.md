@@ -516,3 +516,25 @@ tienen REU en el mes (Fecha Ingreso de SGA): 55 de las 56 que liquidó Fiat
 Septiembre: las unidades facturadas en septiembre coinciden al peso con Fiat.
 Las facturadas en julio y agosto no, porque los precios de julio y agosto de
 PRECIOS no son los de lista de Fiat (total 98,1 M contra 108,0 M de Fiat).
+
+## Precios de julio y agosto cargados desde la liquidación de Fiat (22/10/2026)
+En PRECIOS se reemplazó "Prec publico c/IVA" de julio y agosto por el precio de
+lista de Fiat. Se sacó del detalle de la liquidación de septiembre (40%, 60%,
+recupero y adelanto): precio público s/IVA × (1 + IVA), un único valor por
+modelo y mes. Los "Prec CC" que salen de esa fórmula coinciden con el CE s/IVA
+que informa Fiat. También se completaron la Version y la Familia de esos meses.
+- Julio: AR2 32.390.000, FS1 40.410.000, PC5 40.720.000, CA6 41.340.000,
+  MB1 29.610.000, NT3 50.890.000; filas nuevas NC1 35.660.000 y VT3 55.990.000.
+- Agosto: DP1 41.307.521, AR2 33.040.000, FS1 41.220.000, FT3 50.540.000,
+  FO1 32.210.000, NC1 36.380.000, LI1 34.010.000, DT1 60.920.000,
+  PC5 41.540.000, CA6 42.170.000, FP3 40.920.000, MB1 30.210.000,
+  NT3 51.910.000; filas nuevas AC1 35.140.000, ET1 52.270.000, FA4 53.490.000,
+  TT1 61.550.000 y VT3 57.110.000.
+- Sin dato de Fiat (quedan como estaban): julio DP1, FT3, FO1, LI1, DT1, TI1,
+  FP3; agosto TI1; y TN5, CD7, TV6 y FP1 (sin versión ni familia).
+
+Con estos precios, el margen por entrega 40% de septiembre da $ 106.198.738 para
+las 55 unidades con REU en septiembre, contra $ 106.127.049 de Fiat para las
+mismas unidades. La diferencia es FERRANDO (Mobi facturado en junio: no hay
+precio de junio y se usa el de julio). El total de Fiat ($ 108.038.802) suma
+ESCANILLA, con REU 28/8, que el informe cuenta en agosto.
