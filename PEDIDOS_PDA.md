@@ -477,7 +477,10 @@ reemplazan sus filas (no se duplica).
 - **Detalle**: una fila por neto de todos los meses (columna Mes, con filtro).
   Columnas nuevas: Concesionario, REU (Fecha ingreso SGA), Fecha entrega (SGA) y
   % adelanto.
-- **Por familia**: elegir el mes en B2.
+- **Por período**: elegir el mes en B2. Muestra el resumen de ese mes con el
+  formato del informe mensual (categoría, objetivo, netos, condiciones;
+  concepto, condición, base e importe; total, descuentos y adelanto), el cuadro
+  por familia y los avisos.
 - La primera vez, las hojas Resumen y Detalle del formato viejo se rehacen:
   generar de nuevo julio, agosto y septiembre.
 

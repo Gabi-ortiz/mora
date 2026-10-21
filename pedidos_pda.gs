@@ -1465,7 +1465,7 @@ const MODELO_BASE_FAMILIA = {
 // Hojas del archivo de informes.
 const INF_RESUMEN = 'Resumen';
 const INF_DETALLE = 'Detalle';
-const INF_FAMILIAS = 'Por familia';
+const INF_PERIODO = 'Por período';
 const ENC_DETALLE = ['Mes', 'Acto', 'Solicitud', 'Grupo', 'Orden', 'Apellido, Nombre', 'Concesionario',
   'Concepto de venta', 'Modelo ahorro', 'Modelo pedido', 'Familia', 'Precio público c/IVA (pedido)', '% IVA',
   'Precio público s/IVA (pedido)', '% 2A cumplimiento', '2A Bonus cumplimiento', 'Modelo base 2C (familia)',
@@ -1718,7 +1718,7 @@ function filasSinMes(sh, fila, ancho, mes) {
     .filter((f) => String(f[0]).trim() !== '' && textoMes(f[0]) !== mes);
 }
 
-/** Agrega (o reemplaza) el mes en el Sheet de informes: Detalle, Resumen y Por familia. */
+/** Agrega (o reemplaza) el mes en el Sheet de informes: Detalle, Resumen y Por período. */
 function escribirInforme(inf, d) {
   const pesos = '$ #,##0';
   if (inf.getName() !== NOMBRE_INFORME) inf.rename(NOMBRE_INFORME);
@@ -1761,7 +1761,7 @@ function escribirInforme(inf, d) {
   inf.moveActiveSheet(1);
   res.getRange('A1').setValue(NOMBRE_INFORME).setFontSize(16).setFontWeight('bold').setFontColor(COLOR_ENCABEZADO);
   res.getRange('A2').setValue('Una fila por mes (al generar de nuevo un mes, se reemplaza). Detalle por operación ' +
-    'en la hoja Detalle; por familia en "Por familia".').setFontSize(9).setFontColor('#666666');
+    'en la hoja Detalle; el resumen de un mes, con el detalle por familia, en "Por período".').setFontSize(9).setFontColor('#666666');
   const siNo = (b) => (b ? 'Sí' : 'No');
   const filaMes = [d.mes, d.categoria || '—', d.objetivo || '', d.totalNetos, '', d.adicionales, siNo(d.suscripciones),
     siNo(d.patentamientos), d.pct2A, d.pct2B, d.ceNC1, '', '', '', '', '', '', '', '',
@@ -1802,38 +1802,87 @@ function escribirInforme(inf, d) {
   res.setColumnWidth(21, 420);
   res.setRowHeight(3, 45);
 
-  // Por familia: elegir el mes en B2.
-  const fam = inf.getSheetByName(INF_FAMILIAS) || inf.insertSheet(INF_FAMILIAS);
-  const mesFam = textoMes(fam.getRange('B2').getValue());
+  // Por período: el resumen de un mes (elegido en B2) con el formato del informe mensual.
+  let per = inf.getSheetByName(INF_PERIODO);
+  if (!per && inf.getSheetByName('Por familia')) per = inf.getSheetByName('Por familia').setName(INF_PERIODO);
+  if (!per) per = inf.insertSheet(INF_PERIODO);
+  const mesSel = textoMes(per.getRange('B2').getValue());
   const listaMeses = meses.map((f) => textoMes(f[0]));
-  fam.clear();
-  fam.getRange('A1').setValue('Por familia (modelo pedido)').setFontSize(14).setFontWeight('bold')
+  per.clear();
+  per.getRange(1, 1, per.getMaxRows(), per.getMaxColumns()).breakApart().clearDataValidations();
+  per.getRange('A1').setValue(`${NOMBRE_INFORME} - por período`).setFontSize(16).setFontWeight('bold')
     .setFontColor(COLOR_ENCABEZADO);
-  fam.getRange('A2').setValue('Mes').setFontWeight('bold');
-  fam.getRange('B2').setNumberFormat('@').setValue(listaMeses.indexOf(mesFam) >= 0 ? mesFam : d.mes)
+  per.getRange('A2').setValue('Período').setFontWeight('bold');
+  per.getRange('B2').setNumberFormat('@').setValue(listaMeses.indexOf(mesSel) >= 0 ? mesSel : d.mes)
     .setFontWeight('bold').setBackground('#fff2cc')
     .setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(listaMeses, true).build());
+  // Dato del mes elegido, leído de la fila del mes en Resumen.
+  const R = `'${INF_RESUMEN}'!`;
+  const dato = (col) => `INDEX(${R}${col}:${col},MATCH($B$2,${R}A:A,0))`;
+  per.getRange('A4:B11').setValues([
+    ['Categoría', `=IFERROR(${dato('B')},"")`],
+    ['Objetivo de pedidos', `=IFERROR(${dato('C')},"")`],
+    ['Netos del mes', `=IFERROR(${dato('D')},"")`],
+    ['% cumplimiento pedidos', `=IFERROR(${dato('E')},"")`],
+    ['Pedidos adicionales al objetivo', `=IFERROR(${dato('F')},"")`],
+    ['Cumplió suscripciones (100%)', `=IFERROR(${dato('G')},"")`],
+    ['Cumplió patentamientos (100%)', `=IFERROR(${dato('H')},"")`],
+    ['Generado', `=IFERROR(${dato('T')},"")`],
+  ]);
+  per.getRange('A4:A11').setFontWeight('bold');
+  per.getRange('B4:B11').setHorizontalAlignment('left');
+  per.getRange('B7').setNumberFormat('0%');
+  per.getRange('A13:D13').setValues([['Concepto', 'Condición', 'Base', 'Importe']]).setFontWeight('bold')
+    .setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  const imp = (col) => `=IFERROR(${dato(col)},0)`;
+  per.getRange('A14:D20').setValues([
+    ['2A Bonus cumplimiento pedidos totales', `=IFERROR("100% pedidos y suscripciones ("&TEXT(${dato('I')},"0.00%")&")","")`,
+      'Precio público c/IVA del modelo pedido', imp('L')],
+    ['2B Pedidos adicionales al objetivo', `=IFERROR(${dato('F')}&" pedido(s) × "&TEXT(${dato('J')},"0.00%"),"")`,
+      'Precio CE s/IVA de NC1', imp('M')],
+    ['2C Extra bonus pedidos', `=IFERROR("100% patentamientos ("&${dato('H')}&")","")`,
+      'Inc pedido del modelo pedido × CE s/IVA del modelo base de la familia (Cronos NC1, Titano DT1...)', imp('N')],
+    ['Total incentivos', '', '', '=D14+D15+D16'],
+    ['Descuentos otorgados', '', '$ descuento de BASE', imp('P')],
+    ['Total incentivos - descuentos', '', '', '=D17-D18'],
+    ['Adelanto de margen', `=IFERROR("60% del 14% · "&${dato('S')}&" de "&${dato('D')}&" pedidos (sin REU en el mes)","")`,
+      'Precio público s/IVA del modelo pedido', imp('R')],
+  ]);
+  per.getRange('D14:D20').setNumberFormat(pesos);
+  per.getRange('A17:D17').setFontWeight('bold').setBackground(FONDO_TOTAL);
+  per.getRange('A19:D19').setFontWeight('bold').setBackground(FONDO_TOTAL);
+
+  // Por familia (modelo pedido) del mes elegido.
   const encF = ['Familia', 'Netos', '2A', '2C', 'Adelanto margen', 'Pedidos con adelanto', 'Descuentos'];
-  fam.getRange(4, 1, 1, encF.length).setValues([encF]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
+  per.getRange(23, 1, 1, encF.length).setValues([encF]).setFontWeight('bold').setBackground(COLOR_ENCABEZADO)
     .setFontColor('white');
   const familias = [...new Set(todas.map((f) => String(f[10] || '').trim() || 'Sin familia'))].sort();
+  let filaAvisos = 26;
   if (familias.length) {
     const crit = (r) => `IF($A${r}="Sin familia","",$A${r})`;
-    fam.getRange(5, 1, familias.length, encF.length).setValues(familias.map((fa, i) => {
-      const r = i + 5;
+    per.getRange(24, 1, familias.length, encF.length).setValues(familias.map((fa, i) => {
+      const r = i + 24;
       const sf = (col) => `=SUMIFS(${D}${col}:${col},${D}A:A,$B$2,${D}K:K,${crit(r)})`;
       return [fa, `=COUNTIFS(${D}A:A,$B$2,${D}K:K,${crit(r)})`, sf('P'), sf('T'), sf('X'),
         `=COUNTIFS(${D}A:A,$B$2,${D}K:K,${crit(r)},${D}W:W,">0")`, sf('Y')];
     }));
-    const t = familias.length + 5;
-    fam.getRange(t, 1, 1, encF.length).setValues([['TOTAL', `=SUM(B5:B${t - 1})`, `=SUM(C5:C${t - 1})`,
-      `=SUM(D5:D${t - 1})`, `=SUM(E5:E${t - 1})`, `=SUM(F5:F${t - 1})`, `=SUM(G5:G${t - 1})`]])
+    const t = familias.length + 24;
+    per.getRange(t, 1, 1, encF.length).setValues([['TOTAL', `=SUM(B24:B${t - 1})`, `=SUM(C24:C${t - 1})`,
+      `=SUM(D24:D${t - 1})`, `=SUM(E24:E${t - 1})`, `=SUM(F24:F${t - 1})`, `=SUM(G24:G${t - 1})`]])
       .setFontWeight('bold').setBackground(FONDO_TOTAL);
-    fam.getRange(5, 3, familias.length + 1, 3).setNumberFormat(pesos);
-    fam.getRange(5, 7, familias.length + 1, 1).setNumberFormat(pesos);
+    per.getRange(24, 3, familias.length + 1, 3).setNumberFormat(pesos);
+    per.getRange(24, 7, familias.length + 1, 1).setNumberFormat(pesos);
+    filaAvisos = t + 2;
   }
-  fam.setColumnWidth(1, 160);
-  for (let col = 2; col <= 7; col++) fam.setColumnWidth(col, 130);
+  per.getRange(filaAvisos, 1).setValue('Avisos').setFontWeight('bold');
+  per.getRange(filaAvisos + 1, 1).setFormula(`=IFERROR(SUBSTITUTE(${dato('U')}," • ",CHAR(10)),"")`)
+    .setFontColor('#b45f06').setWrap(true);
+  per.getRange(filaAvisos + 1, 1, 1, 4).merge();
+  per.setColumnWidth(1, 260);
+  per.setColumnWidth(2, 260);
+  per.setColumnWidth(3, 320);
+  per.setColumnWidth(4, 140);
+  for (let col = 5; col <= 7; col++) per.setColumnWidth(col, 130);
 
   // Hoja vacía que crea Sheets en un archivo nuevo.
   const vacia = inf.getSheetByName('Hoja 1') || inf.getSheetByName('Sheet1');
