@@ -559,3 +559,11 @@ familia. Esos meses se listan en `MESES_2C_MODELO_PEDIDO`. Inc pedido de
 octubre corregido en PRECIOS según la señal: FP3 12,5%, DT1 10%, TI1 1%
 (versión TITANO ENDURANCE MT 4X4), AR2 0% y AU3 0% (no está en la señal); DT1
 con versión. A AR2 y TI1 se les agregaron las fórmulas de Prec CC.
+
+**PRECIOS ordenado por mes (22/10/2026):** se agregaron en octubre ET1
+52.380.000 (8%), PT1 67.030.000 (7%) y AT1 72.370.000 (9%), y los precios de MB1
+30.280.000 y AC1 37.730.000. La tabla quedó ordenada de junio a octubre (dentro
+de cada mes, en el orden en que estaba). Las fórmulas de Prec CC y Familia se
+reescribieron para la fila nueva de cada modelo. Las búsquedas de Familia que
+apuntaban a un rango fijo del bloque de octubre pasaron a la fórmula de la
+Version. Junio: "MB!" corregido a MB1.
