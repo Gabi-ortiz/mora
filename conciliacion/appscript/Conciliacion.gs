@@ -1543,6 +1543,29 @@ function fechaCorta_(nro, base) {
   return null;
 }
 
+/**
+ * Norma de carga del Nº del valor: "<identificador> - <dd/mm>" (ej. "20396927226 - 22/10", "EFECTIVO - 22/10",
+ * "83518725 - 22/10"). Identificador = CUIT de quien transfirió (o del destinatario de un pago), número de cheque,
+ * EFECTIVO o TARJETA; la fecha es la de acreditación o débito en el extracto. Devuelve null si el texto no sigue la norma
+ * (se sigue leyendo como hasta ahora).
+ */
+function normaValor_(txt, base) {
+  const x = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?([0-9][0-9.\-]{3,14}|EFECTIVO|TARJETA)\s+-\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?!\d)/i);
+  if (!x) return null;
+  const d = Number(x[2]), mes = Number(x[3]);
+  if (d < 1 || d > 31 || mes < 1 || mes > 12) return null;
+  let a = x[4] ? Number(x[4]) : base.getFullYear();
+  if (a < 100) a += 2000;
+  let fecha = new Date(a, mes - 1, d);
+  if (!x[4] && dias_(fecha, base) > 0 && fecha > base && fecha - base > 62 * 864e5) fecha = new Date(a - 1, mes - 1, d);   // dic. cargado en enero
+  const id = x[1].toUpperCase(), digitos = id.replace(/[-.]/g, '');
+  const out = { fecha, numero: '', cuit: '', tipo: '' };
+  if (/^(20|23|24|27|30|33|34)\d{9}$/.test(digitos)) { out.cuit = digitos; out.numero = digitos; out.tipo = 'CUIT'; }
+  else if (/^\d+$/.test(digitos)) { out.numero = digitos; out.tipo = 'NUMERO'; }
+  else out.tipo = id;   // EFECTIVO / TARJETA
+  return out;
+}
+
 function datosAux_(aux, base, cc) {
   const vacio = { numero: '', cuitValor: '', fecha: null, fecha2: null, banco: '', cuentaBanco: '' };
   if (!aux) return vacio;
@@ -1550,6 +1573,9 @@ function datosAux_(aux, base, cc) {
   const t = String(aux).trim();
   const out = Object.assign({}, vacio);
   if (parseFecha_(t)) return Object.assign(out, { fecha: parseFecha_(t) });   // la celda trae directamente una fecha
+  // norma de carga, sola en la celda ("20396927226 - 22/10")
+  const nv = normaValor_(t, base);
+  if (nv) return Object.assign(out, { fecha: nv.fecha, numero: nv.numero, cuitValor: nv.cuit, tipoValor: nv.tipo });
   const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*-?\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);   // también \"BANCO MACRO-(1103015)\"
   const dm = (txt) => {
     let x = txt.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})(?!\d)/);
@@ -1566,6 +1592,9 @@ function datosAux_(aux, base, cc) {
     const nro = m[1].replace(/\s+/g, '');
     out.banco = m[2].trim(); out.cuentaBanco = m[3];
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
+    // norma de carga dentro del Nº ("Nº 20396927226 - 22/10-BANCO MACRO(1103012)-23/10/2026")
+    const nv2 = normaValor_(m[1], out.fecha2 || base);
+    if (nv2) return Object.assign(out, { fecha: nv2.fecha, numero: nv2.numero, cuitValor: nv2.cuit, tipoValor: nv2.tipo });
     const sinGuiones = nro.replace(/[-.]/g, '');
     if (/^(20|23|24|27|30|33|34)\d{9}$/.test(sinGuiones)) {
       // CUIT de quien transfirió: la fecha del valor es la del final (acreditación)
