@@ -1438,7 +1438,7 @@ function valoresLista(ss, encabezado) {
 //   objetivo (solo si se cumplió el objetivo de pedidos).
 // - 2C Extra bonus pedidos: Inc pedido (PRECIOS) del modelo PEDIDO × precio CE sin IVA del modelo
 //   base de la familia del pedido (MODELO_BASE_FAMILIA: Cronos = NC1, Titano = DT1...), que es como
-//   liquida Fiat. Solo si se cumplió patentamientos. Excluye Cronos 90/10 (B90) desde el grupo 18002.
+//   liquida Fiat. Solo si se cumplió patentamientos. Excluye Cronos 90/10 (B90) en el rango de RANGO_B90.
 // - Adelanto de margen: precio público SIN IVA del modelo PEDIDO × 14% × 60%. Cruce con las
 //   entregas (hoja SGA del archivo de entregas): si el REU (Fecha Ingreso de SGA) es del mismo mes,
 //   Fiat no adelanta (paga el 100% del margen con la entrega). Tampoco adelanta las operaciones de
@@ -1455,7 +1455,12 @@ const CONCESIONARIO_PROPIO = 'TURIN S.A.';
 const CARPETA_INFORMES = 'Informes de incentivos';
 const MARGEN_COMISIONAL = 0.14;
 const ADELANTO_MARGEN = 0.6;
-const GRUPO_DESDE_B90 = 18002;
+// Cronos 90/10 (B90) sin 2C: grupos desde / hasta según la señal de cada mes (sin mes = valor por defecto).
+// Septiembre 2026 (señal 1599): desde 18002, sin tope. Octubre 2026 (señal 1606): 18002 a 18115 inclusive.
+const RANGO_B90 = {
+  '': [18002, Infinity],
+  'OCTUBRE 26': [18002, 18115],
+};
 const FAMILIAS_IVA_REDUCIDO = ['FIORINO', 'STRADA', 'TORO', 'TITANO'];
 // Modelo de ahorro de referencia de cada familia: el 2C se paga a su precio CE sin IVA.
 // Verificado con la liquidación de Fiat de septiembre 2026 (Cronos, Titano, Toro, Fiorino) y con el
@@ -1614,6 +1619,7 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
   }
   const sga = reu || {};
 
+  const rangoB90 = RANGO_B90[mes] || RANGO_B90[''];
   const faltan = new Set();
   const filas = netos.map((f) => {
     const ahorro = String(f[c('Modelo ahorro')]).trim();
@@ -1626,14 +1632,18 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
     if (!num(pb.ceSin)) faltan.add(`${modeloBase} (precio CE sin IVA)`);
     const concepto = String(f[c('Concepto de venta')]);
     const grupo = num(f[c('Grupo')]);
-    const b90 = /CRONOS/i.test(fam) && /^\s*90\s*\/\s*10/.test(concepto) && grupo >= GRUPO_DESDE_B90;
+    const b90 = /CRONOS/i.test(fam) && /^\s*90\s*\/\s*10/.test(concepto) && grupo >= rangoB90[0] &&
+      grupo <= rangoB90[1];
     const pct2C = !patentamientos || b90 ? 0 : num(pp.inc);
     const conc = String(f[c('Concesionario')]).trim();
     const otroCE = conc !== '' && conc.toUpperCase() !== CONCESIONARIO_PROPIO;
     const ent = sga[claveGrupoOrden(f[c('Grupo')], f[c('Orden')])] || {};
     const reuMismoMes = !!ent.ingreso && etiquetaMes(ent.ingreso.getMonth(), ent.ingreso.getFullYear() % 100) === mes;
     const notas = [];
-    if (b90) notas.push('Cronos 90/10 (B90) desde grupo 18002: sin 2C');
+    if (b90) {
+      notas.push(`Cronos 90/10 (B90), grupos ${rangoB90[0]}` +
+        (rangoB90[1] === Infinity ? ' en adelante' : ` a ${rangoB90[1]}`) + ': sin 2C');
+    }
     if (reuMismoMes) notas.push('REU en el mismo mes: sin adelanto (Fiat paga el 100% del margen con la entrega)');
     if (otroCE) notas.push(`Otro concesionario (${conc}): sin adelanto`);
     if (!String(f[c('Modelo PEDIDO')]).trim()) notas.push('Sin Modelo PEDIDO: se usa el de ahorro');

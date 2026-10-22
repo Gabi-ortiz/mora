@@ -538,3 +538,16 @@ las 55 unidades con REU en septiembre, contra $ 106.127.049 de Fiat para las
 mismas unidades. La diferencia es FERRANDO (Mobi facturado en junio: no hay
 precio de junio y se usa el de julio). El total de Fiat ($ 108.038.802) suma
 ESCANILLA, con REU 28/8, que el informe cuenta en agosto.
+
+## Septiembre vs Fiat y señal 1606 de octubre (22/10/2026)
+Informe de septiembre (archivo "Incentivos pedidos FIAT" nuevo, ID
+1WLLsnJ1uZATVS1pWn6UjdXIVT01qpgSN9Squ3Jv6Vt0: el script lo creó porque el
+anterior ya no se podía abrir) contra la liquidación de Fiat: 2A + 2B
+$ 28.078.984 (igual), 2C $ 68.860.122 (igual), adelanto $ 188.478.808 (igual),
+margen 40% $ 106.198.738 contra $ 108.038.802. La diferencia de −$ 1.840.064
+son ESCANILLA (REU 28/8, Fiat la pagó en septiembre: −$ 1.911.753) y FERRANDO
+(precio de junio que falta: +$ 71.690).
+
+Señal 1606 (octubre): el B90 sin bonus va de los grupos 18002 a 18115
+inclusive. Antes era "desde 18002" sin tope (en septiembre Fiat tampoco pagó
+los grupos mayores a 18115). Ahora el rango se define por mes en `RANGO_B90`.
