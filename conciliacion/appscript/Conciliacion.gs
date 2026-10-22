@@ -497,6 +497,14 @@ function procesar_(ss) {
         if (t.filas.length > 1) { base = unirFilas_(base, t.filas); tardios = t.total; }
       }
     }
+    if (r.ctx) {
+      const cpc = cambiosPostCierre_(r.ctx, desde, fechaUltimoCierre_(ss));
+      if (cpc.filas.length > 1) {
+        base = agregarTardias_(base, cpc.filas);
+        avisosBase.push('Se sumaron ' + cpc.n + ' cambios de la hoja "' + HOJA_CAMBIOS_BASE + '" de la base (movimientos de meses ya ' +
+          'congelados que se cargaron, modificaron o borraron en FBS después): se cruzan contra los pendientes anteriores.');
+      }
+    }
     if (ss.getSheetByName(HOJA.base) && ss.getSheetByName(HOJA.base).getLastRow() > 1) {
       avisosBase.push('Se usó la base externa de "' + HOJA.parametros + '"; la hoja "' + HOJA.base + '" de esta planilla se ignoró (se puede borrar).');
     }
@@ -1318,7 +1326,7 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
   const col = re => { const i = cab.findIndex(h => re.test(h)); return i < 0 ? null : letra_(i + 1); };
   const L = { id: col(/^detmovid$/), plan: col(/^detplan$/), fecha: col(/^detfecha$/), debe: col(/^detdebe$/), haber: col(/^dethaber$/), estado: col(/^_estado$/),
-    asiento: col(/^detmovnro$/), comenta: col(/^detcomenta$/) };
+    asiento: col(/^detmovnro$/), comenta: col(/^detcomenta$/), nombre: col(/^cuentanombre$/) };
   if (!L.plan || !L.fecha || !L.debe || !L.haber) throw new Error('La base FBS no tiene las columnas DETPLAN, DETFECHA, DETDEBE y DETHABER.');
   const cuentas = [ctas.E].concat(ctas.O ? [ctas.O] : []);
   const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
@@ -1363,6 +1371,110 @@ function ingresosOPosteriores_(ctx, hasta) {
       ' and ' + L.debe + ' > 0' + ctx.vigente);
     return filas.slice(1).map(r => ({ texto: String(r[0] || ''), importe: Number(r[1] || 0), fecha: parseFecha_(r[2]) }));
   } catch (e) { return null; }
+}
+
+const HOJA_CAMBIOS_BASE = 'CAMBIOS POST CIERRE';
+
+/** Fecha y hora del último "Cerrar mes" de esta planilla (hoja Historial), o null. */
+function fechaUltimoCierre_(ss) {
+  const sh = ss.getSheetByName(HOJA.historial);
+  if (!sh || sh.getLastRow() < 2) return null;
+  return parseFecha_(sh.getRange(sh.getLastRow(), 3).getValue());
+}
+
+/**
+ * La base congela cada mes el día 15 del mes siguiente (foto fija): lo que el ERP cambia después con fecha de un mes
+ * congelado no entra en MOVIMIENTOS y queda anotado en la hoja "CAMBIOS POST CIERRE" (NUEVO, MODIFICADO, ELIMINADO).
+ * Esos cambios suelen ser las correcciones de los pendientes: se suman al mes que se concilia como registros tardíos
+ * (cruzan contra los pendientes anteriores; el saldo inicial sigue siendo el del cierre). Devuelve filas con las columnas
+ * de la base + _TARDIO, o [] si la base no tiene la hoja.
+ */
+function cambiosPostCierre_(ctx, desde, cierreAnterior) {
+  let sh;
+  try { sh = SpreadsheetApp.openById(ctx.id).getSheetByName(HOJA_CAMBIOS_BASE); } catch (e) { return { filas: [], n: 0 }; }
+  if (!sh || sh.getLastRow() < 2) return { filas: [], n: 0 };
+  const cambios = sh.getDataRange().getValues();
+  const L = ctx.L;
+  // nombre de cuenta -> número (las cuentas E y O de esta planilla)
+  const nombres = {};
+  if (L.nombre) {
+    consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.plan + ', ' + L.nombre + ', count(' + (L.id || L.plan) + ') where ' + ctx.enCuentas +
+      ' group by ' + L.plan + ', ' + L.nombre).slice(1).forEach(r => { nombres[normalizar_(r[1])] = String(Number(r[0])); });
+  }
+  // versión congelada (la de MOVIMIENTOS) de lo modificado o eliminado, para tener todas sus columnas
+  const hc = cambios[0].map(normalizar_), iid = hc.indexOf('detmovid'), itipo = hc.indexOf('tipo');
+  const ids = Array.from(new Set(cambios.slice(1).filter(r => !/NUEVO/i.test(String(r[itipo]))).map(r => String(r[iid]).replace(/\D/g, '')).filter(Boolean)));
+  let cab = null;
+  const viejas = {};
+  if (L.id) {
+    for (let i = 0; i < ids.length; i += 40) {
+      const r = consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + ids.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or '));
+      if (!cab) cab = r[0];
+      const hi = r[0].map(normalizar_).indexOf('detmovid');
+      r.slice(1).forEach(x => { viejas[String(x[hi])] = x; });
+    }
+  }
+  if (!cab) cab = consultaGviz_(ctx.id, ctx.hoja, 'select * limit 1')[0];
+  return armarCambios_(cambios, cab, viejas, nombres, ctx.ctas, desde, cierreAnterior);
+}
+
+/** Parte "pura" de cambiosPostCierre_ (sin acceso a la base): arma las filas tardías a partir de la hoja de cambios. */
+function armarCambios_(cambios, cab, viejas, nombres, ctas, desde, cierreAnterior) {
+  const hc = cambios[0].map(normalizar_), c = n => hc.indexOf(n);
+  const h = cab.map(normalizar_), out = [cab.concat(['_TARDIO'])];
+  const mesNum = d => d.getFullYear() * 12 + d.getMonth();
+  const mesM = mesNum(desde);
+  const nuestras = [String(Number(ctas.E))].concat(ctas.O ? [String(Number(ctas.O))] : []);
+  const diaCierre = cierreAnterior ? new Date(cierreAnterior.getFullYear(), cierreAnterior.getMonth(), cierreAnterior.getDate()) : null;
+  let n = 0;
+  const fila = (base, campos) => {
+    const r = base ? base.slice(0, cab.length) : cab.map(() => '');
+    Object.keys(campos).forEach(k => { const i = h.indexOf(k); if (i >= 0) r[i] = campos[k]; });
+    return r.concat(['SI']);
+  };
+  cambios.slice(1).forEach(r => {
+    const mc = String(r[c('mes cerrado')] || '').match(/(\d{4})-(\d{1,2})/);
+    if (!mc) return;
+    const mes = Number(mc[1]) * 12 + Number(mc[2]) - 1;
+    const det = parseFecha_(r[c('detectado')]);
+    // meses anteriores al que se concilia; el mes inmediato anterior siempre (se concilió con su foto fija), los más
+    // viejos solo si el cambio se detectó desde el último cierre de esta planilla (los anteriores ya se usaron)
+    if (mes >= mesM || !(mes === mesM - 1 || (diaCierre && det && det >= diaCierre))) return;
+    const id = String(r[c('detmovid')] || '').replace(/\D/g, ''), tipo = String(r[c('tipo')] || '').toUpperCase();
+    const cambiosCampo = {};
+    String(r[c('detalle')] || '').split(/;\s*/).forEach(x => {
+      const m = x.match(/^\s*([A-Za-z_]+):\s*(.*?)\s*->\s*(.*)$/);
+      if (m) cambiosCampo[normalizar_(m[1])] = { viejo: m[2], nuevo: m[3] };
+    });
+    const nuevo = {
+      detmovid: id, detfecha: r[c('detfecha')], cuentanombre: r[c('cuentanombre')], detdebe: parseNum_(r[c('detdebe')]) || 0,
+      dethaber: parseNum_(r[c('dethaber')]) || 0, detcomenta: r[c('detcomenta')], detmovnro: 'cambio ' + id };
+    Object.keys(cambiosCampo).forEach(k => { if (!(k in nuevo) || k === 'detplan') nuevo[k] = cambiosCampo[k].nuevo; });
+    const planNuevo = String(Number(cambiosCampo.detplan ? cambiosCampo.detplan.nuevo : nombres[normalizar_(r[c('cuentanombre')])] || ''));
+    nuevo.detplan = Number(planNuevo) || '';
+    const vieja = viejas[id];
+    const viejo = Object.assign({}, nuevo);
+    Object.keys(cambiosCampo).forEach(k => { viejo[k] = cambiosCampo[k].viejo; });
+    ['detdebe', 'dethaber'].forEach(k => { viejo[k] = parseNum_(viejo[k]) || 0; });
+    const planViejo = String(Number(cambiosCampo.detplan ? cambiosCampo.detplan.viejo : planNuevo));
+    viejo.detplan = Number(planViejo) || '';
+    const revertir = () => {
+      if (nuestras.indexOf(planViejo) < 0) return;
+      // la versión vieja con el signo cambiado (mismo comentario: así se cancela contra el pendiente que dejó)
+      const base = vieja || null, campos = base ? { detmovnro: 'cambio ' + id } : Object.assign({}, viejo);
+      campos.detdebe = viejo.dethaber; campos.dethaber = viejo.detdebe;
+      if (base) { const ib = h.indexOf('detdebe'), ih = h.indexOf('dethaber'); campos.detdebe = parseNum_(base[ih]) || 0; campos.dethaber = parseNum_(base[ib]) || 0; }
+      out.push(fila(base, campos)); n++;
+    };
+    const agregar = () => {
+      if (nuestras.indexOf(planNuevo) < 0) return;
+      out.push(fila(vieja || null, nuevo)); n++;
+    };
+    if (/ELIMIN|BORRAD/.test(tipo)) revertir();
+    else if (/MODIF/.test(tipo)) { revertir(); agregar(); }
+    else agregar();
+  });
+  return { filas: out.length > 1 ? out : [], n };
 }
 
 /**
@@ -1460,6 +1572,15 @@ function movimientosTardios_(ctx, desde, dif, foto) {
 }
 
 /** Une las filas del mes con las tardías (mismas columnas por nombre; se agrega _TARDIO). */
+/** Como unirFilas_, pero si la base ya trae la columna _TARDIO (otros tardíos) agrega las filas sin repetirla. */
+function agregarTardias_(filas, extra) {
+  if (!extra.length) return filas;
+  const h = filas[0].map(normalizar_);
+  if (h.indexOf('_tardio') < 0) return unirFilas_(filas, extra);
+  const he = extra[0].map(normalizar_);
+  return filas.concat(extra.slice(1).map(r => h.map(c => { const i = he.indexOf(c); return i < 0 ? '' : r[i]; })));
+}
+
 function unirFilas_(filas, extra) {
   if (!extra.length) return filas;
   const cab = filas[0].concat(['_TARDIO']), h = cab.map(normalizar_), he = extra[0].map(normalizar_);
@@ -2944,6 +3065,8 @@ function revisarPendientes() {
   if (r.ctx) {
     const foto = leerFotoBase_(ss);
     if (foto) { const t = movimientosTardios_(r.ctx, desde, {}, foto); if (t.filas.length > 1) filas = unirFilas_(filas, t.filas); }
+    const cpc = cambiosPostCierre_(r.ctx, desde, fechaUltimoCierre_(ss));
+    if (cpc.filas.length > 1) filas = agregarTardias_(filas, cpc.filas);
   }
   const b = leerBase_(filas, ctas.E, ctas.O || '__sin_cuenta_O__');
   const movs = b.E.map(a => Object.assign(a, { cuenta: 'E' })).concat(b.O.map(a => Object.assign(a, { cuenta: 'O' })));
@@ -3264,4 +3387,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
