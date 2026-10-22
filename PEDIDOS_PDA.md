@@ -567,3 +567,12 @@ de cada mes, en el orden en que estaba). Las fórmulas de Prec CC y Familia se
 reescribieron para la fila nueva de cada modelo. Las búsquedas de Familia que
 apuntaban a un rango fijo del bloque de octubre pasaron a la fórmula de la
 Version. Junio: "MB!" corregido a MB1.
+
+**Versiones y familias faltantes (22/10/2026)**, según la lista de precios de
+Fiat (OWBSO040 del 22/10):
+- TV6 = TORO VOLCANO 2.0 AT9 4X4 (Toro).
+- TN5 = Toro Freedom, CD7 = Cronos Drive 1.3 GSE y FP1 = Pulse Drive. Estos
+  tres no figuran en la lista; se tomaron de los códigos hermanos (TN3/TN4,
+  CD5/CD6/CD8, FP3/FP4).
+- TN5 y TV6 pasan a IVA 10,5% en el Prec CC s/IVA, como el resto de Toro.
+- DP1 tampoco figura en la lista (queda con la versión del suscripto de FBS).
