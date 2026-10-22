@@ -1544,7 +1544,7 @@ function fechaCorta_(nro, base) {
 }
 
 function datosAux_(aux, base, cc) {
-  const vacio = { numero: '', fecha: null, fecha2: null, banco: '', cuentaBanco: '' };
+  const vacio = { numero: '', cuitValor: '', fecha: null, fecha2: null, banco: '', cuentaBanco: '' };
   if (!aux) return vacio;
   if (aux instanceof Date) return Object.assign(vacio, { fecha: parseFecha_(aux) });
   const t = String(aux).trim();
@@ -1566,6 +1566,12 @@ function datosAux_(aux, base, cc) {
     const nro = m[1].replace(/\s+/g, '');
     out.banco = m[2].trim(); out.cuentaBanco = m[3];
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
+    const sinGuiones = nro.replace(/[-.]/g, '');
+    if (/^(20|23|24|27|30|33|34)\d{9}$/.test(sinGuiones)) {
+      // CUIT de quien transfirió: la fecha del valor es la del final (acreditación)
+      out.cuitValor = sinGuiones; out.numero = sinGuiones; out.fecha = out.fecha2;
+      return out;
+    }
     out.fecha = dm(nro);
     if (/^\d{5,}$/.test(nro)) out.numero = nro;
     if (!out.fecha && cc && CC_NUMERO_ES_FECHA.test(cc) && /^\d{2,5}$/.test(nro)) {
@@ -1647,6 +1653,10 @@ function partidaFbs_(a, origen) {
   }
   const partes = com.split('/').map(p => p.trim());
   const ax = datosAux_(a.aux, a.fecha || new Date(), a.cc);
+  // norma de carga: el Nº del valor es el CUIT de quien transfirió ("Nº 20142901421-BANCO MACRO(1103012)-06/08/2026",
+  // con o sin guiones) y la fecha del final es la de acreditación en el banco
+  const cuitNro = ax.cuitValor;
+  if (cuitNro) { cuit = cuitNro; dni = cuitNro.slice(2, 10); }
   const fr = ax.fecha || (a.fecha ? fechaEnTexto_(com, a.fecha) : null);
   const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
