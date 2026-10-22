@@ -551,3 +551,11 @@ son ESCANILLA (REU 28/8, Fiat la pagó en septiembre: −$ 1.911.753) y FERRANDO
 Señal 1606 (octubre): el B90 sin bonus va de los grupos 18002 a 18115
 inclusive. Antes era "desde 18002" sin tope (en septiembre Fiat tampoco pagó
 los grupos mayores a 18115). Ahora el rango se define por mes en `RANGO_B90`.
+
+**Octubre (22/10/2026):** el 2C de octubre se calcula sobre el precio CE s/IVA
+del **modelo pedido** (señal 1606: "por el modelo solicitado en cada pedido
+aceptado", precio concesionario s/IVA al 01/10), no sobre el modelo base de la
+familia. Esos meses se listan en `MESES_2C_MODELO_PEDIDO`. Inc pedido de
+octubre corregido en PRECIOS según la señal: FP3 12,5%, DT1 10%, TI1 1%
+(versión TITANO ENDURANCE MT 4X4), AR2 0% y AU3 0% (no está en la señal); DT1
+con versión. A AR2 y TI1 se les agregaron las fórmulas de Prec CC.

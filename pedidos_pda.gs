@@ -1438,7 +1438,8 @@ function valoresLista(ss, encabezado) {
 //   objetivo (solo si se cumplió el objetivo de pedidos).
 // - 2C Extra bonus pedidos: Inc pedido (PRECIOS) del modelo PEDIDO × precio CE sin IVA del modelo
 //   base de la familia del pedido (MODELO_BASE_FAMILIA: Cronos = NC1, Titano = DT1...), que es como
-//   liquida Fiat. Solo si se cumplió patentamientos. Excluye Cronos 90/10 (B90) en el rango de RANGO_B90.
+//   liquida Fiat; en los meses de MESES_2C_MODELO_PEDIDO, CE sin IVA del propio modelo pedido. Solo si se
+//   cumplió patentamientos. Excluye Cronos 90/10 (B90) en el rango de RANGO_B90.
 // - Adelanto de margen: precio público SIN IVA del modelo PEDIDO × 14% × 60%. Cruce con las
 //   entregas (hoja SGA del archivo de entregas): si el REU (Fecha Ingreso de SGA) es del mismo mes,
 //   Fiat no adelanta (paga el 100% del margen con la entrega). Tampoco adelanta las operaciones de
@@ -1462,6 +1463,9 @@ const RANGO_B90 = {
   'OCTUBRE 26': [18002, 18115],
 };
 const FAMILIAS_IVA_REDUCIDO = ['FIORINO', 'STRADA', 'TORO', 'TITANO'];
+// Meses en que Fiat liquida el 2C sobre el precio CE s/IVA del propio modelo pedido (no del modelo base
+// de la familia). Octubre 2026: señal 1606, "por el modelo solicitado en cada pedido aceptado".
+const MESES_2C_MODELO_PEDIDO = ['OCTUBRE 26'];
 // Modelo de ahorro de referencia de cada familia: el 2C se paga a su precio CE sin IVA.
 // Verificado con la liquidación de Fiat de septiembre 2026 (Cronos, Titano, Toro, Fiorino) y con el
 // archivo de agosto (Strada, Fastback, Pulse, Argo). Si la familia no está, se usa el modelo de ahorro.
@@ -1626,7 +1630,8 @@ function calcularIncentivos(ss, mes, suscripciones, patentamientos) {
     const pedido = String(f[c('Modelo PEDIDO')]).trim() || ahorro;
     const pp = precio[pedido] || {};
     const fam = familia[pedido] || familia[ahorro] || '';
-    const modeloBase = MODELO_BASE_FAMILIA[String(fam).toUpperCase()] || ahorro;
+    const modeloBase = MESES_2C_MODELO_PEDIDO.indexOf(mes) >= 0 ? pedido :
+      MODELO_BASE_FAMILIA[String(fam).toUpperCase()] || ahorro;
     const pb = precio[modeloBase] || {};
     if (!num(pp.pub)) faltan.add(`${pedido} (precio público)`);
     if (!num(pb.ceSin)) faltan.add(`${modeloBase} (precio CE sin IVA)`);
@@ -2051,7 +2056,9 @@ function escribirInforme(inf, d) {
     ['2B Pedidos adicionales al objetivo', `=IFERROR(${dato('F')}&" pedido(s) × "&TEXT(${dato('J')},"0.00%"),"")`,
       'Precio CE s/IVA de NC1', imp('M')],
     ['2C Extra bonus pedidos', `=IFERROR("100% patentamientos ("&${dato('H')}&")","")`,
-      'Inc pedido del modelo pedido × CE s/IVA del modelo base de la familia (Cronos NC1, Titano DT1...)', imp('N')],
+      `=IF(OR(${MESES_2C_MODELO_PEDIDO.map((m) => `$B$2="${m}"`).join(',') || 'FALSE'}),` +
+        '"Inc pedido del modelo pedido × CE s/IVA del modelo pedido",' +
+        '"Inc pedido del modelo pedido × CE s/IVA del modelo base de la familia (Cronos NC1, Titano DT1...)")', imp('N')],
     ['Total incentivos', '', '', '=D14+D15+D16'],
     ['Descuentos otorgados', '', '$ descuento de BASE', imp('P')],
     ['Total incentivos - descuentos', '', '', '=D17-D18'],
