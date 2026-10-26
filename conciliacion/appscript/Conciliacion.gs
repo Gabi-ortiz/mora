@@ -47,6 +47,7 @@ const HOJA = {
   pendFbs: 'E sin cruzar',
   pendBanco: 'Banco sin registrar',
   conciliados: 'E conciliado',
+  desconciliados: 'Desconciliados',
   analisisO: 'Análisis O',
   revisar: 'Para revisar',
   historial: 'Historial',
@@ -513,12 +514,14 @@ function procesar_(ss) {
   } else if (!ss.getSheetByName(HOJA.mayorE)) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
+  const desc = leerDesconciliados_(ss);
   const res = conciliarTodo_({
     extracto, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: leer(hojaAnteriores),
     reglas, empresas, parametros,
+    desconciliar: desc.claves,
   });
   res.baseCtx = ctxBase; res.hastaBase = hastaBase;
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
@@ -528,6 +531,7 @@ function procesar_(ss) {
   escribirAnalisisO_(ss, res);
   escribirPendientes_(ss, HOJA.pendO, res, res.listas.O,
     'Paso 1 — Cuenta O: líneas que no netean (no confirmadas). Van a Depósitos no acreditados / Cheques no debitados.');
+  escribirDesconciliados_(ss, desc.filas);
   escribirConciliados_(ss, res);
   escribirPendientes_(ss, HOJA.pendFbs, res, res.listas.E,
     'Paso 2 — Cuenta E que no se cruzó ni con pendientes anteriores ni con el extracto (posibles errores de registración).');
@@ -585,6 +589,8 @@ function cerrarMes() {
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
   const n = pasarPendientes_(ss, res.corte);
+  // lo desconciliado ya quedó en los pendientes que pasan: la lista se vacía para el mes siguiente
+  escribirDesconciliados_(ss, []);
   const par = ss.getSheetByName(HOJA.parametros);
   // foto de E y O en la base al cierre: el mes siguiente detecta lo que se cargue o cambie después con fecha de meses cerrados
   if (par) {   // fecha del último cierre: desde ahí "Revisar pendientes" busca movimientos nuevos en la base
@@ -676,7 +682,7 @@ function marcarComoFoto_(copia, periodo, empresa) {
   (tablero || info).activate();
 }
 
-const COLS_PEND = ['Sector', 'Fecha', 'Concepto', 'Importe', 'ID', 'Días', 'Estado', 'Responsable', 'Comentario', 'Revisión automática', 'Revisado el'];
+const COLS_PEND = ['Sector', 'Fecha', 'Concepto', 'Importe', 'ID', 'Días', 'Estado', 'Responsable', 'Comentario', 'Revisión automática', 'Revisado el', 'Observación', 'Cruces encontrados'];
 const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Justificado', 'Error de la lista'];
 
 /** Clave estable de un pendiente (sector, fecha, concepto, importe) para conservar estado y comentarios entre cierres. */
@@ -704,8 +710,9 @@ function pasarPendientes_(ss, corte) {
     if (!sh) throw new Error('Primero corré "2. Procesar conciliación".');
     const v = sh.getDataRange().getValues();
     const h = v[1];   // fila 1 = título, fila 2 = encabezados
-    const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe') };
-    v.slice(2).forEach(r => { if (r[c.s]) nuevas.push([r[c.s], r[c.f], r[c.t], r[c.i]]); });
+    const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe'),
+      o: h.indexOf('Observación'), x: h.indexOf('Cruces encontrados') };
+    v.slice(2).forEach(r => { if (r[c.s]) nuevas.push([r[c.s], r[c.f], r[c.t], r[c.i], c.o >= 0 ? r[c.o] : '', c.x >= 0 ? r[c.x] : '']); });
   });
   let sh = hojaDe_(ss, nombresAnteriores_());
   // lo trabajado en la lista anterior (por ID)
@@ -731,7 +738,7 @@ function pasarPendientes_(ss, corte) {
     const f = parseFecha_(r[1]);
     const estado = p[0] && !/^Resuelto/i.test(p[0]) ? p[0] : 'Pendiente';
     // con signo: un pendiente anterior en negativo (comisión de una liquidación en S3) sigue en negativo
-    return [r[0], r[1], r[2], parseNum_(r[3]) || 0, ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', ''];
+    return [r[0], r[1], r[2], parseNum_(r[3]) || 0, ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', '', r[4] || '', r[5] || ''];
   });
   escribirPendTrabajo_(sh, filas);
   return filas.length;
@@ -749,9 +756,10 @@ function escribirPendTrabajo_(sh, filas) {
     sh.getRange(2, 11, filas.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
     sh.getRange(2, 7, filas.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(ESTADOS_PEND, true).setAllowInvalid(false).build());
     sh.getRange(2, 10, filas.length, 1).setWrap(true);
+    sh.getRange(2, 12, filas.length, 2).setWrap(true);
   }
   sh.getRange(1, 1, Math.max(filas.length, 1) + 1, COLS_PEND.length).createFilter();
-  [55, 85, 360, 120, 60, 50, 120, 110, 260, 380, 110].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [55, 85, 360, 120, 60, 50, 120, 110, 260, 380, 110, 300, 380].forEach((w, i) => sh.setColumnWidth(i + 1, w));
   sh.hideColumns(5);   // ID
 }
 
@@ -885,6 +893,7 @@ function escribirTablero_(ss, res) {
 }
 
 function observacion_(p) {
+  if (p.bloqueado) return 'Desconciliado a mano: queda pendiente (para que se vuelva a cruzar, borrá la fila en la hoja "' + HOJA.desconciliados + '")';
   if (p.alerta) return p.alerta;
   if (p.tardio) return 'Movimiento con fecha ' + fechaTexto_(p.fecha) + ' (mes ya cerrado) cargado o modificado en FBS después del cierre';
   if (p.desfasado) return 'Confirmado con fecha ' + fechaTexto_(p.fecha) + ' pero el recibo se registró el ' + fechaTexto_(p.fechaRef2) +
@@ -1020,8 +1029,8 @@ function escribirRevisar_(ss, res) {
 function escribirConciliados_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.conciliados);
   const cab = ['Cruce', 'Fecha banco', 'Concepto banco / pendiente anterior', 'Importe banco', 'Origen banco',
-    'Fecha FBS', 'Comprobante FBS', 'Importe FBS', 'Asiento FBS', 'Origen FBS'];
-  const filas = res.conciliados;
+    'Fecha FBS', 'Comprobante FBS', 'Importe FBS', 'Asiento FBS', 'Origen FBS', 'Desconciliar', 'Nº cruce', 'Clave banco', 'Clave FBS'];
+  const filas = res.conciliados.map(r => r.slice(0, 10).concat([false], r.slice(10)));
   sh.getRange(1, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   if (filas.length) {
     sh.getRange(2, 1, filas.length, cab.length).setValues(filas);
@@ -1029,10 +1038,72 @@ function escribirConciliados_(ss, res) {
     sh.getRange(2, 6, filas.length, 1).setNumberFormat('dd/mm/yyyy');
     sh.getRange(2, 4, filas.length, 1).setNumberFormat(NUM_FMT);
     sh.getRange(2, 8, filas.length, 1).setNumberFormat(NUM_FMT);
+    sh.getRange(2, 11, filas.length, 1).insertCheckboxes();
   }
+  sh.getRange(1, 11).setNote('Marcá la casilla y volvé a procesar: las dos puntas del cruce (todas las filas con el mismo Nº de cruce) ' +
+    'quedan pendientes y se anotan en la hoja "' + HOJA.desconciliados + '".');
   sh.setFrozenRows(1);
   sh.getRange(1, 1, filas.length + 1, cab.length).createFilter();
-  [200, 90, 300, 120, 70, 90, 350, 120, 90, 70].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  [200, 90, 300, 120, 70, 90, 350, 120, 90, 70, 95, 70].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.hideColumns(13, 2);   // claves
+}
+
+/**
+ * Partidas desconciliadas a mano: las casillas marcadas en "E conciliado" (todo el cruce) más las que ya estaban en la hoja
+ * "Desconciliados". Esas partidas no se cruzan con nada y quedan pendientes; borrando la fila se vuelven a cruzar.
+ */
+function leerDesconciliados_(ss) {
+  const filas = [];
+  const sh = ss.getSheetByName(HOJA.desconciliados);
+  if (sh && sh.getLastRow() > 1) {
+    const v = sh.getDataRange().getValues(), k = v[0].map(String).indexOf('Clave');
+    if (k >= 0) v.slice(1).forEach(r => { if (String(r[k]).trim()) filas.push(r.slice(0, 5)); });
+  }
+  const ec = ss.getSheetByName(HOJA.conciliados);
+  if (ec && ec.getLastRow() > 1) {
+    const v = ec.getDataRange().getValues(), h = v[0].map(String);
+    const c = { m: h.indexOf('Desconciliar'), n: h.indexOf('Nº cruce'), kb: h.indexOf('Clave banco'), kf: h.indexOf('Clave FBS') };
+    if (c.m >= 0 && c.n >= 0 && c.kb >= 0 && c.kf >= 0) {
+      const marcados = new Set(v.slice(1).filter(r => r[c.m] === true).map(r => String(r[c.n])));
+      const vistas = new Set();
+      v.slice(1).forEach(r => {
+        if (!marcados.has(String(r[c.n]))) return;
+        // una partida agrupada aparece en varias filas del cruce con la misma clave: va una sola vez
+        [['Banco', 1, 2, 3, c.kb], ['FBS', 5, 6, 7, c.kf]].forEach(([lado, f, t, i, k]) => {
+          const clave = String(r[k] || '');
+          if (!clave || vistas.has(r[c.n] + '|' + clave)) return;
+          vistas.add(r[c.n] + '|' + clave);
+          filas.push([lado, r[f], r[t], r[i], clave]);
+        });
+      });
+    }
+  }
+  return { filas, claves: filas.map(r => String(r[4])) };
+}
+
+function escribirDesconciliados_(ss, filas) {
+  let sh = ss.getSheetByName(HOJA.desconciliados);
+  if (!sh && !filas.length) return;
+  sh = hojaLimpia_(ss, HOJA.desconciliados);
+  const cab = ['Lado', 'Fecha', 'Concepto', 'Importe', 'Clave'];
+  sh.getRange(1, 1, 1, cab.length).setValues([cab]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
+  sh.getRange(1, 1).setNote('Partidas sacadas a mano de un cruce (casilla "Desconciliar" de "' + HOJA.conciliados + '"): quedan pendientes. ' +
+    'Para que el proceso las vuelva a cruzar, borrá la fila y procesá. Al cerrar el mes la lista se vacía.');
+  if (filas.length) {
+    sh.getRange(2, 1, filas.length, cab.length).setValues(filas);
+    sh.getRange(2, 2, filas.length, 1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(2, 4, filas.length, 1).setNumberFormat(NUM_FMT);
+  }
+  sh.setFrozenRows(1);
+  [60, 90, 380, 120, 60].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.hideColumns(5);
+}
+
+/** Clave estable de una partida para "Desconciliar" (lado, fecha, importe, texto y referencia / asiento). */
+function claveCruce_(p) {
+  const f = p.fecha instanceof Date ? fechaTexto_(p.fecha) : String(p.fecha || '');
+  return [p.lado === 'BANCO' ? 'B' : 'F', p.origen === 'Arrastre' ? 'A' : 'M', f, Number(p.importe || 0).toFixed(2),
+    normalizar_(p.texto).replace(/\s+/g, ' '), p.lado === 'BANCO' ? p.ref : (p.asiento || '') + '/' + (p.cuenta || '')].join('|');
 }
 
 // ------------------------------------------------------------------ utilidades
@@ -3342,6 +3413,18 @@ function conciliarTodo_(entrada, redondoUnico) {
   const eItems = partidasE_(asientosE, o.asientos);
   fechaEnO_(eItems, o.asientos);
   const antFbsRestantes = anterioresFbs.filter(p => ao.usadosAnteriores.indexOf(p) < 0);
+  // desconciliadas a mano: no entran en ningún cruce (cada clave bloquea una partida)
+  const aBloquear = {};
+  (entrada.desconciliar || []).forEach(k => { aBloquear[k] = (aBloquear[k] || 0) + 1; });
+  const bloqueadas = [];
+  bancoMes.concat(anterioresBanco, eItems, antFbsRestantes, ao.pendientes).forEach(p => {
+    const k = claveCruce_(p);
+    if (p.match !== null || !aBloquear[k]) return;
+    aBloquear[k]--; p.match = []; p.metodo = '__bloqueado'; p.bloqueado = true; bloqueadas.push(p);
+  });
+  const sinEncontrar = Object.keys(aBloquear).reduce((x, k) => x + aBloquear[k], 0);
+  if (bloqueadas.length || sinEncontrar) avisos.push(bloqueadas.length + ' partidas desconciliadas a mano quedan pendientes (hoja "' + HOJA.desconciliados + '")' +
+    (sinEncontrar ? '; partidas de la lista que ya no se encuentran en el mes (se cambiaron en FBS o en el extracto): ' + sinEncontrar + ', revisá la hoja' : '') + '.');
   cruzarAnteriores_(eItems, anterioresBanco, antFbsRestantes);
   const banco = bancoMes.concat(anterioresBanco);
   const fbs = eItems.concat(antFbsRestantes);
@@ -3366,6 +3449,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
     (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), 'Pendiente anterior: fecha del comentario + importe', 400, true);
+  bloqueadas.forEach(p => { p.match = null; p.metodo = ''; });
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
@@ -3408,14 +3492,15 @@ function conciliarTodo_(entrada, redondoUnico) {
   });
 
   const conciliados = [];
-  CRUCES_.forEach(c => {
-    // las partidas agrupadas se muestran con sus líneas originales
+  CRUCES_.forEach((c, n) => {
+    // las partidas agrupadas se muestran con sus líneas originales (la clave es la de la partida agrupada)
     const lineasFbs = [].concat.apply([], c.fbs.map(f => (f.lineas && f.lineas.length > 1
-      ? f.lineas.slice().sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).map(l => Object.assign({}, f, l)) : [f])));
+      ? f.lineas.slice().sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).map(l => ({ v: Object.assign({}, f, l), p: f })) : [{ v: f, p: f }])));
     for (let i = 0; i < Math.max(c.banco.length, lineasFbs.length, 1); i++) {
-      const x = c.banco[i], y = lineasFbs[i];
+      const x = c.banco[i], y = lineasFbs[i] ? lineasFbs[i].v : null;
       conciliados.push([c.metodo, x ? x.fecha : '', x ? x.texto : '', x ? x.importe : '', x ? x.origen : '',
-        y ? y.fecha : '', y ? y.texto : '', y ? y.importe : '', y ? y.asiento : '', y ? (y.origen === 'Arrastre' ? 'Pendiente anterior' : 'Cuenta ' + (y.cuenta || 'E')) : '']);
+        y ? y.fecha : '', y ? y.texto : '', y ? y.importe : '', y ? y.asiento : '', y ? (y.origen === 'Arrastre' ? 'Pendiente anterior' : 'Cuenta ' + (y.cuenta || 'E')) : '',
+        n + 1, x ? claveCruce_(x) : '', y ? claveCruce_(lineasFbs[i].p) : '']);
     }
   });
   const listas = { O: ao.pendientes, E: fbs.filter(p => p.match === null), B: banco.filter(p => p.match === null) };
@@ -3429,4 +3514,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
