@@ -1672,7 +1672,11 @@ function fechaCorta_(nro, base) {
  */
 function normaValor_(txt, base) {
   const x = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?([0-9][0-9.\-]{3,14}|EFECTIVO|TARJETA)\s+-\s+(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?(?!\d)/i);
-  if (!x) return null;
+  if (!x) {
+    // solo el CUIT, sin fecha (el comentario de FBS no tiene lugar para más): la fecha sale del resto del registro
+    const c = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?((?:20|23|24|27|30|33|34)-?\d{8}-?\d)$/i);
+    return c ? { fecha: null, numero: c[1].replace(/-/g, ''), cuit: c[1].replace(/-/g, ''), tipo: 'CUIT' } : null;
+  }
   const d = Number(x[2]), mes = Number(x[3]);
   if (d < 1 || d > 31 || mes < 1 || mes > 12) return null;
   let a = x[4] ? Number(x[4]) : base.getFullYear();
@@ -1715,7 +1719,7 @@ function datosAux_(aux, base, cc) {
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
     // norma de carga dentro del Nº ("Nº 20396927226 - 22/10-BANCO MACRO(1103012)-23/10/2026")
     const nv2 = normaValor_(m[1], out.fecha2 || base);
-    if (nv2) return Object.assign(out, { fecha: nv2.fecha, numero: nv2.numero, cuitValor: nv2.cuit, tipoValor: nv2.tipo });
+    if (nv2) return Object.assign(out, { fecha: nv2.fecha || out.fecha2, numero: nv2.numero, cuitValor: nv2.cuit, tipoValor: nv2.tipo });
     const sinGuiones = nro.replace(/[-.]/g, '');
     if (/^(20|23|24|27|30|33|34)\d{9}$/.test(sinGuiones)) {
       // CUIT de quien transfirió: la fecha del valor es la del final (acreditación)
