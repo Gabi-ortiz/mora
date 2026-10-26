@@ -935,7 +935,7 @@ function escribirPendientes_(ss, nombre, res, items, titulo) {
 
 /**
  * Lista de trabajo: qué hacer con cada partida del mes, agrupado por acción y ordenado por importe.
- * Devuelve filas [tipo, col1..col6] donde tipo = 'titulo' | 'resumen' | 'seccion' | 'sub' | 'cab' | 'item' | ''.
+ * Devuelve filas [tipo, col1..col6] donde tipo = 'titulo' | 'cabres' | 'resumen' | 'seccion' | 'sub' | 'cab' | 'item' | ''.
  */
 function armarRevisar_(res) {
   const out = [];
@@ -950,13 +950,14 @@ function armarRevisar_(res) {
 
   fila('titulo', 'PARA REVISAR — ' + fechaTexto_(res.corte) + '   (diferencia de control ' + formato_(res.ajustado - res.saldoBanco) + ')');
   fila('');
-  fila('cab', 'Qué hay que hacer', 'Partidas', 'Importe', '', '', '');
-  fila('resumen', '1. Registrar en FBS: movimientos del banco del mes que no están en FBS', B.length, suma(B));
-  fila('resumen', '2. Confirmar en FBS: registros de la cuenta O sin confirmar', O.length, suma(O));
-  fila('resumen', '3. Corregir en FBS: registros de la cuenta E que no aparecen en el banco', E.length, suma(E));
-  fila('resumen', '4. Validar: cruces automáticos marcados "(revisar)"', revisar.length, '');
-  fila('resumen', '5. Pendientes de meses anteriores que siguen abiertos', ant.length, suma(ant));
-  fila('resumen', '6. Desfasados: confirmados en el mes y registrados después del cierre (no hay que hacer nada)', D.length, suma(D));
+  // el texto del resumen ocupa las columnas A:B (se combinan al escribir); C = importe, D = partidas
+  fila('cabres', 'Qué hay que hacer', '', 'Importe', 'Partidas', '', '');
+  fila('resumen', '1. Registrar en FBS: movimientos del banco del mes que no están en FBS', '', suma(B), B.length);
+  fila('resumen', '2. Confirmar en FBS: registros de la cuenta O sin confirmar', '', suma(O), O.length);
+  fila('resumen', '3. Corregir en FBS: registros de la cuenta E que no aparecen en el banco', '', suma(E), E.length);
+  fila('resumen', '4. Validar: cruces automáticos marcados "(revisar)"', '', '', revisar.length);
+  fila('resumen', '5. Pendientes de meses anteriores que siguen abiertos', '', suma(ant), ant.length);
+  fila('resumen', '6. Desfasados: confirmados en el mes y registrados después del cierre (no hay que hacer nada)', '', suma(D), D.length);
 
   const seccion = (titulo, items, motivo, pista) => {
     fila('');
@@ -1008,9 +1009,18 @@ function escribirRevisar_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.revisar);
   const filas = armarRevisar_(res);
   sh.getRange(1, 1, filas.length, 6).setValues(filas.map(f => f.slice(1)));
-  const fmt = [];
+  const fmt = [], largas = [];
+  sh.getRange(1, 1, filas.length, 6).setWrap(true).setVerticalAlignment('top');
   filas.forEach((f, i) => {
     const r = sh.getRange(i + 1, 1, 1, 6);
+    // los textos largos de la columna A (angosta, para fechas) van en celdas combinadas para que la fila no quede altísima
+    if (f[0] === 'titulo' || f[0] === 'seccion') r.merge().setWrap(false);
+    if (f[0] === 'sub' || f[0] === 'resumen' || f[0] === 'cabres') {
+      sh.getRange(i + 1, 1, 1, 2).merge();
+      // Sheets no agranda solo una fila por el texto de una celda combinada: los textos largos llevan alto fijo de 2 líneas
+      if (String(f[1]).length > 65) largas.push(i + 1);
+    }
+    if (f[0] === 'cabres') r.setFontWeight('bold').setBackground('#F2F2F2');
     if (f[0] === 'titulo') r.setFontWeight('bold').setFontSize(14);
     if (f[0] === 'seccion') r.setFontWeight('bold').setFontSize(12).setBackground('#1F4E78').setFontColor('#FFFFFF');
     if (f[0] === 'sub') r.setFontWeight('bold').setBackground('#DDEBF7');
@@ -1021,8 +1031,11 @@ function escribirRevisar_(ss, res) {
   fmt.forEach(r => sh.getRange(r, 3).setNumberFormat(NUM_FMT));
   sh.getRange(1, 1, filas.length, 1).setNumberFormat('dd/mm/yyyy');
   filas.forEach((f, i) => { if (f[0] === 'resumen' || f[0] === 'sub') sh.getRange(i + 1, 1).setNumberFormat('@'); });
-  sh.getRange(1, 1, filas.length, 6).setWrap(true).setVerticalAlignment('top');
   [95, 380, 130, 300, 380, 20].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  // alto de filas según el contenido ya combinado (también limpia altos fijos de una corrida anterior)
+  sh.autoResizeRows(1, filas.length);
+  largas.forEach(r => sh.setRowHeight(r, 36));
+  sh.setRowHeight(1, 30);
   sh.setFrozenRows(1);
 }
 
