@@ -3117,6 +3117,9 @@ function valorSector_(p) {
   return redondear_(s === 'S1' || s === 'S3' ? p.importe : -p.importe);
 }
 
+// Macro: comisiones que traen el IVA 21% incluido en el importe ("Comision Trf. MacrOL E-set", "COMISION TRANSFERE")
+const COMISION_CON_IVA = ['3914', '3872'];
+
 function gastosBancarios_(movs) {
   const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
   // el IVA de una comisión que se registra aparte (Patagonia "COMISION POR CONVENIOS") no va al asiento de gastos
@@ -3135,6 +3138,11 @@ function gastosBancarios_(movs) {
     else if (m.causal === '4145') g.ret += d;
     else if (m.causal === '1972') g.tuc += d;
     else if (m.causal === '1479') g.sellos += d;
+    else if (COMISION_CON_IVA.includes(m.causal)) {
+      // Macro: la comisión de transferencia viene con el IVA incluido en una sola línea ($ 121 = 100 + 21 de IVA)
+      const neto = redondear_(d / 1.21);
+      g.com += neto; g.iva += redondear_(d - neto);
+    }
     else if (m.cat === 'GASTOS BANCARIOS') {
       // Patagonia: sin código, por la descripción
       if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES') || t.startsWith('GRAVAMEN LEY 25413') ||
@@ -3531,4 +3539,4 @@ function conciliarTodo_(entrada, redondoUnico) {
     metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
 }
 
-if (typeof module !== 'undefined') module.exports = { claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
+if (typeof module !== 'undefined') module.exports = { gastosBancarios_, claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
