@@ -227,6 +227,10 @@ const REGLAS_PATAGONIA = [
   ["*", "Débito", "^COM", "GASTOS BANCARIOS", "Comisiones"],
   ["*", "Crédito", "^BONIFICACION COMISION", "GASTOS BANCARIOS", "Bonificación de comisiones"],
   ["*", "Crédito", "^IVA", "GASTOS BANCARIOS", "Devolución de IVA"],
+  // anulaciones del banco (crédito con la misma descripción que el débito): restan en el asiento de gastos
+  ["*", "Crédito", "^IMP\\.DB/CR BANCARIOS", "GASTOS BANCARIOS", "Devolución / anulación de impuesto Ley 25.413"],
+  ["*", "Crédito", "^RET\\.IIBB SIRCREB", "GASTOS BANCARIOS", "Devolución de retención SIRCREB"],
+  ["*", "Crédito", "^COM", "GASTOS BANCARIOS", "Devolución de comisiones"],
 ];
 
 /** Santander Río: "Cod. Operativo" del Excel de Últimos Movimientos. */
