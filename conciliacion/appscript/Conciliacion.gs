@@ -2527,6 +2527,7 @@ function gastosAsiento_(banco, fbs) {
 function conciliar_(banco, fbs) {
   // las liquidaciones de tarjeta van primero y solo contra movimientos de tarjeta del día de la liquidación
   const ajustesTarjeta = liquidacionPorNumero_(banco, fbs).concat(liquidacionesTarjeta_(banco, fbs));
+  cuitMasCercano_(banco, fbs, '1. CUIT/DNI', VENTANA_ID);
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
@@ -2642,6 +2643,29 @@ function ventanaUnica_(banco, fbs, d) {
   });
 }
 
+/**
+ * Mismo CUIT/DNI e importe con más de un candidato (un cliente que paga la misma cuota en días distintos): se arman
+ * todos los pares posibles y se asignan del más cercano en fecha al más lejano. Así, si falta un recibo, queda pendiente
+ * la transferencia más alejada de los recibos cargados, no la primera del mes. Con un solo candidato de cada lado no
+ * hace nada (lo cruza la pasada común).
+ */
+function cuitMasCercano_(banco, fbs, metodo, ventana) {
+  const pares = [], nb = new Map(), nf = new Map();
+  banco.forEach(b => {
+    if (b.match !== null || (!b.cuit && !b.dni)) return;
+    fbs.forEach(f => {
+      if (f.match !== null || Math.abs(f.importe - b.importe) > TOLERANCIA || !MISMO_ID_(b, f)) return;
+      const d = distancia_(b, f);
+      if (d > ventana) return;
+      pares.push({ b, f, d });
+      nb.set(b, (nb.get(b) || 0) + 1); nf.set(f, (nf.get(f) || 0) + 1);
+    });
+  });
+  pares.filter(p => nb.get(p.b) > 1 || nf.get(p.f) > 1)
+    .sort((x, y) => x.d - y.d || x.b.fecha - y.b.fecha)
+    .forEach(p => { if (p.b.match === null && p.f.match === null) unir_([p.b], [p.f], metodo); });
+}
+
 const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni === f.dni);
 const POR_REF_ = (b, f) => b.ref.length >= 5 && ((f.valor && f.valor === b.ref) ||
   (f.texto + ' ' + f.ref + ' ' + (f.aux || '')).replace(/\./g, '').indexOf(b.ref) >= 0);
@@ -2654,6 +2678,7 @@ const POR_NOMBRE_ = (b, f) => comparten_(b.nombre, f.nombre);
  */
 function cruzarAnteriores_(eItems, antBanco, antFbs) {
   const v = 400;
+  cuitMasCercano_(antBanco, eItems, 'Pendiente anterior: CUIT/DNI', v);
   pasada_(antBanco, eItems, MISMO_ID_, 'Pendiente anterior: CUIT/DNI', v, false);
   pasada_(antBanco, eItems, POR_REF_, 'Pendiente anterior: referencia', v, false);
   pasada_(antBanco, eItems, POR_NOMBRE_, 'Pendiente anterior: nombre', v, false);
