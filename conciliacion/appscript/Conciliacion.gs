@@ -1675,7 +1675,18 @@ function normaValor_(txt, base) {
   if (!x) {
     // solo el CUIT, sin fecha (el comentario de FBS no tiene lugar para más): la fecha sale del resto del registro
     const c = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?((?:20|23|24|27|30|33|34)-?\d{8}-?\d)$/i);
-    return c ? { fecha: null, numero: c[1].replace(/-/g, ''), cuit: c[1].replace(/-/g, ''), tipo: 'CUIT' } : null;
+    if (c) return { fecha: null, numero: c[1].replace(/-/g, ''), cuit: c[1].replace(/-/g, ''), tipo: 'CUIT' };
+    // DNI de 8 dígitos + día y mes pegados, 12 dígitos ("396927222110" = DNI 39692722, 21/10)
+    const dn = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?(\d{8})(\d{2})(\d{2})$/i);
+    if (dn) {
+      const dd = Number(dn[2]), mm = Number(dn[3]);
+      if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) {
+        let f = new Date(base.getFullYear(), mm - 1, dd);
+        if (f > base && f - base > 62 * 864e5) f = new Date(base.getFullYear() - 1, mm - 1, dd);
+        return { fecha: f, numero: '', cuit: '', dni: dn[1], tipo: 'DNI' };
+      }
+    }
+    return null;
   }
   const d = Number(x[2]), mes = Number(x[3]);
   if (d < 1 || d > 31 || mes < 1 || mes > 12) return null;
@@ -1700,7 +1711,7 @@ function datosAux_(aux, base, cc) {
   if (parseFecha_(t)) return Object.assign(out, { fecha: parseFecha_(t) });   // la celda trae directamente una fecha
   // norma de carga, sola en la celda ("20396927226 - 22/10")
   const nv = normaValor_(t, base);
-  if (nv) return Object.assign(out, { fecha: nv.fecha, numero: nv.numero, cuitValor: nv.cuit, tipoValor: nv.tipo });
+  if (nv) return Object.assign(out, { fecha: nv.fecha, numero: nv.numero, cuitValor: nv.cuit, dniValor: nv.dni || '', tipoValor: nv.tipo });
   const m = t.match(/^N[º°o]?\s*(.*?)-\s*([A-Z][A-Z .]+?)\s*-?\s*\((\d+)\)\s*-\s*(\d{1,2}\/\d{1,2}\/\d{2,4})?\s*$/i);   // también \"BANCO MACRO-(1103015)\"
   const dm = (txt) => {
     let x = txt.match(/^(\d{1,2})\s*[\/-]\s*(\d{1,2})(?!\d)/);
@@ -1719,7 +1730,7 @@ function datosAux_(aux, base, cc) {
     out.fecha2 = m[4] ? parseFecha_(m[4]) : null;
     // norma de carga dentro del Nº ("Nº 20396927226 - 22/10-BANCO MACRO(1103012)-23/10/2026")
     const nv2 = normaValor_(m[1], out.fecha2 || base);
-    if (nv2) return Object.assign(out, { fecha: nv2.fecha || out.fecha2, numero: nv2.numero, cuitValor: nv2.cuit, tipoValor: nv2.tipo });
+    if (nv2) return Object.assign(out, { fecha: nv2.fecha || out.fecha2, numero: nv2.numero, cuitValor: nv2.cuit, dniValor: nv2.dni || '', tipoValor: nv2.tipo });
     const sinGuiones = nro.replace(/[-.]/g, '');
     if (/^(20|23|24|27|30|33|34)\d{9}$/.test(sinGuiones)) {
       // CUIT de quien transfirió: la fecha del valor es la del final (acreditación)
@@ -1811,6 +1822,7 @@ function partidaFbs_(a, origen) {
   // con o sin guiones) y la fecha del final es la de acreditación en el banco
   const cuitNro = ax.cuitValor;
   if (cuitNro) { cuit = cuitNro; dni = cuitNro.slice(2, 10); }
+  else if (ax.dniValor) { cuit = ''; dni = ax.dniValor; }
   const fr = ax.fecha || (a.fecha ? fechaEnTexto_(com, a.fecha) : null);
   const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
