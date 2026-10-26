@@ -1676,7 +1676,8 @@ function normaValor_(txt, base) {
     // solo el CUIT, sin fecha (el comentario de FBS no tiene lugar para más): la fecha sale del resto del registro
     const c = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?((?:20|23|24|27|30|33|34)-?\d{8}-?\d)$/i);
     if (c) return { fecha: null, numero: c[1].replace(/-/g, ''), cuit: c[1].replace(/-/g, ''), tipo: 'CUIT' };
-    // DNI de 8 dígitos + día y mes pegados, 12 dígitos ("396927222110" = DNI 39692722, 21/10)
+    // 8 dígitos del medio del CUIT/CUIL (el DNI en las personas) + día y mes pegados, 12 dígitos ("396927222110" =
+    // CUIL 20-39692722-6, 21/10; empresas igual: "711713460510" = CUIT 30-71171346-4, 05/10)
     const dn = String(txt || '').trim().match(/^(?:N[º°o]?\s*)?(\d{8})(\d{2})(\d{2})$/i);
     if (dn) {
       const dd = Number(dn[2]), mm = Number(dn[3]);
