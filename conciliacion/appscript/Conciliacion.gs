@@ -494,6 +494,8 @@ function procesar_(ss) {
     const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
     const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
     base = r.filas; saldosIniciales = r.saldos; ctxBase = r.ctx || null; hastaBase = hasta;
+    // las consultas siguientes a la base no dependen entre sí: se hacen todas a la vez
+    if (r.ctx) precargarGviz_(r.ctx.id, r.ctx.hoja, [qPosteriores_(r.ctx, hasta), qFotoActual_(r.ctx, desde), qNombres_(r.ctx)]);
     if (r.ctx) posterioresO = ingresosOPosteriores_(r.ctx, hasta);
     // movimientos de meses cerrados cargados o modificados después del cierre anterior
     const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
@@ -1468,14 +1470,32 @@ function abrirBase_(id) {
   return BASES_[id];
 }
 
-function consultaGviz_(id, hoja, consulta) {
-  const url = 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:json&headers=1&sheet=' +
-    encodeURIComponent(hoja) + '&tq=' + encodeURIComponent(consulta);
-  const r = UrlFetchApp.fetch(url, { headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+const GVIZ_ = {};   // consultas ya hechas en esta ejecución (las precargadas en paralelo)
+const pedidoGviz_ = (id, hoja, consulta) => ({ url: 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:json&headers=1&sheet=' +
+  encodeURIComponent(hoja) + '&tq=' + encodeURIComponent(consulta), headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() }, muteHttpExceptions: true });
+function respuestaGviz_(r) {
   if (r.getResponseCode() !== 200 || !/setResponse/.test(r.getContentText().slice(0, 200))) {
     throw new Error('consulta a la base: respuesta ' + r.getResponseCode());
   }
   return parseGviz_(r.getContentText());
+}
+
+function consultaGviz_(id, hoja, consulta) {
+  const k = id + '|' + hoja + '|' + consulta;
+  if (k in GVIZ_) { const x = GVIZ_[k]; delete GVIZ_[k]; if (x instanceof Error) throw x; return x; }
+  const pd = pedidoGviz_(id, hoja, consulta);
+  return respuestaGviz_(UrlFetchApp.fetch(pd.url, { headers: pd.headers, muteHttpExceptions: true }));
+}
+
+/** Hace varias consultas a la base a la vez (cada una tarda varios segundos): después consultaGviz_ las toma de acá. */
+function precargarGviz_(id, hoja, consultas) {
+  const faltan = Array.from(new Set(consultas.filter(Boolean))).filter(q => !((id + '|' + hoja + '|' + q) in GVIZ_));
+  for (let i = 0; i < faltan.length; i += 20) {
+    const grupo = faltan.slice(i, i + 20);
+    let rs;
+    try { rs = UrlFetchApp.fetchAll(grupo.map(q => pedidoGviz_(id, hoja, q))); } catch (e) { return; }   // se harán de a una
+    rs.forEach((r, j) => { let x; try { x = respuestaGviz_(r); } catch (e) { x = e; } GVIZ_[id + '|' + hoja + '|' + grupo[j]] = x; });
+  }
 }
 
 /**
@@ -1498,13 +1518,15 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   const enCuentas = '(' + cuentas.map(c => L.plan + ' = ' + Number(c)).join(' or ') + ')';
   const vigente = L.estado ? ' and not (' + L.estado + " contains 'ELIMIN')" : '';
   try {
-    const filas = consultaGviz_(id, hoja, 'select * where ' + enCuentas + ' and ' + L.fecha + ' >= ' + fechaGviz_(desde) +
-      ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + vigente);
-    const sum = consultaGviz_(id, hoja, 'select ' + L.plan + ', sum(' + L.debe + '), sum(' + L.haber + ') where ' + enCuentas +
-      ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + vigente + ' group by ' + L.plan);
+    const qFilas = 'select * where ' + enCuentas + ' and ' + L.fecha + ' >= ' + fechaGviz_(desde) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + vigente;
+    const qSum = 'select ' + L.plan + ', sum(' + L.debe + '), sum(' + L.haber + ') where ' + enCuentas +
+      ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + vigente + ' group by ' + L.plan;
+    precargarGviz_(id, hoja, [qFilas, qSum]);
+    const filas = consultaGviz_(id, hoja, qFilas);
+    const sum = consultaGviz_(id, hoja, qSum);
     const saldos = { E: 0, O: 0 };
     sum.slice(1).forEach(r => { const k = String(r[0]) === String(Number(ctas.E)) ? 'E' : 'O'; saldos[k] = redondear_(Number(r[1] || 0) - Number(r[2] || 0)); });
-    return { filas, saldos, ctx: { id, hoja, L, enCuentas, vigente, ctas } };
+    return { filas, saldos, ctx: { id, hoja, L, enCuentas, vigente, ctas, cab: filas[0] } };
   } catch (e) {
     // sin consulta: se lee la hoja entera y se filtra acá (más lento)
     const todo = sh.getDataRange().getValues();
@@ -1527,14 +1549,23 @@ function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
  * registró con fecha del mes siguiente (agosto Macro: pase del 19/08, ingreso en O del 01/09). Devuelve
  * [{ texto, importe, fecha }] o null si no se pudo consultar.
  */
-function ingresosOPosteriores_(ctx, hasta) {
+function qPosteriores_(ctx, hasta) {
   const L = ctx.L;
   if (!ctx.ctas.O || !L.comenta) return null;
   const hasta2 = new Date(hasta.getFullYear(), hasta.getMonth(), hasta.getDate() + 62);
+  return 'select ' + L.comenta + ', ' + L.debe + ', ' + L.fecha + ' where ' + L.plan + ' = ' + Number(ctx.ctas.O) + ' and ' + L.fecha + ' > ' +
+    fechaGviz_(hasta) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta2) + ' and ' + L.debe + ' > 0' + ctx.vigente;
+}
+const qFotoActual_ = (ctx, desde) => !ctx.L.id ? null : 'select ' + [ctx.L.id, ctx.L.plan, ctx.L.debe, ctx.L.haber, ctx.L.fecha].join(', ') +
+  ' where ' + ctx.enCuentas + ' and ' + ctx.L.fecha + ' >= ' + fechaGviz_(inicioFoto_(desde)) + ' and ' + ctx.L.fecha + ' < ' + fechaGviz_(desde) + ctx.vigente;
+const qNombres_ = ctx => !ctx.L.nombre ? null : 'select ' + ctx.L.plan + ', ' + ctx.L.nombre + ', count(' + (ctx.L.id || ctx.L.plan) + ') where ' +
+  ctx.enCuentas + ' group by ' + ctx.L.plan + ', ' + ctx.L.nombre;
+
+function ingresosOPosteriores_(ctx, hasta) {
+  const q = qPosteriores_(ctx, hasta);
+  if (!q) return null;
   try {
-    const filas = consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.comenta + ', ' + L.debe + ', ' + L.fecha + ' where ' + L.plan + ' = ' +
-      Number(ctx.ctas.O) + ' and ' + L.fecha + ' > ' + fechaGviz_(hasta) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta2) +
-      ' and ' + L.debe + ' > 0' + ctx.vigente);
+    const filas = consultaGviz_(ctx.id, ctx.hoja, q);
     return filas.slice(1).map(r => ({ texto: String(r[0] || ''), importe: Number(r[1] || 0), fecha: parseFecha_(r[2]) }));
   } catch (e) { return null; }
 }
@@ -1564,34 +1595,50 @@ function cambiosPostCierre_(ctx, desde, cierreAnterior) {
   // nombre de cuenta -> número (las cuentas E y O de esta planilla)
   const nombres = {};
   if (L.nombre) {
-    consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.plan + ', ' + L.nombre + ', count(' + (L.id || L.plan) + ') where ' + ctx.enCuentas +
-      ' group by ' + L.plan + ', ' + L.nombre).slice(1).forEach(r => { nombres[normalizar_(r[1])] = String(Number(r[0])); });
+    consultaGviz_(ctx.id, ctx.hoja, qNombres_(ctx)).slice(1).forEach(r => { nombres[normalizar_(r[1])] = String(Number(r[0])); });
   }
-  // versión congelada (la de MOVIMIENTOS) de lo modificado o eliminado, para tener todas sus columnas
+  // versión congelada (la de MOVIMIENTOS) de lo modificado o eliminado, para tener todas sus columnas; solo de los cambios
+  // que se van a usar este mes (antes se consultaban todos los de la hoja)
   const hc = cambios[0].map(normalizar_), iid = hc.indexOf('detmovid'), itipo = hc.indexOf('tipo');
-  const ids = Array.from(new Set(cambios.slice(1).filter(r => !/NUEVO/i.test(String(r[itipo]))).map(r => String(r[iid]).replace(/\D/g, '')).filter(Boolean)));
-  let cab = null;
+  const ids = Array.from(new Set(cambios.slice(1).filter(r => !/NUEVO/i.test(String(r[itipo])) &&
+    cambioAplica_(r[hc.indexOf('mes cerrado')], r[hc.indexOf('detectado')], desde, cierreAnterior))
+    .map(r => String(r[iid]).replace(/\D/g, '')).filter(Boolean)));
+  let cab = ctx.cab || null;
   const viejas = {};
   if (L.id) {
-    for (let i = 0; i < ids.length; i += 40) {
-      const r = consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + ids.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or '));
+    const qs = [];
+    for (let i = 0; i < ids.length; i += 40) qs.push('select * where ' + ids.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or '));
+    precargarGviz_(ctx.id, ctx.hoja, qs);
+    qs.forEach(q => {
+      const r = consultaGviz_(ctx.id, ctx.hoja, q);
       if (!cab) cab = r[0];
       const hi = r[0].map(normalizar_).indexOf('detmovid');
       r.slice(1).forEach(x => { viejas[String(x[hi])] = x; });
-    }
+    });
   }
   if (!cab) cab = consultaGviz_(ctx.id, ctx.hoja, 'select * limit 1')[0];
   return armarCambios_(cambios, cab, viejas, nombres, ctx.ctas, desde, cierreAnterior);
+}
+
+/**
+ * Qué cambios de "CAMBIOS POST CIERRE" entran en el mes que se concilia: los de meses anteriores; el mes inmediato anterior
+ * siempre (se concilió con su foto fija), los más viejos solo si el cambio se detectó desde el último cierre de esta planilla
+ * (los anteriores ya se usaron).
+ */
+function cambioAplica_(mesCerrado, detectado, desde, cierreAnterior) {
+  const mc = String(mesCerrado || '').match(/(\d{4})-(\d{1,2})/);
+  if (!mc) return false;
+  const mes = Number(mc[1]) * 12 + Number(mc[2]) - 1, mesM = desde.getFullYear() * 12 + desde.getMonth();
+  const det = parseFecha_(detectado);
+  const diaCierre = cierreAnterior ? new Date(cierreAnterior.getFullYear(), cierreAnterior.getMonth(), cierreAnterior.getDate()) : null;
+  return mes < mesM && (mes === mesM - 1 || !!(diaCierre && det && det >= diaCierre));
 }
 
 /** Parte "pura" de cambiosPostCierre_ (sin acceso a la base): arma las filas tardías a partir de la hoja de cambios. */
 function armarCambios_(cambios, cab, viejas, nombres, ctas, desde, cierreAnterior) {
   const hc = cambios[0].map(normalizar_), c = n => hc.indexOf(n);
   const h = cab.map(normalizar_), out = [cab.concat(['_TARDIO'])];
-  const mesNum = d => d.getFullYear() * 12 + d.getMonth();
-  const mesM = mesNum(desde);
   const nuestras = [String(Number(ctas.E))].concat(ctas.O ? [String(Number(ctas.O))] : []);
-  const diaCierre = cierreAnterior ? new Date(cierreAnterior.getFullYear(), cierreAnterior.getMonth(), cierreAnterior.getDate()) : null;
   let n = 0;
   const fila = (base, campos) => {
     const r = base ? base.slice(0, cab.length) : cab.map(() => '');
@@ -1599,13 +1646,7 @@ function armarCambios_(cambios, cab, viejas, nombres, ctas, desde, cierreAnterio
     return r.concat(['SI']);
   };
   cambios.slice(1).forEach(r => {
-    const mc = String(r[c('mes cerrado')] || '').match(/(\d{4})-(\d{1,2})/);
-    if (!mc) return;
-    const mes = Number(mc[1]) * 12 + Number(mc[2]) - 1;
-    const det = parseFecha_(r[c('detectado')]);
-    // meses anteriores al que se concilia; el mes inmediato anterior siempre (se concilió con su foto fija), los más
-    // viejos solo si el cambio se detectó desde el último cierre de esta planilla (los anteriores ya se usaron)
-    if (mes >= mesM || !(mes === mesM - 1 || (diaCierre && det && det >= diaCierre))) return;
+    if (!cambioAplica_(r[c('mes cerrado')], r[c('detectado')], desde, cierreAnterior)) return;
     const id = String(r[c('detmovid')] || '').replace(/\D/g, ''), tipo = String(r[c('tipo')] || '').toUpperCase();
     const cambiosCampo = {};
     String(r[c('detalle')] || '').split(/;\s*/).forEach(x => {
@@ -1667,8 +1708,7 @@ function movimientosTardios_(ctx, desde, dif, foto) {
     filas.push(r.concat(['SI']));
   });
   if (foto && L.id) {
-    const actual = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
-      ' and ' + L.fecha + ' >= ' + fechaGviz_(ini) + ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + ctx.vigente);
+    const actual = consultaGviz_(ctx.id, ctx.hoja, qFotoActual_(ctx, desde));
     // de la foto, solo lo de la misma ventana (lo anterior no se consultó: no es que se haya borrado)
     foto.forEach((f, id) => { const fd = parseFecha_(f.fecha); if (!fd || fd < ini || fd >= desde) foto.delete(id); });
     const vistos = new Set(), nuevos = [];
@@ -1680,9 +1720,10 @@ function movimientosTardios_(ctx, desde, dif, foto) {
         if (f) foto.set(id, Object.assign({}, f, { cambiado: true }));
       }
     });
-    for (let i = 0; i < nuevos.length; i += 40) {
-      sumar(consultaGviz_(ctx.id, ctx.hoja, 'select * where ' + nuevos.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or ')));
-    }
+    const qs = [];
+    for (let i = 0; i < nuevos.length; i += 40) qs.push('select * where ' + nuevos.slice(i, i + 40).map(x => L.id + ' = ' + x).join(' or '));
+    precargarGviz_(ctx.id, ctx.hoja, qs);
+    qs.forEach(q => sumar(consultaGviz_(ctx.id, ctx.hoja, q)));
     // lo que estaba en la foto y ya no está (o cambió): se revierte la versión vieja
     const quitados = [];
     foto.forEach((f, id) => { if ((!vistos.has(id) || f.cambiado) && Math.abs(f.importe) > 0.005) quitados.push([id, f]); });
