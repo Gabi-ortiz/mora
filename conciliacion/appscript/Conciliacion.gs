@@ -555,6 +555,10 @@ function procesar_(ss) {
   marca('escribir las hojas');
   res.tiempos = ((Date.now() - t0) / 1000).toFixed(0) + ' s (' + tiempos.join(', ') + ')';
   console.log('Tiempos: ' + res.tiempos);
+  // a la vista en el Tablero: cuándo se procesó y cuánto tardó
+  const tab = ss.getSheetByName(HOJA.tablero);
+  if (tab) tab.getRange(2, 1).setValue('Procesado el ' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'dd/MM/yyyy HH:mm') +
+    ' — tardó ' + res.tiempos).setFontColor('#7F7F7F').setFontStyle('italic');
   // orden de las pestañas: primero lo que se lee
   [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.cuatro).activate();
