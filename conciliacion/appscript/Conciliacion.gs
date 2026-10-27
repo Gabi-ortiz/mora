@@ -519,11 +519,12 @@ function procesar_(ss) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
   const desc = leerDesconciliados_(ss);
+  const trabajo = leer(hojaAnteriores);
   const res = conciliarTodo_({
     extracto, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
-    anteriores: leer(hojaAnteriores),
+    anteriores: trabajo,
     reglas, empresas, parametros,
     desconciliar: desc.claves,
   });
@@ -541,6 +542,7 @@ function procesar_(ss) {
     'Paso 2 — Cuenta E que no se cruzó ni con pendientes anteriores ni con el extracto (posibles errores de registración).');
   escribirPendientes_(ss, HOJA.pendBanco, res, res.listas.B,
     'Movimientos del extracto (y pendientes anteriores del banco) que no están en la cuenta E.');
+  actualizarPendTrabajo_(ss, res, trabajo, hojaAnteriores);
   // orden de las pestañas: primero lo que se lee
   [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.cuatro).activate();
@@ -592,7 +594,7 @@ function cerrarMes() {
     .setLinkUrl(archivo.getUrl()).build());
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
-  const n = pasarPendientes_(ss, res.corte);
+  const n = pasarPendientes_(ss, res);
   // lo desconciliado ya quedó en los pendientes que pasan: la lista se vacía para el mes siguiente
   escribirDesconciliados_(ss, []);
   const par = ss.getSheetByName(HOJA.parametros);
@@ -686,7 +688,20 @@ function marcarComoFoto_(copia, periodo, empresa) {
   (tablero || info).activate();
 }
 
-const COLS_PEND = ['Sector', 'Fecha', 'Concepto', 'Importe', 'ID', 'Días', 'Estado', 'Responsable', 'Comentario', 'Revisión automática', 'Revisado el', 'Observación', 'Cruces encontrados'];
+// "Pendientes en trabajo": los pendientes de meses anteriores (Origen "Mes anterior", los lee el proceso) y los del mes en
+// curso (Origen "Mes", los reescribe cada proceso). Todo se trabaja ahí: Estado, Responsable y Comentario.
+const COLS_PEND = ['Sector', 'Origen', 'Fecha', 'Concepto', 'Importe', 'Días', 'Estado', 'Responsable', 'Comentario', 'Situación',
+  'Observación', 'Cruces encontrados', 'Revisión automática', 'Revisado el', 'ID'];
+const ORIGEN_ANT = 'Mes anterior', ORIGEN_MES = 'Mes';
+
+/** Índice de cada columna de "Pendientes en trabajo" por su encabezado (las listas viejas traen Sector, Fecha, Concepto, Importe primero). */
+function colsPend_(cab) {
+  const h = (cab || []).map(normalizar_), c = {};
+  COLS_PEND.forEach(n => { c[n] = h.indexOf(normalizar_(n)); });
+  ['Sector', 'Fecha', 'Concepto', 'Importe'].forEach((n, i) => { if (c[n] < 0) c[n] = i; });
+  return c;
+}
+const esFilaMes_ = (r, c) => c.Origen >= 0 && /^mes$/i.test(String(r[c.Origen] || '').trim());
 const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Justificado', 'Error de la lista'];
 
 /** Clave estable de un pendiente (sector, fecha, concepto, importe) para conservar estado y comentarios entre cierres. */
@@ -703,68 +718,78 @@ function idsPend_(filas) {
 }
 
 /**
- * Arma "Pendientes en trabajo" con los pendientes del cierre: Sector, Fecha, Concepto, Importe (lo que lee el proceso)
- * y columnas para trabajarlos (Estado, Responsable, Comentario). Lo que ya estaba en la lista conserva su estado y
- * comentarios; lo resuelto no pasa.
+ * Al cerrar: "Pendientes en trabajo" queda solo con los pendientes del cierre (los del mes pasan a "Mes anterior"), con su
+ * Estado, Responsable y Comentario. Lo cruzado o marcado Resuelto en FBS / Error de la lista ya no está en res.pend.
  */
-function pasarPendientes_(ss, corte) {
-  const nuevas = [];
-  [HOJA.pendO, HOJA.pendFbs, HOJA.pendBanco].forEach(nombre => {
-    const sh = ss.getSheetByName(nombre);
-    if (!sh) throw new Error('Primero corré "2. Procesar conciliación".');
-    const v = sh.getDataRange().getValues();
-    const h = v[1];   // fila 1 = título, fila 2 = encabezados
-    const c = { s: h.indexOf('Sector'), f: h.indexOf('Fecha'), t: h.indexOf('Concepto / Comprobante'), i: h.indexOf('Importe'),
-      o: h.indexOf('Observación'), x: h.indexOf('Cruces encontrados') };
-    v.slice(2).forEach(r => { if (r[c.s]) nuevas.push([r[c.s], r[c.f], r[c.t], r[c.i], c.o >= 0 ? r[c.o] : '', c.x >= 0 ? r[c.x] : '']); });
-  });
+function pasarPendientes_(ss, res) {
+  const items = [].concat(res.pend.S1, res.pend.S2, res.pend.S3, res.pend.S4)
+    .sort((a, b) => sector_(a).localeCompare(sector_(b)) || a.fecha - b.fecha);
+  const claves = items.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p)]);
+  const ids = idsPend_(claves);
+  const filas = items.map((p, i) => [claves[i][0], ORIGEN_ANT, p.fecha, p.texto, claves[i][3], dias_(res.corte, p.fecha),
+    p.estado && !/^(Resuelto|Error)/i.test(p.estado) ? p.estado : 'Pendiente', p.resp || '', p.com || '', '',
+    observacion_(p), p.cruces || '', '', '', ids[i]]);
   let sh = hojaDe_(ss, nombresAnteriores_());
-  // lo trabajado en la lista anterior (por ID)
-  const previo = {};
-  if (sh && sh.getLastRow() > 1) {
-    const v = sh.getDataRange().getValues(), h = v[0].map(String);
-    const ix = n => h.indexOf(n);
-    const ids = ix('ID') >= 0 ? v.slice(1).map(r => String(r[ix('ID')])) : idsPend_(v.slice(1));
-    v.slice(1).forEach((r, i) => {
-      if (ix('Estado') < 0) return;
-      previo[ids[i]] = [r[ix('Estado')], r[ix('Responsable')], r[ix('Comentario')]];
-    });
-  }
   // se escribe siempre en "Pendientes en trabajo"; la lista vieja ("Pend mes anterior") ya quedó absorbida y se borra
   const destino = ss.getSheetByName(HOJA.anterioresAlt[0]);
   if (destino && sh && destino.getName() !== sh.getName()) { ss.deleteSheet(sh); sh = destino; }
   if (!sh) sh = destino || ss.insertSheet(HOJA.anterioresAlt[0]);
   if (sh.getName() !== HOJA.anterioresAlt[0]) sh.setName(HOJA.anterioresAlt[0]);
   nombresAnteriores_().forEach(n => { const otra = ss.getSheetByName(n); if (otra && otra.getName() !== sh.getName()) ss.deleteSheet(otra); });
-  const ids = idsPend_(nuevas);
-  const filas = nuevas.map((r, i) => {
-    const p = previo[ids[i]] || [];
-    const f = parseFecha_(r[1]);
-    const estado = p[0] && !/^Resuelto/i.test(p[0]) ? p[0] : 'Pendiente';
-    // con signo: un pendiente anterior en negativo (comisión de una liquidación en S3) sigue en negativo
-    return [r[0], r[1], r[2], parseNum_(r[3]) || 0, ids[i], f && corte ? dias_(corte, f) : '', estado, p[1] || '', p[2] || '', '', '', r[4] || '', r[5] || ''];
-  });
   escribirPendTrabajo_(sh, filas);
   return filas.length;
+}
+
+/**
+ * Después de cada proceso: los pendientes anteriores quedan como estaban (son la entrada del proceso) con su "Situación"
+ * de este mes, y los pendientes del mes se reescriben conservando el Estado, Responsable y Comentario que se les puso.
+ */
+function actualizarPendTrabajo_(ss, res, filasHoja, nombre) {
+  const sh = ss.getSheetByName(nombre) || ss.insertSheet(HOJA.anterioresAlt[0]);
+  const c = colsPend_(filasHoja[0]);
+  const v = (r, n) => (c[n] >= 0 && c[n] < r.length ? r[c[n]] : '');
+  const porFila = {};
+  res.anteriores.forEach(p => { porFila[p.fila] = p; });
+  const out = [];
+  filasHoja.slice(1).forEach((r, i) => {
+    if (esFilaMes_(r, c) || !r.some(x => String(x).trim())) return;
+    const p = porFila[i], f = parseFecha_(v(r, 'Fecha')), sigue = p && p.situacion === 'Sigue pendiente';
+    out.push([v(r, 'Sector'), ORIGEN_ANT, v(r, 'Fecha'), v(r, 'Concepto'), v(r, 'Importe'), f ? dias_(res.corte, f) : '',
+      v(r, 'Estado') || 'Pendiente', v(r, 'Responsable'), v(r, 'Comentario'),
+      p ? p.situacion : 'No se pudo leer: revisá Sector (S1 a S4) e Importe',
+      sigue ? observacion_(p) : v(r, 'Observación'), sigue ? p.cruces || '' : v(r, 'Cruces encontrados'),
+      v(r, 'Revisión automática'), v(r, 'Revisado el'), (p && p.idPend) || v(r, 'ID')]);
+  });
+  res.pendMes.forEach(p => out.push([sector_(p), ORIGEN_MES, p.fecha, p.texto, valorSector_(p), dias_(res.corte, p.fecha),
+    p.estado || 'Pendiente', p.resp || '', p.com || '', p.situacion, observacion_(p), p.cruces || '', '', '', p.idPend]));
+  escribirPendTrabajo_(sh, out);
 }
 
 function escribirPendTrabajo_(sh, filas) {
   if (sh.getFilter()) sh.getFilter().remove();
   sh.clear();
+  const col = n => COLS_PEND.indexOf(n) + 1;
   sh.getRange(1, 1, 1, COLS_PEND.length).setValues([COLS_PEND]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   sh.setFrozenRows(1);
   if (filas.length) {
-    sh.getRange(2, 1, filas.length, COLS_PEND.length).setValues(filas);
-    sh.getRange(2, 2, filas.length, 1).setNumberFormat('dd/mm/yyyy');
-    sh.getRange(2, 4, filas.length, 1).setNumberFormat(NUM_FMT);
-    sh.getRange(2, 11, filas.length, 1).setNumberFormat('dd/mm/yyyy hh:mm');
-    sh.getRange(2, 7, filas.length, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(ESTADOS_PEND, true).setAllowInvalid(false).build());
-    sh.getRange(2, 10, filas.length, 1).setWrap(true);
-    sh.getRange(2, 12, filas.length, 2).setWrap(true);
+    const n = filas.length;
+    sh.getRange(2, 1, n, COLS_PEND.length).setValues(filas);
+    sh.getRange(2, col('Fecha'), n, 1).setNumberFormat('dd/mm/yyyy');
+    sh.getRange(2, col('Importe'), n, 1).setNumberFormat(NUM_FMT);
+    sh.getRange(2, col('Revisado el'), n, 1).setNumberFormat('dd/mm/yyyy hh:mm');
+    sh.getRange(2, col('Estado'), n, 1).setDataValidation(SpreadsheetApp.newDataValidation().requireValueInList(ESTADOS_PEND, true).setAllowInvalid(false).build());
+    sh.getRange(2, col('Situación'), n, 4).setWrap(true);
+    // los del mes en curso con fondo suave; la Situación en verde si se cruzó y en gris si salió por el Estado
+    const iO = col('Origen') - 1, iS = col('Situación') - 1;
+    sh.getRange(2, 1, n, COLS_PEND.length).setBackgrounds(filas.map(r => r.map((x, j) => {
+      if (j === iS && /^Cruzado/.test(String(x))) return '#C6EFCE';
+      if (j === iS && /^Sale/.test(String(x))) return '#E7E6E6';
+      return r[iO] === ORIGEN_MES ? '#FDF3E7' : null;
+    })));
   }
   sh.getRange(1, 1, Math.max(filas.length, 1) + 1, COLS_PEND.length).createFilter();
-  [55, 85, 360, 120, 60, 50, 120, 110, 260, 380, 110, 300, 380].forEach((w, i) => sh.setColumnWidth(i + 1, w));
-  sh.hideColumns(5);   // ID
+  [55, 105, 85, 340, 120, 50, 120, 110, 240, 260, 300, 340, 300, 110, 60].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.hideColumns(col('ID'));
 }
 
 // ------------------------------------------------------------------ salida
@@ -2157,23 +2182,28 @@ function escribirAnalisisO_(ss, res) {
 /** Hoja "Pendientes anteriores": Sector (S1..S4), Fecha, Concepto, Importe (positivo). */
 function leerAnteriores_(filas, desde) {
   const out = [];
-  // "Pendientes en trabajo": la columna Estado la pone el usuario (Resuelto en FBS / Error de la lista se respetan al procesar)
-  const cEst = (filas[0] || []).map(x => String(x).trim()).indexOf('Estado');
-  filas.slice(1).forEach(r => {
-    const sec = String(r[0] || '').trim().toUpperCase();
-    const imp = parseNum_(r[3]);
+  // "Pendientes en trabajo": la columna Estado la pone el usuario (Resuelto en FBS / Error de la lista se respetan al procesar).
+  // Las filas del mes en curso (Origen "Mes") las escribe el proceso: no son pendientes anteriores.
+  const c = colsPend_(filas[0]);
+  const v = (r, n) => (c[n] >= 0 && c[n] < r.length ? r[c[n]] : '');
+  const ant = filas.slice(1).map((r, i) => ({ r, i })).filter(x => !esFilaMes_(x.r, c));
+  const ids = idsPend_(ant.map(({ r }) => [v(r, 'Sector'), v(r, 'Fecha'), v(r, 'Concepto'), v(r, 'Importe')]));
+  ant.forEach(({ r, i }, k) => {
+    const sec = String(v(r, 'Sector') || '').trim().toUpperCase();
+    const imp = parseNum_(v(r, 'Importe'));
     if (!/^S[1-4]$/.test(sec) || imp === null) return;
-    const fecha = parseFecha_(r[1]) || new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() - 1);
-    const texto = String(r[2] || '');
+    const fecha = parseFecha_(v(r, 'Fecha')) || new Date(desde.getFullYear(), desde.getMonth(), desde.getDate() - 1);
+    const texto = String(v(r, 'Concepto') || '');
     // el importe va en positivo; uno negativo invierte el sentido (ej. la comisión de una liquidación listada en S3)
-    const v = sec === 'S1' || sec === 'S3' ? imp : -imp;
+    const val = sec === 'S1' || sec === 'S3' ? imp : -imp;
     if (sec === 'S1' || sec === 'S2') {
-      out.push(partidaBanco_({ fecha, concepto: texto, importe: v, ref: '', nombre: '' }, 'Arrastre'));
+      out.push(partidaBanco_({ fecha, concepto: texto, importe: val, ref: '', nombre: '' }, 'Arrastre'));
     } else {
-      out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: Math.max(v, 0), haber: Math.max(-v, 0) }, 'Arrastre'));
+      out.push(partidaFbs_({ fecha, comentario: texto, referencia: '', debe: Math.max(val, 0), haber: Math.max(-val, 0) }, 'Arrastre'));
     }
-    out[out.length - 1].sectorOriginal = sec;
-    if (cEst >= 0) out[out.length - 1].estado = String(r[cEst] || '').trim();
+    const p = out[out.length - 1];
+    p.sectorOriginal = sec; p.fila = i; p.idPend = String(v(r, 'ID') || '').trim() || ids[k];
+    p.estado = String(v(r, 'Estado') || '').trim(); p.resp = v(r, 'Responsable'); p.com = v(r, 'Comentario');
   });
   return out;
 }
@@ -3209,7 +3239,10 @@ function revisarPendientes() {
   const b = leerBase_(filas, ctas.E, ctas.O || '__sin_cuenta_O__');
   const movs = b.E.map(a => Object.assign(a, { cuenta: 'E' })).concat(b.O.map(a => Object.assign(a, { cuenta: 'O' })));
   const v = sh.getDataRange().getValues();
-  const pend = v.slice(1).map(x => [x[0], x[1], x[2], x[3]]);
+  const c = colsPend_(v[0]);
+  // solo los pendientes de meses anteriores: los del mes en curso se revisan al procesar
+  const filasAnt = v.slice(1).map((r, i) => ({ r, i })).filter(x => !esFilaMes_(x.r, c));
+  const pend = filasAnt.map(({ r }) => [r[c.Sector], r[c.Fecha], r[c.Concepto], r[c.Importe]]);
   const res = revisarPendientesCore_(pend, movs, cierre);
   // pendientes del banco sin rastro: ¿están registrados en la cuenta de otro banco?
   if (r.ctx) {
@@ -3217,13 +3250,18 @@ function revisarPendientes() {
     if (sinRastro.length) otrasCuentas_(r.ctx, pend, res, desde);
   }
   // escribir
-  const h = v[0].map(String), cRev = h.indexOf('Revisión automática'), cFecha = h.indexOf('Revisado el'), cEst = h.indexOf('Estado');
-  if (cRev < 0) throw new Error('La hoja "' + sh.getName() + '" no tiene las columnas de trabajo: se agregan solas en el próximo "Cerrar mes".');
-  const rev = res.map(x => [x.texto || 'Sin novedades en FBS']), fec = res.map(() => [hoy]);
-  sh.getRange(2, cRev + 1, rev.length, 1).setValues(rev);
-  sh.getRange(2, cFecha + 1, rev.length, 1).setValues(fec).setNumberFormat('dd/mm/yyyy hh:mm');
-  const colores = res.map(x => [x.tipo === 'resuelto' ? '#C6EFCE' : x.tipo === 'posible' ? '#FFEB9C' : null]);
-  sh.getRange(2, cRev + 1, rev.length, 1).setBackgrounds(colores);
+  const cRev = c['Revisión automática'], cFecha = c['Revisado el'];
+  if (cRev < 0 || cFecha < 0) throw new Error('La hoja "' + sh.getName() + '" no tiene las columnas de trabajo: se agregan solas al procesar la conciliación.');
+  const rev = v.slice(1).map(r => [r[cRev]]), fec = v.slice(1).map(r => [r[cFecha]]), colores = v.slice(1).map(() => [null]);
+  filasAnt.forEach(({ i }, k) => {
+    const x = res[k];
+    rev[i] = [x.texto || 'Sin novedades en FBS']; fec[i] = [hoy];
+    colores[i] = [x.tipo === 'resuelto' ? '#C6EFCE' : x.tipo === 'posible' ? '#FFEB9C' : null];
+  });
+  if (rev.length) {
+    sh.getRange(2, cRev + 1, rev.length, 1).setValues(rev).setBackgrounds(colores);
+    sh.getRange(2, cFecha + 1, rev.length, 1).setValues(fec).setNumberFormat('dd/mm/yyyy hh:mm');
+  }
   // el Estado lo decide el usuario: "Resuelto en FBS" saca el pendiente de la conciliación si el proceso no lo cruza,
   // así que la revisión automática no lo cambia (solo informa en su columna, en verde)
   const n = { resuelto: 0, posible: 0 };
@@ -3478,16 +3516,30 @@ function conciliarTodo_(entrada, redondoUnico) {
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
+  // pendientes del mes: el mismo ID que en "Pendientes en trabajo", para respetar el Estado que se les puso ahí
+  const trabajo = entrada.anteriores || [], cT = colsPend_(trabajo[0]), marcas = {};
+  trabajo.slice(1).forEach(r => {
+    if (esFilaMes_(r, cT) && cT.ID >= 0 && String(r[cT.ID] || '').trim()) marcas[String(r[cT.ID]).trim()] =
+      { estado: String(r[cT.Estado] || '').trim(), resp: cT.Responsable >= 0 ? r[cT.Responsable] : '', com: cT.Comentario >= 0 ? r[cT.Comentario] : '' };
+  });
+  const pendMes = banco.concat(fbs).filter(p => p.match === null && p.origen !== 'Arrastre').concat(ao.pendientes.filter(p => p.origen !== 'Arrastre'))
+    .sort((a, b) => sector_(a).localeCompare(sector_(b)) || a.fecha - b.fecha);
+  idsPend_(pendMes.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p)])).forEach((id, i) => {
+    const p = pendMes[i], m = marcas[id];
+    p.idPend = id;
+    if (m) { p.estado = m.estado; p.resp = m.resp; p.com = m.com; }
+  });
+
   const pend = { S1: [], S2: [], S3: [], S4: [] };
-  // pendientes anteriores que el usuario marcó "Resuelto en FBS" o "Error de la lista" y el proceso no cruzó: salen de la
-  // conciliación (si la corrección no está en FBS, la diferencia de control cambia en lo que se sacó)
+  // pendientes (anteriores o del mes) que el usuario marcó "Resuelto en FBS" o "Error de la lista" y el proceso no cruzó: salen
+  // de la conciliación (si la corrección no está en FBS, la diferencia de control cambia en lo que se sacó)
   const quitados = [];
-  const sacar = p => p.origen === 'Arrastre' && /^(Resuelto|Error)/i.test(p.estado || '');
+  const sacar = p => /^(Resuelto|Error)/i.test(p.estado || '');
   banco.concat(fbs).forEach(p => { if (p.match === null) (sacar(p) ? quitados : pend[sector_(p)]).push(p); });
   ao.pendientes.forEach(p => (sacar(p) ? quitados : pend[sector_(p)]).push(p));   // no confirmados en O: directo a pendientes
   if (quitados.length) {
     const neto = redondear_(quitados.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
-    avisos.push(quitados.length + ' pendientes anteriores marcados "Resuelto en FBS" o "Error de la lista" en "' + HOJA.anterioresAlt[0] +
+    avisos.push(quitados.length + ' pendientes marcados "Resuelto en FBS" o "Error de la lista" en "' + HOJA.anterioresAlt[0] +
       '" salieron de la conciliación (' + quitados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + ')' +
       (Math.abs(neto) > 0.005 ? '. Neto ' + formato_(neto) + ': si no está corregido en FBS, la diferencia de control cambia en ese importe.' : '. Se compensan entre sí: el control no cambia.'));
   }
@@ -3528,7 +3580,13 @@ function conciliarTodo_(entrada, redondoUnico) {
         n + 1, x ? claveCruce_(x) : '', y ? claveCruce_(lineasFbs[i].p) : '']);
     }
   });
-  const listas = { O: ao.pendientes, E: fbs.filter(p => p.match === null), B: banco.filter(p => p.match === null) };
+  // lo que salió por el Estado no va a las hojas de pendientes ni pasa al cierre: se ve en "Pendientes en trabajo"
+  const fuera = new Set(quitados), enPend = new Set([].concat(pend.S1, pend.S2, pend.S3, pend.S4));
+  const listas = { O: ao.pendientes.filter(p => !fuera.has(p)), E: fbs.filter(p => p.match === null && !fuera.has(p)),
+    B: banco.filter(p => p.match === null && !fuera.has(p)) };
+  const situacion = p => fuera.has(p) ? 'Sale de la conciliación por el Estado "' + p.estado + '"'
+    : enPend.has(p) ? 'Sigue pendiente' : 'Cruzado este mes' + (p.metodo ? ' (' + p.metodo.split(' (dif')[0] + ')' : '');
+  anteriores.concat(pendMes).forEach(p => { p.situacion = situacion(p); });
 
   let empresa = '';
   if (entrada.base) {
@@ -3536,7 +3594,7 @@ function conciliarTodo_(entrada, redondoUnico) {
     if (ie >= 0) { const f = entrada.base.slice(1).find(r => String(r[ie] || '').trim()); empresa = f ? String(f[ie]).trim() : ''; }
   }
   return { empresa, cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
-    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs };
+    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs, anteriores, pendMes };
 }
 
 if (typeof module !== 'undefined') module.exports = { gastosBancarios_, claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
