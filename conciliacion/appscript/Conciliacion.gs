@@ -359,13 +359,12 @@ function onOpen() { crearMenu(); }
 /** Menú de la planilla. Con la biblioteca, la planilla de cada banco llama a Motor.crearMenu() en su onOpen. */
 function crearMenu() {
   SpreadsheetApp.getUi().createMenu('Conciliación')
-    .addItem('1. Crear hojas de entrada', 'crearHojasEntrada')
-    .addItem('2. Procesar conciliación', 'procesarConciliacion')
-    .addItem('3. Cerrar mes (guardar foto y pasar pendientes)', 'cerrarMes')
+    .addItem('1. Procesar conciliación', 'procesarConciliacion')
+    .addItem('2. Cerrar mes (guardar foto y pasar pendientes)', 'cerrarMes')
     .addSeparator()
     .addItem('Revisar pendientes (con la base al día)', 'revisarPendientes')
-    .addItem('Agregar reglas nuevas del script', 'agregarReglasNuevas')
     .addToUi();
+  // "Crear hojas de entrada" y "Agregar reglas nuevas del script" quedan para el administrador (se corren desde el editor)
 }
 
 function crearParametros_(ss) {
@@ -466,6 +465,8 @@ function procesarConciliacion() {
 }
 
 function procesar_(ss) {
+  const t0 = Date.now(), tiempos = [];
+  const marca = n => tiempos.push(n + ' ' + ((Date.now() - t0) / 1000).toFixed(1) + 's');
   if (ss.getSheetByName(HOJA.foto)) {
     throw new Error('Esta planilla es una FOTO de un cierre y no se puede reprocesar. Trabajá en la planilla principal.');
   }
@@ -519,6 +520,7 @@ function procesar_(ss) {
   } else if (!ss.getSheetByName(HOJA.mayorE)) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
+  marca('base');
   const desc = leerDesconciliados_(ss);
   const trabajo = leer(hojaAnteriores);
   const shCierre = ss.getSheetByName(HOJA.cierrePend);
@@ -532,6 +534,7 @@ function procesar_(ss) {
     desconciliar: desc.claves,
   });
   res.baseCtx = ctxBase; res.hastaBase = hastaBase;
+  marca('cruce');
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirCuatroPuntas_(ss, res);
   escribirTablero_(ss, res);
@@ -548,6 +551,8 @@ function procesar_(ss) {
   // primera vez con esta versión: los pendientes del cierre pasan a la hoja oculta tal como estaban en la lista
   if (!delCierre) guardarCierrePend_(ss, res.anteriores.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p), p.idPend]));
   actualizarPendTrabajo_(ss, res, hojaAnteriores);
+  marca('hojas');
+  console.log('Tiempos: ' + tiempos.join(' | '));
   // orden de las pestañas: primero lo que se lee
   [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.cuatro).activate();
@@ -1091,9 +1096,10 @@ function escribirRevisar_(ss, res) {
     if (f[0] === 'resumen') sh.getRange(i + 1, 1).setFontWeight('bold');
     if (f[0] === 'item' || f[0] === 'resumen' || f[0] === 'sub') fmt.push(i + 1);
   });
-  fmt.forEach(r => sh.getRange(r, 3).setNumberFormat(NUM_FMT));
-  sh.getRange(1, 1, filas.length, 1).setNumberFormat('dd/mm/yyyy');
-  filas.forEach((f, i) => { if (f[0] === 'resumen' || f[0] === 'sub') sh.getRange(i + 1, 1).setNumberFormat('@'); });
+  // formatos de número de las columnas A y C en un solo llamado (antes era uno por fila)
+  const enFmt = new Set(fmt);
+  sh.getRange(1, 1, filas.length, 3).setNumberFormats(filas.map((f, i) => [
+    f[0] === 'resumen' || f[0] === 'sub' ? '@' : 'dd/mm/yyyy', 'General', enFmt.has(i + 1) ? NUM_FMT : 'General']));
   [95, 380, 130, 300, 380, 20].forEach((w, i) => sh.setColumnWidth(i + 1, w));
   // alto de filas según el contenido ya combinado (también limpia altos fijos de una corrida anterior)
   sh.autoResizeRows(1, filas.length);
@@ -1449,6 +1455,13 @@ function parseGviz_(texto) {
   return [cols.map(c => c.label || c.id)].concat((json.table.rows || []).map(r => cols.map((_, i) => valor(r.c[i]))));
 }
 
+const BASES_ = {};
+/** La base de la empresa se abre una sola vez por ejecución (abrir una planilla grande tarda). */
+function abrirBase_(id) {
+  if (!BASES_[id]) BASES_[id] = SpreadsheetApp.openById(id);
+  return BASES_[id];
+}
+
 function consultaGviz_(id, hoja, consulta) {
   const url = 'https://docs.google.com/spreadsheets/d/' + id + '/gviz/tq?tqx=out:json&headers=1&sheet=' +
     encodeURIComponent(hoja) + '&tq=' + encodeURIComponent(consulta);
@@ -1466,7 +1479,7 @@ function consultaGviz_(id, hoja, consulta) {
  */
 function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   let sh;
-  try { sh = SpreadsheetApp.openById(id).getSheetByName(hoja); } catch (e) {
+  try { sh = abrirBase_(id).getSheetByName(hoja); } catch (e) {
     throw new Error('No pude abrir la base FBS (' + id + '): revisá el link en "' + HOJA.parametros + '" y que tengas acceso.');
   }
   if (!sh) throw new Error('La base FBS no tiene la hoja "' + hoja + '".');
@@ -1538,7 +1551,7 @@ function fechaUltimoCierre_(ss) {
  */
 function cambiosPostCierre_(ctx, desde, cierreAnterior) {
   let sh;
-  try { sh = SpreadsheetApp.openById(ctx.id).getSheetByName(HOJA_CAMBIOS_BASE); } catch (e) { return { filas: [], n: 0 }; }
+  try { sh = abrirBase_(ctx.id).getSheetByName(HOJA_CAMBIOS_BASE); } catch (e) { return { filas: [], n: 0 }; }
   if (!sh || sh.getLastRow() < 2) return { filas: [], n: 0 };
   const cambios = sh.getDataRange().getValues();
   const L = ctx.L;
@@ -1633,8 +1646,14 @@ function armarCambios_(cambios, cab, viejas, nombres, ctas, desde, cierreAnterio
  *    anterior al mes por exactamente esa diferencia.
  * Devuelve filas (con encabezado, columna extra _TARDIO) y el total por cuenta.
  */
+// la base congela cada mes el 15 del siguiente: de ahí para atrás los cambios están en "CAMBIOS POST CIERRE", así que la
+// foto solo compara los últimos meses (leer toda la historia de E y O era lo que más tardaba)
+const MESES_FOTO = 3;
+const inicioFoto_ = d => new Date(d.getFullYear(), d.getMonth() - MESES_FOTO, 1);
+
 function movimientosTardios_(ctx, desde, dif, foto) {
   const L = ctx.L, total = { E: 0, O: 0 };
+  const ini = inicioFoto_(desde);
   const cuentaDe = plan => (String(Number(plan)) === String(Number(ctx.ctas.E)) ? 'E' : 'O');
   let filas = null;
   const sumar = rows => rows.slice(1).forEach(r => {
@@ -1643,7 +1662,9 @@ function movimientosTardios_(ctx, desde, dif, foto) {
   });
   if (foto && L.id) {
     const actual = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
-      ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + ctx.vigente);
+      ' and ' + L.fecha + ' >= ' + fechaGviz_(ini) + ' and ' + L.fecha + ' < ' + fechaGviz_(desde) + ctx.vigente);
+    // de la foto, solo lo de la misma ventana (lo anterior no se consultó: no es que se haya borrado)
+    foto.forEach((f, id) => { const fd = parseFecha_(f.fecha); if (!fd || fd < ini || fd >= desde) foto.delete(id); });
     const vistos = new Set(), nuevos = [];
     actual.slice(1).forEach(r => {
       const id = String(r[0]), imp = redondear_(Number(r[2] || 0) - Number(r[3] || 0)), f = foto.get(id);
@@ -1741,12 +1762,13 @@ const HOJA_FOTO_FBS = '_Foto FBS';
 function guardarFotoBase_(ss, ctx, hasta) {
   const L = ctx.L;
   if (!L.id) return 0;
+  const desdeFoto = inicioFoto_(new Date(hasta.getFullYear(), hasta.getMonth() + 1, 1));
   const r = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
-    ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + ctx.vigente);
+    ' and ' + L.fecha + ' >= ' + fechaGviz_(desdeFoto) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + ctx.vigente);
   const filas = [['DETMOVID', 'Cuenta', 'Importe', 'Fecha', 'Cierre al ' + fechaTexto_(hasta)]].concat(r.slice(1).map(x =>
     [String(x[0]), String(Number(x[1])), redondear_(Number(x[2] || 0) - Number(x[3] || 0)), x[4], '']));
   let sh = ss.getSheetByName(HOJA_FOTO_FBS);
-  if (sh) sh.clearContents(); else sh = ss.insertSheet(HOJA_FOTO_FBS);
+  if (sh) sh.clear(); else sh = ss.insertSheet(HOJA_FOTO_FBS);
   sh.getRange(1, 1, filas.length, 5).setValues(filas);
   sh.getRange(2, 1, Math.max(filas.length - 1, 1), 2).setNumberFormat('@');
   sh.hideSheet();
@@ -3381,7 +3403,7 @@ function revisarPendientesCore_(pend, movs, cierre) {
 /** S1/S2 sin rastro en E/O: busca en la base el mismo importe registrado en la cuenta de otro banco después del pendiente. */
 function otrasCuentas_(ctx, pend, res, desde) {
   const L = ctx.L;
-  const sh = SpreadsheetApp.openById(ctx.id).getSheetByName(ctx.hoja);
+  const sh = abrirBase_(ctx.id).getSheetByName(ctx.hoja);
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
   const col = re => { const i = cab.findIndex(x => re.test(x)); return i < 0 ? null : letra_(i + 1); };
   const nombre = col(/^cuentanombre$/), com = col(/^detcomenta$/), asi = col(/^detmovnro$/);
