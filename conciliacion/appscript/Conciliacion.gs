@@ -74,7 +74,8 @@ const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972',   //
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
 
-const EMPRESAS_INICIALES = [['30669400167', 'TURIN SA'], ['30681026386', 'CHEXA SA']];
+const EMPRESAS_INICIALES = [['30669400167', 'TURIN SA'], ['30681026386', 'CHEXA SA'], ['30716101289', 'JEA SA'], ['30709866245', 'GAMOT SA'],
+  ['30708591382', 'GMIS SA'], ['30710780478', 'PYL SA'], ['30711301263', 'FUCARE'], ['30711011915', 'LEIPE SA'], ['30715873741', 'UTILXA']];
 
 // Código causal | Sentido (Débito/Crédito/Ambos) | Patrón en concepto (regex, vacío = todos) | Categoría | Descripción
 /** Galicia: "Código causal" = número de la columna "Concepto" del Excel de Office Banking (ej. "907173 - ING. BRUTOS S/ CRED"). */
