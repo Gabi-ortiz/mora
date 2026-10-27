@@ -460,13 +460,14 @@ function procesarConciliacion() {
   const ss = SpreadsheetApp.getActive();
   const res = procesar_(ss);
   const dif = res.ajustado - res.saldoBanco;
-  ss.toast('Diferencia de control: ' + formato_(dif) + (res.avisos.length ? ' — ver avisos en el Tablero' : ''),
-    'Conciliación terminada', 10);
+  ss.toast('Diferencia de control: ' + formato_(dif) + (res.avisos.length ? ' — ver avisos en el Tablero' : '') +
+    '. Tiempo: ' + res.tiempos, 'Conciliación terminada', 20);
 }
 
 function procesar_(ss) {
   const t0 = Date.now(), tiempos = [];
-  const marca = n => tiempos.push(n + ' ' + ((Date.now() - t0) / 1000).toFixed(1) + 's');
+  let tPrev = t0;
+  const marca = n => { const t = Date.now(); tiempos.push(n + ' ' + ((t - tPrev) / 1000).toFixed(0) + ' s'); tPrev = t; };
   if (ss.getSheetByName(HOJA.foto)) {
     throw new Error('Esta planilla es una FOTO de un cierre y no se puede reprocesar. Trabajá en la planilla principal.');
   }
@@ -520,7 +521,7 @@ function procesar_(ss) {
   } else if (!ss.getSheetByName(HOJA.mayorE)) {
     throw new Error('Falta la base de FBS: cargá el link de la base de la empresa en "' + HOJA.parametros + '" (fila "Base FBS").');
   }
-  marca('base');
+  marca('leer la base');
   const desc = leerDesconciliados_(ss);
   const trabajo = leer(hojaAnteriores);
   const shCierre = ss.getSheetByName(HOJA.cierrePend);
@@ -534,7 +535,7 @@ function procesar_(ss) {
     desconciliar: desc.claves,
   });
   res.baseCtx = ctxBase; res.hastaBase = hastaBase;
-  marca('cruce');
+  marca('cruzar');
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirCuatroPuntas_(ss, res);
   escribirTablero_(ss, res);
@@ -551,8 +552,9 @@ function procesar_(ss) {
   // primera vez con esta versión: los pendientes del cierre pasan a la hoja oculta tal como estaban en la lista
   if (!delCierre) guardarCierrePend_(ss, res.anteriores.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p), p.idPend]));
   actualizarPendTrabajo_(ss, res, hojaAnteriores);
-  marca('hojas');
-  console.log('Tiempos: ' + tiempos.join(' | '));
+  marca('escribir las hojas');
+  res.tiempos = ((Date.now() - t0) / 1000).toFixed(0) + ' s (' + tiempos.join(', ') + ')';
+  console.log('Tiempos: ' + res.tiempos);
   // orden de las pestañas: primero lo que se lee
   [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.cuatro).activate();
