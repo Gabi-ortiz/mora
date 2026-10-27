@@ -178,6 +178,9 @@ const REGLAS_CORDOBA = [
   ["*", "Débito", "^GASTOS DE MANTENIMIENTO", "GASTOS BANCARIOS", "Gastos de mantenimiento"],
   ["*", "Débito", "^IVA", "GASTOS BANCARIOS", "IVA (comisiones y percepción)"],
   ["*", "Débito", "^COMISI", "GASTOS BANCARIOS", "Comisiones"],
+  ["*", "Débito", "^DEBITO ABONO IB", "PAGO PROVEEDORES", "Pago por Interbanking (abono IB)"],
+  ["*", "Débito", "^D[EÉ]BITO AUTOMATICO RECIBIDO", "DEBITOS AUTOMATICOS", "Débito automático (donaciones, adhesiones)"],
+  ["*", "Débito", "^COBRO DE SEGURO", "DEBITOS AUTOMATICOS", "Seguro de vida / sepelio"],
 ];
 
 /** Nación: el Excel de "Últimos movimientos" (Fecha, Comprobante, Concepto, Monto, Saldo) no trae código; reglas por concepto. */
@@ -1370,7 +1373,7 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
 function leerExtracto_(filas, reglas, empresas) {
   const h = encabezados_(filas, {
-    fecha: /^fecha$/, ref: /referencia|^numero de comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe|^monto/,
+    fecha: /^fecha$/, ref: /referencia|^numero de comprobante|^nro\.? ?comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe|^monto/,
     debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
     ley1: /^leyendas? adicional(es)?\s*1/, ley2: /^leyendas? adicional(es)?\s*2/, ley3: /^leyendas? adicional(es)?\s*3/,
     ley4: /^leyendas? adicional(es)?\s*4/,
