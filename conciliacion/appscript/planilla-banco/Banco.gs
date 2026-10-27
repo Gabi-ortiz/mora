@@ -12,5 +12,3 @@ function revisarPendientes() { Motor.revisarPendientes(); }
 // Solo administrador: se corren desde este editor (Ejecutar), no están en el menú.
 function crearHojasEntrada() { Motor.crearHojasEntrada(); }
 function agregarReglasNuevas() { Motor.agregarReglasNuevas(); }
-function ocultarHojasAdmin() { Motor.ocultarHojasAdmin(); }
-function mostrarHojasAdmin() { Motor.mostrarHojasAdmin(); }

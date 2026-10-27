@@ -563,13 +563,14 @@ function procesar_(ss) {
     ' — tardó ' + res.tiempos).setFontColor('#7F7F7F').setFontStyle('italic');
   ordenarHojas_(ss);
   ss.getSheetByName(HOJA.cuatro).activate();
+  ocultarHojasAdmin_(ss);
   SpreadsheetApp.flush();
   return res;
 }
 
 /**
  * Pestañas en el mismo orden en todas las planillas: primero las de uso (color), después las de consulta (gris). Las del
- * administrador (Parámetros, Reglas, Empresas grupo) quedan al final; se ocultan con ocultarHojasAdmin().
+ * administrador (Parámetros, Reglas, Empresas grupo) quedan al final y ocultas (ocultarHojasAdmin_).
  */
 function ordenarHojas_(ss) {
   const ext = hojaDe_(ss, nombresExtracto_());
@@ -586,27 +587,16 @@ function ordenarHojas_(ss) {
   }));
 }
 
-const HOJAS_ADMIN = () => [HOJA.parametros, HOJA.reglas, HOJA.empresas];
-
-/** Oculta las hojas del administrador (se corre una vez desde el editor de la planilla). */
-function ocultarHojasAdmin() {
-  const ss = SpreadsheetApp.getActive();
-  HOJAS_ADMIN().forEach(n => {
+/** Hojas del administrador: quedan siempre ocultas (si alguien las muestra para cambiar algo, el próximo proceso las oculta). */
+function ocultarHojasAdmin_(ss) {
+  [HOJA.parametros, HOJA.reglas, HOJA.empresas].forEach(n => {
     const h = ss.getSheetByName(n);
     if (!h) return;
     if (!h.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
       h.protect().setWarningOnly(true).setDescription('Configuración de la planilla: la cambia el administrador.');
     }
-    h.hideSheet();
+    if (!h.isSheetHidden()) h.hideSheet();
   });
-  ss.toast('Parámetros, Reglas y Empresas grupo quedaron ocultas.', 'Hojas del administrador', 5);
-}
-
-/** Vuelve a mostrar las hojas del administrador para cambiar algo. */
-function mostrarHojasAdmin() {
-  const ss = SpreadsheetApp.getActive();
-  HOJAS_ADMIN().forEach(n => { const h = ss.getSheetByName(n); if (h) h.showSheet(); });
-  ss.toast('Parámetros, Reglas y Empresas grupo visibles. Al terminar, corré ocultarHojasAdmin.', 'Hojas del administrador', 8);
 }
 
 /**
