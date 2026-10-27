@@ -795,6 +795,8 @@ function actualizarPendTrabajo_(ss, res, nombre) {
 function escribirPendTrabajo_(sh, filas) {
   if (sh.getFilter()) sh.getFilter().remove();
   sh.clear();
+  // clear() no borra los desplegables: una lista vieja dejaba el de Estado en otra columna (hoy Responsable)
+  sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).clearDataValidations();
   const col = n => COLS_PEND.indexOf(n) + 1;
   sh.getRange(1, 1, 1, COLS_PEND.length).setValues([COLS_PEND]).setFontWeight('bold').setBackground('#1F4E78').setFontColor('#FFFFFF');
   sh.setFrozenRows(1);
