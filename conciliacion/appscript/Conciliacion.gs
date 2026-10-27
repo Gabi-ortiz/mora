@@ -47,6 +47,7 @@ const HOJA = {
   pendFbs: 'E sin cruzar',
   pendBanco: 'Banco sin registrar',
   conciliados: 'E conciliado',
+  cierrePend: '_Pendientes del cierre',   // oculta: los pendientes del último cierre, tal como los lee el proceso
   desconciliados: 'Desconciliados',
   analisisO: 'Análisis O',
   revisar: 'Para revisar',
@@ -520,11 +521,13 @@ function procesar_(ss) {
   }
   const desc = leerDesconciliados_(ss);
   const trabajo = leer(hojaAnteriores);
+  const shCierre = ss.getSheetByName(HOJA.cierrePend);
+  const delCierre = shCierre && shCierre.getLastRow() > 0 ? shCierre.getDataRange().getValues() : null;
   const res = conciliarTodo_({
     extracto, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
-    anteriores: trabajo,
+    anteriores: delCierre || trabajo, trabajo,
     reglas, empresas, parametros,
     desconciliar: desc.claves,
   });
@@ -542,7 +545,9 @@ function procesar_(ss) {
     'Paso 2 — Cuenta E que no se cruzó ni con pendientes anteriores ni con el extracto (posibles errores de registración).');
   escribirPendientes_(ss, HOJA.pendBanco, res, res.listas.B,
     'Movimientos del extracto (y pendientes anteriores del banco) que no están en la cuenta E.');
-  actualizarPendTrabajo_(ss, res, trabajo, hojaAnteriores);
+  // primera vez con esta versión: los pendientes del cierre pasan a la hoja oculta tal como estaban en la lista
+  if (!delCierre) guardarCierrePend_(ss, res.anteriores.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p), p.idPend]));
+  actualizarPendTrabajo_(ss, res, hojaAnteriores);
   // orden de las pestañas: primero lo que se lee
   [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
   ss.getSheetByName(HOJA.cuatro).activate();
@@ -702,6 +707,33 @@ function colsPend_(cab) {
   return c;
 }
 const esFilaMes_ = (r, c) => c.Origen >= 0 && /^mes$/i.test(String(r[c.Origen] || '').trim());
+
+/** Lo que el usuario anotó en "Pendientes en trabajo", por ID del pendiente. */
+function marcasTrabajo_(filas) {
+  const c = colsPend_(filas[0]), v = (r, n) => (c[n] >= 0 && c[n] < r.length ? r[c[n]] : '');
+  const rows = filas.slice(1).filter(r => r.some(x => String(x).trim()));
+  const ids = idsPend_(rows.map(r => [v(r, 'Sector'), v(r, 'Fecha'), v(r, 'Concepto'), v(r, 'Importe')]));
+  const out = {};
+  rows.forEach((r, i) => {
+    out[String(v(r, 'ID') || '').trim() || ids[i]] = { estado: String(v(r, 'Estado') || '').trim(), resp: v(r, 'Responsable'),
+      com: v(r, 'Comentario'), revAuto: v(r, 'Revisión automática'), revFecha: v(r, 'Revisado el') };
+  });
+  return out;
+}
+
+/** Hoja oculta con los pendientes del cierre (Sector, Fecha, Concepto, Importe, ID): la entrada del proceso del mes. */
+function guardarCierrePend_(ss, items) {
+  let sh = ss.getSheetByName(HOJA.cierrePend);
+  if (!sh) sh = ss.insertSheet(HOJA.cierrePend);
+  sh.clear();
+  const filas = [['Sector', 'Fecha', 'Concepto', 'Importe', 'ID']].concat(items);
+  sh.getRange(1, 1, filas.length, 5).setValues(filas);
+  if (items.length) sh.getRange(2, 2, items.length, 1).setNumberFormat('dd/mm/yyyy');
+  sh.hideSheet();
+  // no se toca a mano: si se borra o cambia, el mes deja de cerrar contra el cierre anterior
+  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) sh.protect().setWarningOnly(true)
+    .setDescription('Pendientes del último cierre: los usa el proceso. Se trabajan en "' + HOJA.anterioresAlt[0] + '".');
+}
 const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Compensado', 'Justificado', 'Error de la lista'];
 // estados que sacan el pendiente de la conciliación (Compensado: solo si todo lo marcado así suma cero)
 const ESTADO_SALE = /^(Resuelto|Error|Compensado)/i;
@@ -739,6 +771,7 @@ function pasarPendientes_(ss, res) {
   if (sh.getName() !== HOJA.anterioresAlt[0]) sh.setName(HOJA.anterioresAlt[0]);
   nombresAnteriores_().forEach(n => { const otra = ss.getSheetByName(n); if (otra && otra.getName() !== sh.getName()) ss.deleteSheet(otra); });
   escribirPendTrabajo_(sh, filas);
+  guardarCierrePend_(ss, filas.map(f => [f[0], f[2], f[3], f[4], f[12]]));
   return filas.length;
 }
 
@@ -746,30 +779,17 @@ function pasarPendientes_(ss, res) {
  * Después de cada proceso: los pendientes anteriores quedan como estaban (son la entrada del proceso) con su "Situación"
  * de este mes, y los pendientes del mes se reescriben conservando el Estado, Responsable y Comentario que se les puso.
  */
-function actualizarPendTrabajo_(ss, res, filasHoja, nombre) {
+function actualizarPendTrabajo_(ss, res, nombre) {
   const sh = ss.getSheetByName(nombre) || ss.insertSheet(HOJA.anterioresAlt[0]);
-  const c = colsPend_(filasHoja[0]);
-  const v = (r, n) => (c[n] >= 0 && c[n] < r.length ? r[c[n]] : '');
-  const porFila = {};
-  res.anteriores.forEach(p => { porFila[p.fila] = p; });
-  const ant = [];
-  filasHoja.slice(1).forEach((r, i) => {
-    if (esFilaMes_(r, c) || !r.some(x => String(x).trim())) return;
-    const p = porFila[i];
-    ant.push({ p, fila: [v(r, 'Sector'), ORIGEN_ANT, v(r, 'Fecha'), v(r, 'Concepto'), v(r, 'Importe'),
-      v(r, 'Estado') || 'Pendiente', v(r, 'Responsable'), v(r, 'Comentario'),
-      p ? p.situacion : 'No se pudo leer: revisá Sector (S1 a S4) e Importe',
-      p && p.situacion === 'Sigue pendiente' ? p.cruces || '' : v(r, 'Cruces encontrados'),
-      v(r, 'Revisión automática'), v(r, 'Revisado el'), (p && p.idPend) || v(r, 'ID')] });
-  });
-  const mes = res.pendMes.map(p => ({ p, fila: [sector_(p), ORIGEN_MES, p.fecha, p.texto, valorSector_(p),
-    p.estado || 'Pendiente', p.resp || '', p.com || '', p.situacion === 'Sigue pendiente' ? observacion_(p) : p.situacion,
-    p.cruces || '', '', '', p.idPend] }));
-  // primero lo que hay que trabajar; después lo que sale por el Estado; al final lo cruzado este mes (se borra al cerrar)
-  const orden = x => !x.p ? 0 : /^Cruzado/.test(x.p.situacion) ? 2 : ESTADO_SALE.test(x.p.estado || '') ? 1 : 0;
-  const todas = ant.concat(mes);
-  const filas = [0, 1, 2].map(k => todas.filter(x => orden(x) === k)).reduce((a, l) => a.concat(l), []).map(x => x.fila);
-  escribirPendTrabajo_(sh, filas);
+  // lo cruzado este mes ya está en "E conciliado": acá queda solo lo que hay que trabajar
+  const abiertos = res.anteriores.filter(p => !/^Cruzado/.test(p.situacion));
+  const fila = (p, origen, situacion, revAuto, revFecha) => [sector_(p), origen, p.fecha, p.texto, valorSector_(p),
+    p.estado || 'Pendiente', p.resp || '', p.com || '', situacion, p.cruces || '', revAuto || '', revFecha || '', p.idPend];
+  const filas = abiertos.map(p => ({ p, f: fila(p, ORIGEN_ANT, p.situacion, p.revAuto, p.revFecha) }))
+    .concat(res.pendMes.map(p => ({ p, f: fila(p, ORIGEN_MES, p.situacion === 'Sigue pendiente' ? observacion_(p) : p.situacion) })));
+  // primero lo que hay que trabajar; al final lo que sale por el Estado
+  const sale = x => ESTADO_SALE.test(x.p.estado || '') && !x.p.compFalla;
+  escribirPendTrabajo_(sh, filas.filter(x => !sale(x)).concat(filas.filter(sale)).map(x => x.f));
 }
 
 function escribirPendTrabajo_(sh, filas) {
@@ -3529,10 +3549,11 @@ function conciliarTodo_(entrada, redondoUnico) {
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
 
   // pendientes del mes: el mismo ID que en "Pendientes en trabajo", para respetar el Estado que se les puso ahí
-  const trabajo = entrada.anteriores || [], cT = colsPend_(trabajo[0]), marcas = {};
-  trabajo.slice(1).forEach(r => {
-    if (esFilaMes_(r, cT) && cT.ID >= 0 && String(r[cT.ID] || '').trim()) marcas[String(r[cT.ID]).trim()] =
-      { estado: String(r[cT.Estado] || '').trim(), resp: cT.Responsable >= 0 ? r[cT.Responsable] : '', com: cT.Comentario >= 0 ? r[cT.Comentario] : '' };
+  // (los pendientes del cierre salen de la hoja oculta; el Estado, Responsable y Comentario, de "Pendientes en trabajo")
+  const marcas = marcasTrabajo_(entrada.trabajo || entrada.anteriores || []);
+  anteriores.forEach(p => {
+    const m = marcas[p.idPend];
+    if (m) { p.estado = m.estado; p.resp = m.resp; p.com = m.com; p.revAuto = m.revAuto; p.revFecha = m.revFecha; }
   });
   const pendMes = banco.concat(fbs).filter(p => p.match === null && p.origen !== 'Arrastre').concat(ao.pendientes.filter(p => p.origen !== 'Arrastre'))
     .sort((a, b) => sector_(a).localeCompare(sector_(b)) || a.fecha - b.fecha);
