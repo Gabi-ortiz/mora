@@ -1876,6 +1876,8 @@ function leerBase_(filas, cuentaE, cuentaO) {
   }, ['plan', 'fecha', 'debe', 'haber', 'com']);
   if (!h) throw new Error('Base: no encuentro las columnas DETPLAN, DETFECHA, DETDEBE, DETHABER, DETComenta.');
   const c = h.col, out = { E: [], O: [] };
+  // cuenta bancaria que tiene que figurar en el Nº del valor: la O (valores); sin cuenta O (Chexa), la E
+  const propia = String(/^__/.test(String(cuentaO)) ? cuentaE : cuentaO);
   filas.slice(h.fila + 1).forEach(r => {
     const plan = String(r[c.plan]).replace(/\.0+$/, '').trim();
     const cta = plan === String(cuentaE) ? 'E' : plan === String(cuentaO) ? 'O' : null;
@@ -1886,7 +1888,7 @@ function leerBase_(filas, cuentaE, cuentaO) {
     out[cta].push({ asiento: String(r[c.asiento] || '').replace(/\.0+$/, ''), fecha, referencia: String(r[c.ref] || '').trim(),
       comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
       aux: aux instanceof Date ? aux : (typeof aux === 'number' ? String(Math.round(aux)) : String(aux || '').trim()),
-      id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: String(cuentaO),
+      id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: propia,
       cc: c.cc !== undefined ? String(r[c.cc] || '').trim() : '', tardio: c.tardio !== undefined && r[c.tardio] === 'SI' });
   });
   return out;
