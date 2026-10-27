@@ -2781,8 +2781,9 @@ function gastosAsiento_(banco, fbs) {
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)) &&
     !ivaDeOtra(x));
-  // el asiento mensual "Gastos bancarios MM/AAAA" (no las "Liq ... gastos bancarios", que son otros registros)
-  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /GASTOS BANCARIOS \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
+  // el asiento mensual "Gastos bancarios MM/AAAA" o "Gtos MM/AAAA" (Chexa: "30550726-Gtos 07/2026"); no las "Liq ... gastos
+  // bancarios", que son otros registros
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?) \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
     !/LIQ/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
   const dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
