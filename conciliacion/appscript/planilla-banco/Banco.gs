@@ -5,8 +5,12 @@
  * Lo que cambia de un banco a otro va en la hoja "Parámetros" de cada planilla (cuentas E y O, link de la base, etc.).
  */
 function onOpen() { Motor.crearMenu(); }
-function crearHojasEntrada() { Motor.crearHojasEntrada(); }
 function procesarConciliacion() { Motor.procesarConciliacion(); }
 function cerrarMes() { Motor.cerrarMes(); }
 function revisarPendientes() { Motor.revisarPendientes(); }
+
+// Solo administrador: se corren desde este editor (Ejecutar), no están en el menú.
+function crearHojasEntrada() { Motor.crearHojasEntrada(); }
 function agregarReglasNuevas() { Motor.agregarReglasNuevas(); }
+function ocultarHojasAdmin() { Motor.ocultarHojasAdmin(); }
+function mostrarHojasAdmin() { Motor.mostrarHojasAdmin(); }

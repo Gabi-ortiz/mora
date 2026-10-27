@@ -561,11 +561,52 @@ function procesar_(ss) {
   const tab = ss.getSheetByName(HOJA.tablero);
   if (tab) tab.getRange(2, 1).setValue('Procesado el ' + Utilities.formatDate(new Date(), ss.getSpreadsheetTimeZone(), 'dd/MM/yyyy HH:mm') +
     ' — tardó ' + res.tiempos).setFontColor('#7F7F7F').setFontStyle('italic');
-  // orden de las pestañas: primero lo que se lee
-  [HOJA.cuatro, HOJA.tablero, HOJA.revisar].forEach((n, i) => { const h = ss.getSheetByName(n); if (h) { ss.setActiveSheet(h); ss.moveActiveSheet(i + 1); } });
+  ordenarHojas_(ss);
   ss.getSheetByName(HOJA.cuatro).activate();
   SpreadsheetApp.flush();
   return res;
+}
+
+/**
+ * Pestañas en el mismo orden en todas las planillas: primero las de uso (color), después las de consulta (gris). Las del
+ * administrador (Parámetros, Reglas, Empresas grupo) quedan al final; se ocultan con ocultarHojasAdmin().
+ */
+function ordenarHojas_(ss) {
+  const ext = hojaDe_(ss, nombresExtracto_());
+  const uso = [ext ? ext.getName() : HOJA.extractoAlt[0], HOJA.cuatro, HOJA.tablero, HOJA.revisar, HOJA.anterioresAlt[0], HOJA.conciliados, HOJA.desconciliados];
+  const consulta = [HOJA.pendBanco, HOJA.pendFbs, HOJA.pendO, HOJA.analisisO, HOJA.historial];
+  let pos = 1;
+  [[uso, '#2E5E99'], [consulta, '#BFBFBF']].forEach(([nombres, color]) => nombres.forEach(n => {
+    const h = ss.getSheetByName(n);
+    if (!h) return;
+    h.setTabColor(color);
+    if (h.isSheetHidden()) return;
+    ss.setActiveSheet(h);
+    ss.moveActiveSheet(pos++);
+  }));
+}
+
+const HOJAS_ADMIN = () => [HOJA.parametros, HOJA.reglas, HOJA.empresas];
+
+/** Oculta las hojas del administrador (se corre una vez desde el editor de la planilla). */
+function ocultarHojasAdmin() {
+  const ss = SpreadsheetApp.getActive();
+  HOJAS_ADMIN().forEach(n => {
+    const h = ss.getSheetByName(n);
+    if (!h) return;
+    if (!h.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) {
+      h.protect().setWarningOnly(true).setDescription('Configuración de la planilla: la cambia el administrador.');
+    }
+    h.hideSheet();
+  });
+  ss.toast('Parámetros, Reglas y Empresas grupo quedaron ocultas.', 'Hojas del administrador', 5);
+}
+
+/** Vuelve a mostrar las hojas del administrador para cambiar algo. */
+function mostrarHojasAdmin() {
+  const ss = SpreadsheetApp.getActive();
+  HOJAS_ADMIN().forEach(n => { const h = ss.getSheetByName(n); if (h) h.showSheet(); });
+  ss.toast('Parámetros, Reglas y Empresas grupo visibles. Al terminar, corré ocultarHojasAdmin.', 'Hojas del administrador', 8);
 }
 
 /**
