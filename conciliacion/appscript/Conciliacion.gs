@@ -228,6 +228,10 @@ const REGLAS_PATAGONIA = [
   ["*", "Débito", "^COM", "GASTOS BANCARIOS", "Comisiones"],
   ["*", "Crédito", "^BONIFICACION COMISION", "GASTOS BANCARIOS", "Bonificación de comisiones"],
   ["*", "Crédito", "^IVA", "GASTOS BANCARIOS", "Devolución de IVA"],
+  ["*", "Crédito", "^CRED\\.TRANSFERENCIAS", "COBRANZA CLIENTES", "Crédito por transferencia SNP"],
+  ["*", "Crédito", "^TRANSFERENCIA E-BANK", "COBRANZA CLIENTES", "Transferencia e-bank recibida"],
+  ["*", "Débito", "^TRANSF\\. A TERCEROS", "PAGO PROVEEDORES", "Transferencia a terceros (e-bank, mismo banco)"],
+  ["*", "Débito", "^CHEQUE RECHAZADO", "CHEQUES", "Rechazo de cheque depositado"],
   // anulaciones del banco (crédito con la misma descripción que el débito): restan en el asiento de gastos
   ["*", "Crédito", "^IMP\\.DB/CR BANCARIOS", "GASTOS BANCARIOS", "Devolución / anulación de impuesto Ley 25.413"],
   ["*", "Crédito", "^RET\\.IIBB SIRCREB", "GASTOS BANCARIOS", "Devolución de retención SIRCREB"],
@@ -3594,8 +3598,10 @@ function conciliarTodo_(entrada, redondoUnico) {
   if (ext.info.mesesAnteriores) avisos.push('Extracto: trae ' + ext.info.mesesAnteriores + ' movimientos de meses anteriores; ' +
     'se concilia solo el último mes.');
   const nuevos = movs.filter(m => m.desc === 'Código causal nuevo');
-  if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos con código causal sin regla (' +
-    Array.from(new Set(nuevos.map(m => m.causal))).join(', ') + '). Agregalos en "' + HOJA.reglas + '".');
+  // sin código causal (Patagonia, Córdoba) se nombra el concepto
+  if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos sin regla (' +
+    Array.from(new Set(nuevos.map(m => m.causal || String(m.concepto).slice(0, 35).trim()))).join(', ') +
+    '): quedan como "A IDENTIFICAR". Avisale al administrador para agregar la regla.');
 
   CRUCES_ = [];
   CORTE_ = corte;
