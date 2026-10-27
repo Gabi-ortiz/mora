@@ -3702,7 +3702,12 @@ function conciliarTodo_(entrada, redondoUnico) {
   const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
   const enE = fbsPend.filter(p => p.cuenta === 'E' && !/Diferencia asiento gastos/.test(p.texto));
   const dup = fbsPend.filter(p => p.alerta);
-  if (dup.length) avisos.push(dup.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
+  // la alerta puede ser un duplicado o un valor imputado a otro banco: el aviso nombra cada caso
+  const otroBco = dup.filter(p => p.otroBanco), dupReal = dup.filter(p => !p.otroBanco);
+  if (dupReal.length) avisos.push(dupReal.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
+  if (otroBco.length) avisos.push(otroBco.length + ' registros de FBS están en esta cuenta pero el valor dice otro banco (' +
+    otroBco.map(p => p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe)) + ' → ' + p.otroBanco).join('; ') +
+    '): revisá en FBS cuál de los dos está mal; mientras tanto no se cruzan.');
   const conMarca = ao.pendientes.filter(p => p.cruces).length;
   if (conMarca) avisos.push(conMarca + ' líneas de O sin confirmar tienen un posible cruce (columna "Cruces encontrados" en "' + HOJA.pendO + '").');
   if (enE.length) avisos.push(enE.length + ' registros de la cuenta E no se encontraron en el banco, por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
