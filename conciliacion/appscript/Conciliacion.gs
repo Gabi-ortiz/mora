@@ -272,6 +272,21 @@ const REGLAS_SANTANDER = [
   ["3254", "Débito", "", "GASTOS BANCARIOS", "IVA 21% sobre comisiones"],
   ["2872", "Débito", "", "GASTOS BANCARIOS", "Comisión pago servicio Interbanking"],
   ["2960", "Débito", "", "GASTOS BANCARIOS", "Comisión por servicio de cuenta"],
+  ["1387", "Débito", "", "IMPUESTOS Y RETENCIONES", "Recaudación IIBB SIRCREB"],
+  ["6387", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Anulación recaudación IIBB SIRCREB"],
+  ["9637", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Anulación impuesto Ley 25.413 sobre créditos"],
+  ["9633", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Anulación impuesto Ley 25.413 sobre débitos"],
+  ["3253", "Débito", "", "GASTOS BANCARIOS", "Percepción IVA RG 2408"],
+  ["960", "Débito", "", "GASTOS BANCARIOS", "Comisión compensación cheques CFU"],
+  ["3130", "Débito", "", "GASTOS BANCARIOS", "Comisión echeq rechazado"],
+  ["2909", "Débito", "", "GASTOS BANCARIOS", "Comisión tarjeta de débito adicional"],
+  ["3036", "Crédito", "", "CHEQUES", "Depósito echeq 48 hs"],
+  ["3040", "Crédito", "", "CHEQUES", "Depósito echeq (CFU, cobro sin presencia)"],
+  ["3041", "Crédito", "", "CHEQUES", "Depósito echeq canje interno 24 hs"],
+  ["3058", "Crédito", "", "CHEQUES", "Depósito echeq otras plazas"],
+  ["3060", "Crédito", "", "CHEQUES", "Depósito echeq misma plaza"],
+  ["3099", "Débito", "", "CHEQUES", "Rechazo de echeq depositado"],
+  ["827", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Pago CCI Interbanking (a cuenta propia)"],
 ];
 
 const REGLAS_INICIALES = [
@@ -1329,6 +1344,8 @@ function extraerCuit_(texto) {
   let m;
   while ((m = re.exec(texto)) !== null) {
     const c = m[1] + m[2] + m[3];
+    // Santander SIRCREB "Resp:30681026386": es el CUIT del titular de la cuenta, no la contraparte
+    if (/resp:\s*$/i.test(texto.slice(Math.max(0, m.index - 6), m.index))) continue;
     if (cuitValido_(c)) return c;
   }
   return '';
@@ -1364,7 +1381,7 @@ function leerReglas_(filas) {
     const sen = normalizar_(r[1]);
     const pat = String(r[2] || '').trim();
     return {
-      cod: String(r[0]).trim(),
+      cod: String(r[0]).trim().replace(/^0+(?=\d)/, ''),
       sentido: sen.startsWith('d') ? 'D' : sen.startsWith('c') ? 'C' : null,
       patron: pat && pat !== '(todos)' ? new RegExp(pat, 'i') : null,   // sin distinguir mayúsculas (Córdoba: "Recaudaciones SIRCREB")
       cat: String(r[3] || '').trim(),
@@ -1443,7 +1460,8 @@ function leerExtracto_(filas, reglas, empresas) {
       nombre = ley[0] && !/^\d+$/.test(ley[0]) ? ley[0] : extraerNombre_(concepto);
     } else {
       concepto = String(r[c.concepto] || '').trim();
-      causal = c.causal !== undefined ? String(r[c.causal]).trim() : '';
+      // sin ceros adelante: el CSV trae "0827" y al pegarlo en la planilla queda 827
+      causal = c.causal !== undefined ? String(r[c.causal]).trim().replace(/^0+(?=\d)/, '') : '';
       nombre = extraerNombre_(concepto);
     }
     const importe = redondear_(cred - deb);
@@ -3328,8 +3346,8 @@ function gastosBancarios_(movs) {
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   movs.filter(m => !ivaDeOtra(m)).forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
-    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633'].includes(m.causal)) g.imp += d;
-    else if (m.causal === '1384') g.sircreb += d;   // Santander
+    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633', '9637', '9633'].includes(m.causal)) g.imp += d;
+    else if (['1384', '1387', '6387'].includes(m.causal)) g.sircreb += d;   // Santander
     else if (m.causal === '566') g.tuc += d;        // Santander
     else if (m.causal === '907173') { if (t.includes('TUCUMAN')) g.tuc += d; else g.sircreb += d; }
     else if (m.causal === '905130') g.sellos += d;
