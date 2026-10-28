@@ -510,10 +510,11 @@ function procesar_(ss) {
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null, posterioresO = null;
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
-    const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas)).movs;
+    const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas),
+      parseNum_(paramDe_(parametros, '^saldo del extracto'))).movs;
     if (!movs.length) throw new Error('El extracto está vacío.');
-    const desde = new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1);
     const ult = movs[movs.length - 1].fecha;
+    const desde = new Date(ult.getFullYear(), ult.getMonth(), 1);
     const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
     const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
     base = r.filas; saldosIniciales = r.saldos; ctxBase = r.ctx || null; hastaBase = hasta;
@@ -683,6 +684,10 @@ function cerrarMes() {
     let i = v.findIndex(r => /^ultimo cierre/i.test(normalizar_(r[0])));
     if (i < 0) { par.appendRow(['Último cierre', '']); i = par.getLastRow() - 1; }
     par.getRange(i + 1, 2).setValue(res.hastaBase || new Date(res.corte.getFullYear(), res.corte.getMonth() + 1, 0)).setNumberFormat('dd/mm/yyyy');
+    // saldo final del extracto: el mes siguiente toma lo que el banco haya cargado después con fecha de este mes
+    let j = v.findIndex(r => /^saldo del extracto/i.test(normalizar_(r[0])));
+    if (j < 0) { par.appendRow(['Saldo del extracto al último cierre', '']); j = par.getLastRow() - 1; }
+    par.getRange(j + 1, 2).setValue(res.saldoBanco).setNumberFormat(NUM_FMT);
   }
   if (res.baseCtx) {
     try { guardarFotoBase_(ss, res.baseCtx, res.hastaBase); } catch (e) {
@@ -1412,7 +1417,7 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 }
 
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
-function leerExtracto_(filas, reglas, empresas) {
+function leerExtracto_(filas, reglas, empresas, saldoCierre) {
   const h = encabezados_(filas, {
     fecha: /^fecha$/, ref: /referencia|^numero de comprobante|^nro\.? ?comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe|^monto/,
     debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
@@ -1484,8 +1489,18 @@ function leerExtracto_(filas, reglas, empresas) {
   // si el extracto trae más de un mes (ej. Córdoba bajado con junio y julio), se concilia el último mes
   const ult = movs[movs.length - 1].fecha, mes = m => m.fecha.getFullYear() * 12 + m.fecha.getMonth();
   if (mes(movs[0]) !== mes(movs[movs.length - 1])) {
-    info.mesesAnteriores = movs.filter(m => mes(m) !== mes(movs[movs.length - 1])).length;
-    return { info, movs: movs.filter(m => mes(m) === ult.getFullYear() * 12 + ult.getMonth()) };
+    const delMes = m => mes(m) === ult.getFullYear() * 12 + ult.getMonth();
+    // movimientos del mes anterior que el banco cargó después de bajar el extracto del cierre (ej. el SIRCREB del último
+    // día): van después de la fila con el saldo final del extracto del cierre y se concilian en este mes
+    let corteCierre = -1;
+    if (saldoCierre !== null && saldoCierre !== undefined) {
+      movs.forEach((m, i) => { if (!delMes(m) && m.saldo !== null && Math.abs(m.saldo - saldoCierre) < 0.005) corteCierre = i; });
+      if (corteCierre < 0) info.saldoCierreNoEncontrado = saldoCierre;
+    }
+    const quedan = movs.filter((m, i) => delMes(m) || (corteCierre >= 0 && i > corteCierre));
+    info.tardiosBanco = quedan.filter(m => !delMes(m));
+    info.mesesAnteriores = movs.length - quedan.length;
+    return { info, movs: quedan };
   }
   return { info, movs };
 }
@@ -3597,9 +3612,11 @@ function conciliarTodo_(entrada, redondoUnico) {
   // un solo modo de cruce (el que antes se llamaba INTERMEDIO); el parámetro solo lo usan las pruebas
   CRUZAR_REDONDO_UNICO_DIA = redondoUnico !== undefined ? redondoUnico : 3;
   const reglas = leerReglas_(entrada.reglas), empresas = leerEmpresas_(entrada.empresas);
-  const ext = leerExtracto_(entrada.extracto, reglas, empresas);
-  const movs = ext.movs;
   const param = nombre => { const f = (entrada.parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0]))); return f ? f[1] : null; };
+  const ext = leerExtracto_(entrada.extracto, reglas, empresas, parseNum_(param('^saldo del extracto')));
+  const movs = ext.movs;
+  // el período es el del último movimiento (los primeros pueden ser tardíos del mes anterior)
+  const ultMov = movs[movs.length - 1].fecha, inicioMes = new Date(ultMov.getFullYear(), ultMov.getMonth(), 1);
   let e, o;
   if (entrada.base) {
     const ctas = cuentasDe_(entrada.parametros), sinO = !ctas.O;
@@ -3635,7 +3652,7 @@ function conciliarTodo_(entrada, redondoUnico) {
     o = mk(b.O, siO, sinO ? 'O (no se usa)' : 'O (' + cuentaO + ')');
     if (siE === null || siO === null) {
       // sin saldos iniciales: se deducen de la conciliación anterior (saldo inicial del banco - pendientes anteriores)
-      const antes = leerAnteriores_(entrada.anteriores || [], new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1));
+      const antes = leerAnteriores_(entrada.anteriores || [], inicioMes);
       const netoAnt = antes.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0);
       const total = redondear_(movs[0].saldo - movs[0].importe - netoAnt);
       e.info.saldoInicial = total; o.info.saldoInicial = 0;
@@ -3648,7 +3665,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   } else {
     e = leerMayor_(entrada.mayorE, HOJA.mayorE); o = leerMayor_(entrada.mayorO, HOJA.mayorO);
   }
-  const desde = new Date(movs[0].fecha.getFullYear(), movs[0].fecha.getMonth(), 1);
+  const desde = inicioMes;
   const corte = movs[movs.length - 1].fecha;
   const avisos = (entrada.avisosBase || []).concat(e.avisos, o.avisos);
 
@@ -3660,6 +3677,11 @@ function conciliarTodo_(entrada, redondoUnico) {
   if (quiebres) avisos.push('Extracto: ' + quiebres + ' filas donde el saldo no sigue a la anterior (¿faltan movimientos?).');
   if (ext.info.mesesAnteriores) avisos.push('Extracto: trae ' + ext.info.mesesAnteriores + ' movimientos de meses anteriores; ' +
     'se concilia solo el último mes.');
+  if (ext.info.tardiosBanco && ext.info.tardiosBanco.length) avisos.push('Extracto: ' + ext.info.tardiosBanco.length + ' movimientos con fecha ' +
+    'del mes anterior que no estaban en el extracto del cierre se concilian en este mes (' + ext.info.tardiosBanco.map(m => fechaTexto_(m.fecha) +
+    ' ' + String(m.concepto).slice(0, 30).trim() + ' ' + formato_(m.importe)).join('; ') + ').');
+  if (ext.info.saldoCierreNoEncontrado !== undefined) avisos.push('Extracto: no encuentro la fila con el saldo del extracto del cierre (' +
+    formato_(ext.info.saldoCierreNoEncontrado) + '), así que no se tomó ningún movimiento del mes anterior.');
   const nuevos = movs.filter(m => m.desc === 'Código causal nuevo');
   // sin código causal (Patagonia, Córdoba) se nombra el concepto
   if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos sin regla (' +
