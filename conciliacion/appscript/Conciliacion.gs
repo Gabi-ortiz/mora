@@ -619,6 +619,9 @@ function cerrarMes() {
   const ss = SpreadsheetApp.getActive();
   const ui = SpreadsheetApp.getUi();
   const res = procesar_(ss);
+  let t = Date.now();
+  const tiempos = [];
+  const marca = n => { const a = Date.now(); tiempos.push(n + ' ' + ((a - t) / 1000).toFixed(0) + ' s'); t = a; };
   const periodo = res.corte.getFullYear() + '-' + ('0' + (res.corte.getMonth() + 1)).slice(-2);
   const empresa = res.empresa || res.info.empresa || '';
   const dif = redondear_(res.ajustado - res.saldoBanco);
@@ -631,6 +634,7 @@ function cerrarMes() {
   if (yaCerrado) msg += '\n\nATENCIÓN: este período ya tiene un cierre en "Historial". Se guarda una foto nueva (versión 2, 3...).';
   if (Math.abs(dif) >= 1000) msg += '\n\nATENCIÓN: la diferencia de control no es cero.';
   if (ui.alert('Cerrar mes', msg + '\n\n¿Continuar?', ui.ButtonSet.YES_NO) !== ui.Button.YES) return;
+  t = Date.now();
 
   // 2. foto
   const carpeta = carpetaHistorial_(ss);
@@ -638,7 +642,9 @@ function cerrarMes() {
   const version = previos.filter(r => String(r[0]) === periodo && String(r[1]) === empresa).length + 1;
   if (version > 1) nombre += ' (v' + version + ')';
   const archivo = DriveApp.getFileById(ss.getId()).makeCopy(nombre, carpeta);
+  marca('copiar');
   marcarComoFoto_(SpreadsheetApp.openById(archivo.getId()), periodo, empresa);
+  marca('proteger la foto');
 
   // 3. historial
   hist.appendRow([periodo, empresa, new Date(), Session.getActiveUser().getEmail(), res.saldoE, res.saldoO,
@@ -652,6 +658,7 @@ function cerrarMes() {
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
   const n = pasarPendientes_(ss, res);
+  marca('pasar pendientes');
   // lo desconciliado ya quedó en los pendientes que pasan: la lista se vacía para el mes siguiente
   escribirDesconciliados_(ss, []);
   const par = ss.getSheetByName(HOJA.parametros);
@@ -666,7 +673,11 @@ function cerrarMes() {
     try { guardarFotoBase_(ss, res.baseCtx, res.hastaBase); } catch (e) {
       ui.alert('No se pudo guardar la foto de la base (' + e.message + '). El mes siguiente se controla solo por saldo.');
     }
+    marca('foto de la base');
   }
+  console.log('Tiempos del cierre: procesar ' + res.tiempos + ' | ' + tiempos.join(', '));
+  const tab = ss.getSheetByName(HOJA.tablero);
+  if (tab) tab.getRange(2, 1).setValue(tab.getRange(2, 1).getValue() + '   ·   cierre: ' + tiempos.join(', '));
   if (par) {
     const v = par.getDataRange().getValues();
     v.forEach((r, i) => {
@@ -734,6 +745,8 @@ function marcarComoFoto_(copia, periodo, empresa) {
   ]);
   info.getRange(1, 1).setFontWeight('bold').setFontSize(14);
   info.getRange(4, 2).setNumberFormat('dd/mm/yyyy hh:mm');
+  // las hojas internas no hacen falta en la foto: se borran (la de la base puede tener miles de filas)
+  [HOJA_FOTO_FBS, HOJA.cierrePend].forEach(n => { const h = copia.getSheetByName(n); if (h) copia.deleteSheet(h); });
   const yo = Session.getEffectiveUser();
   copia.getSheets().forEach(sh => {
     // las hojas que ya traían una protección "solo aviso" (Parámetros, Reglas, pendientes del cierre) no aceptan editores:
