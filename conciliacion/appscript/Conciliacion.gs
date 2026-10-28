@@ -48,6 +48,7 @@ const HOJA = {
   pendBanco: 'Banco sin registrar',
   conciliados: 'E conciliado',
   cierrePend: '_Pendientes del cierre',   // oculta: los pendientes del último cierre, tal como los lee el proceso
+  extCierre: '_Extracto del cierre',      // oculta: los movimientos del extracto del último cierre (para no tomar dos veces uno tardío)
   desconciliados: 'Desconciliados',
   analisisO: 'Análisis O',
   revisar: 'Para revisar',
@@ -504,6 +505,8 @@ function procesar_(ss) {
   const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
   const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
   const extracto = leer(hojaExtracto), empresas = leer(HOJA.empresas);
+  const shExt = ss.getSheetByName(HOJA.extCierre);
+  const extractoCierre = shExt && shExt.getLastRow() > 1 ? shExt.getRange(2, 1, shExt.getLastRow() - 1, 3).getValues() : null;
   asegurarReglasDelBanco_(ss, paramDe_(parametros, '^cuenta bancaria$'));
   const reglas = leer(HOJA.reglas);
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
@@ -511,7 +514,7 @@ function procesar_(ss) {
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
     const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas),
-      parseNum_(paramDe_(parametros, '^saldo del extracto'))).movs;
+      { movs: extractoCierre, saldo: parseNum_(paramDe_(parametros, '^saldo del extracto')) }).movs;
     if (!movs.length) throw new Error('El extracto está vacío.');
     const ult = movs[movs.length - 1].fecha;
     const desde = new Date(ult.getFullYear(), ult.getMonth(), 1);
@@ -553,7 +556,7 @@ function procesar_(ss) {
   const shCierre = ss.getSheetByName(HOJA.cierrePend);
   const delCierre = shCierre && shCierre.getLastRow() > 0 ? shCierre.getDataRange().getValues() : null;
   const res = conciliarTodo_({
-    extracto, base, saldosIniciales, avisosBase, tardios, posterioresO,
+    extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: delCierre || trabajo, trabajo,
@@ -674,6 +677,7 @@ function cerrarMes() {
 
   // 4. pendientes al mes siguiente (y los saldos finales de E y O pasan a ser los iniciales)
   const n = pasarPendientes_(ss, res);
+  guardarExtractoCierre_(ss, res);
   marca('pasar pendientes');
   // lo desconciliado ya quedó en los pendientes que pasan: la lista se vacía para el mes siguiente
   escribirDesconciliados_(ss, []);
@@ -766,7 +770,7 @@ function marcarComoFoto_(copia, periodo, empresa) {
   info.getRange(1, 1).setFontWeight('bold').setFontSize(14);
   info.getRange(4, 2).setNumberFormat('dd/mm/yyyy hh:mm');
   // las hojas internas no hacen falta en la foto: se borran (la de la base puede tener miles de filas)
-  [HOJA_FOTO_FBS, HOJA.cierrePend].forEach(n => { const h = copia.getSheetByName(n); if (h) copia.deleteSheet(h); });
+  [HOJA_FOTO_FBS, HOJA.cierrePend, HOJA.extCierre].forEach(n => { const h = copia.getSheetByName(n); if (h) copia.deleteSheet(h); });
   const yo = Session.getEffectiveUser();
   // los editores de una protección nueva son los del archivo, iguales en todas las hojas: se leen una sola vez
   let otros = null, dominio = false;
@@ -816,6 +820,20 @@ function marcasTrabajo_(filas) {
 }
 
 /** Hoja oculta con los pendientes del cierre (Sector, Fecha, Concepto, Importe, ID): la entrada del proceso del mes. */
+/** Movimientos del extracto del mes que se cierra: el mes siguiente no vuelve a tomar los que ya estaban (ver leerExtracto_). */
+function guardarExtractoCierre_(ss, res) {
+  let sh = ss.getSheetByName(HOJA.extCierre);
+  if (!sh) sh = ss.insertSheet(HOJA.extCierre);
+  sh.clear();
+  const items = res.banco.filter(p => p.origen === 'Mes').map(p => [p.fecha, p.importe, p.texto]);
+  const filas = [['Fecha', 'Importe', 'Concepto']].concat(items);
+  sh.getRange(1, 1, filas.length, 3).setValues(filas);
+  if (items.length) sh.getRange(2, 1, items.length, 1).setNumberFormat('dd/mm/yyyy');
+  sh.hideSheet();
+  if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) sh.protect().setWarningOnly(true)
+    .setDescription('Extracto del último cierre: lo usa el proceso para no tomar dos veces un movimiento.');
+}
+
 function guardarCierrePend_(ss, items) {
   let sh = ss.getSheetByName(HOJA.cierrePend);
   if (!sh) sh = ss.insertSheet(HOJA.cierrePend);
@@ -1417,7 +1435,7 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
 }
 
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
-function leerExtracto_(filas, reglas, empresas, saldoCierre) {
+function leerExtracto_(filas, reglas, empresas, cierre) {
   const h = encabezados_(filas, {
     fecha: /^fecha$/, ref: /referencia|^numero de comprobante|^nro\.? ?comprobante/, causal: /causal|^cod\.? operativo/, concepto: /^concepto/, importe: /^importe|^monto/,
     debito: /^debito/, credito: /^credito/, saldo: /^saldo/, descripcion: /^descripcion/,
@@ -1491,13 +1509,26 @@ function leerExtracto_(filas, reglas, empresas, saldoCierre) {
   if (mes(movs[0]) !== mes(movs[movs.length - 1])) {
     const delMes = m => mes(m) === ult.getFullYear() * 12 + ult.getMonth();
     // movimientos del mes anterior que el banco cargó después de bajar el extracto del cierre (ej. el SIRCREB del último
-    // día): van después de la fila con el saldo final del extracto del cierre y se concilian en este mes
-    let corteCierre = -1;
-    if (saldoCierre !== null && saldoCierre !== undefined) {
-      movs.forEach((m, i) => { if (!delMes(m) && m.saldo !== null && Math.abs(m.saldo - saldoCierre) < 0.005) corteCierre = i; });
-      if (corteCierre < 0) info.saldoCierreNoEncontrado = saldoCierre;
+    // día): se concilian en este mes. Se compara uno por uno con el extracto del cierre (hoja oculta) para no tomar dos veces
+    // uno que ya estaba; sin esa hoja (primer mes con la herramienta) van los que siguen a la fila con el saldo del cierre
+    const tomar = new Set();
+    const mesPrevio = mes(movs[movs.length - 1]) - 1;
+    if (cierre && cierre.movs && cierre.movs.length) {
+      const clave = (f, imp, c) => fechaTexto_(f) + '|' + Number(imp).toFixed(2) + '|' + normalizar_(c).replace(/\s+/g, ' ');
+      const ya = {};
+      cierre.movs.forEach(r => { const f = parseFecha_(r[0]); if (f) { const k = clave(f, r[1], r[2]); ya[k] = (ya[k] || 0) + 1; } });
+      movs.forEach((m, i) => {
+        if (mes(m) !== mesPrevio) return;
+        const k = clave(m.fecha, m.importe, m.concepto);
+        if (ya[k]) ya[k]--; else tomar.add(i);
+      });
+    } else if (cierre && cierre.saldo !== null && cierre.saldo !== undefined) {
+      let corte = -1;
+      movs.forEach((m, i) => { if (!delMes(m) && m.saldo !== null && Math.abs(m.saldo - cierre.saldo) < 0.005) corte = i; });
+      if (corte < 0) info.saldoCierreNoEncontrado = cierre.saldo;
+      else movs.forEach((m, i) => { if (i > corte && mes(m) === mesPrevio) tomar.add(i); });
     }
-    const quedan = movs.filter((m, i) => delMes(m) || (corteCierre >= 0 && i > corteCierre));
+    const quedan = movs.filter((m, i) => delMes(m) || tomar.has(i));
     info.tardiosBanco = quedan.filter(m => !delMes(m));
     info.mesesAnteriores = movs.length - quedan.length;
     return { info, movs: quedan };
@@ -3613,7 +3644,8 @@ function conciliarTodo_(entrada, redondoUnico) {
   CRUZAR_REDONDO_UNICO_DIA = redondoUnico !== undefined ? redondoUnico : 3;
   const reglas = leerReglas_(entrada.reglas), empresas = leerEmpresas_(entrada.empresas);
   const param = nombre => { const f = (entrada.parametros || []).find(r => new RegExp(nombre, 'i').test(String(r[0]))); return f ? f[1] : null; };
-  const ext = leerExtracto_(entrada.extracto, reglas, empresas, parseNum_(param('^saldo del extracto')));
+  const ext = leerExtracto_(entrada.extracto, reglas, empresas,
+    { movs: entrada.extractoCierre || null, saldo: parseNum_(param('^saldo del extracto')) });
   const movs = ext.movs;
   // el período es el del último movimiento (los primeros pueden ser tardíos del mes anterior)
   const ultMov = movs[movs.length - 1].fecha, inicioMes = new Date(ultMov.getFullYear(), ultMov.getMonth(), 1);
