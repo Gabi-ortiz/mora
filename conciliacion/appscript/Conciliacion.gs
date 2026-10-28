@@ -748,14 +748,20 @@ function marcarComoFoto_(copia, periodo, empresa) {
   // las hojas internas no hacen falta en la foto: se borran (la de la base puede tener miles de filas)
   [HOJA_FOTO_FBS, HOJA.cierrePend].forEach(n => { const h = copia.getSheetByName(n); if (h) copia.deleteSheet(h); });
   const yo = Session.getEffectiveUser();
+  // los editores de una protección nueva son los del archivo, iguales en todas las hojas: se leen una sola vez
+  let otros = null, dominio = false;
   copia.getSheets().forEach(sh => {
     // las hojas que ya traían una protección "solo aviso" (Parámetros, Reglas, pendientes del cierre) no aceptan editores:
     // se quita esa protección y se pone la de la foto
     sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(x => x.remove());
     const p = sh.protect().setDescription('Foto de cierre ' + periodo);
     p.addEditor(yo);
-    p.removeEditors(p.getEditors().filter(u => u.getEmail() !== yo.getEmail()));
-    if (p.canDomainEdit()) p.setDomainEdit(false);
+    if (!otros) {
+      otros = p.getEditors().map(u => u.getEmail()).filter(e => e && e !== yo.getEmail());
+      dominio = p.canDomainEdit();
+    }
+    if (otros.length) p.removeEditors(otros);
+    if (dominio) p.setDomainEdit(false);
   });
   const tablero = copia.getSheetByName(HOJA.tablero);
   (tablero || info).activate();
