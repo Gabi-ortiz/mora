@@ -1,0 +1,4 @@
+sherpa-onnx>=1.10
+numpy
+av
+flask
