@@ -786,8 +786,9 @@ function guardarCierrePend_(ss, items) {
   if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) sh.protect().setWarningOnly(true)
     .setDescription('Pendientes del último cierre: los usa el proceso. Se trabajan en "' + HOJA.anterioresAlt[0] + '".');
 }
-const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Compensado', 'Justificado', 'Error de la lista'];
-// estados que sacan el pendiente de la conciliación (Compensado: solo si todo lo marcado así suma cero)
+const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Compensado', 'Justificado'];
+// estados que sacan el pendiente de la conciliación (Compensado: solo si todo lo marcado así suma cero). "Error de la lista"
+// ya no está en el desplegable; se sigue respetando si quedó en una lista vieja
 const ESTADO_SALE = /^(Resuelto|Error|Compensado)/i;
 
 /** Clave estable de un pendiente (sector, fecha, concepto, importe) para conservar estado y comentarios entre cierres. */
@@ -3699,7 +3700,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   ao.pendientes.forEach(p => (sacar(p) ? quitados : pend[sector_(p)]).push(p));   // no confirmados en O: directo a pendientes
   if (quitados.length) {
     const neto = redondear_(quitados.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
-    avisos.push(quitados.length + ' pendientes marcados "Resuelto en FBS", "Compensado" o "Error de la lista" en "' + HOJA.anterioresAlt[0] +
+    avisos.push(quitados.length + ' pendientes marcados "Resuelto en FBS" o "Compensado" en "' + HOJA.anterioresAlt[0] +
       '" salieron de la conciliación (' + quitados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + ')' +
       (Math.abs(neto) > 0.005 ? '. Neto ' + formato_(neto) + ': si no está corregido en FBS, la diferencia de control cambia en ese importe.' : '. Se compensan entre sí: el control no cambia.'));
   }
