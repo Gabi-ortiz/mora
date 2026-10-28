@@ -322,7 +322,7 @@ const REGLAS_INICIALES = [
   ["17", "Ambos", "", "GASTOS BANCARIOS", "Comisión resumen cuenta + IVA"],
   ["33", "Ambos", "", "GASTOS BANCARIOS", "Comisión mantenimiento cuenta + IVA"],
   ["3872", "Ambos", "", "GASTOS BANCARIOS", "Comisión transferencia"],
-  ["1450", "Ambos", "", "GASTOS BANCARIOS", "Comisión transferencia"],
+  ["1450", "Ambos", "", "GASTOS BANCARIOS", "Comisión transferencia (IVA incluido)"],
   ["1693", "Ambos", "", "SUELDOS", "Pago de remuneraciones"],
   ["23", "Ambos", "", "DEBITOS AUTOMATICOS", "Débito automático (seguros, peajes, cámara)"],
   ["1735", "Ambos", "", "DEPOSITOS EN EFECTIVO", "Interdepósito en efectivo"],
@@ -3318,8 +3318,8 @@ function valorSector_(p) {
   return redondear_(s === 'S1' || s === 'S3' ? p.importe : -p.importe);
 }
 
-// Macro: comisiones que traen el IVA 21% incluido en el importe ("Comision Trf. MacrOL E-set", "COMISION TRANSFERE")
-const COMISION_CON_IVA = ['3914', '3872'];
+// Macro: comisiones que traen el IVA 21% incluido en el importe ("Comision Trf. MacrOL E-set", "COMISION TRANSFERE", "COMISION TRANSFERENCIAS" $ 18,15 = 15 + IVA)
+const COMISION_CON_IVA = ['3914', '3872', '1450'];
 
 function gastosBancarios_(movs) {
   const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
