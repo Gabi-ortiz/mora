@@ -70,7 +70,7 @@ const TOLERANCIA = 0.02;
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
 const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972',   // Macro: van al asiento mensual de gastos
   '907176', '907376', '917376', '907173', '905130',                             // Galicia: imp. déb./créd., IIBB, sellos
-  '4637', '4633', '1384', '566'];                                               // Santander: imp. déb./créd., SIRCREB, Tucumán
+  '4637', '4633', '9637', '9633', '1384', '1387', '6387', '566'];              // Santander: imp. déb./créd. (y anulaciones), SIRCREB, Tucumán
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
 
@@ -2581,6 +2581,18 @@ function combinacionesFechaEscrita_(banco, fbs) {
     for (let n = 2; n <= (esp ? 4 : 2) && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, f.importe);
       if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); break; }
+    }
+  });
+  // depósito de echeq (Chexa Santander "02092026-DEP ECHEQ"): el banco acredita cada cheque en su línea, desde 3 días antes
+  // hasta 5 después de la fecha escrita; tiene que entrar al menos un cheque
+  const desde = (f, b) => Math.round((b.fecha - f.fechaRef) / 86400000);
+  fbs.slice().sort((a, b) => b.importe - a.importe).forEach(f => {
+    if (f.match !== null || f.origen !== 'Mes' || !f.fechaRef || f.importe <= 0 || !/CHEQ/i.test(f.texto)) return;
+    const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && b.importe > 0 && b.importe < f.importe + TOLERANCIA &&
+      desde(f, b) >= -3 && desde(f, b) <= 5).slice(0, 25);
+    for (let n = especifico_(f.importe) ? 1 : 2; n <= 5 && cands.length >= n; n++) {
+      const combo = primeraCombinacion_(cands, n, f.importe);
+      if (combo && combo.some(b => b.cat === 'CHEQUES')) { unir_(combo, [f], 'Depósito de echeq acreditado en varias líneas (revisar)'); break; }
     }
   });
 }
