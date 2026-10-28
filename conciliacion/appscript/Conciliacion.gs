@@ -736,6 +736,9 @@ function marcarComoFoto_(copia, periodo, empresa) {
   info.getRange(4, 2).setNumberFormat('dd/mm/yyyy hh:mm');
   const yo = Session.getEffectiveUser();
   copia.getSheets().forEach(sh => {
+    // las hojas que ya traían una protección "solo aviso" (Parámetros, Reglas, pendientes del cierre) no aceptan editores:
+    // se quita esa protección y se pone la de la foto
+    sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).forEach(x => x.remove());
     const p = sh.protect().setDescription('Foto de cierre ' + periodo);
     p.addEditor(yo);
     p.removeEditors(p.getEditors().filter(u => u.getEmail() !== yo.getEmail()));
