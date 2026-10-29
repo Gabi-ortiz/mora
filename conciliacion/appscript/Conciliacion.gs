@@ -2154,11 +2154,15 @@ function partidaBanco_(m, origen) {
     cat: m.cat || '', causal: m.causal || '', match: null, metodo: '', cruces: '' };
 }
 
-/** "BANCO SANTAN" y "Banco Santander" son el mismo banco: se compara la primera palabra después de "Banco" (una abreviada). */
+/**
+ * "BANCO SANTAN" y "Banco Santander", "BANCO Pcia CORDOBA" y "Banco Cordoba" son el mismo banco: alguna palabra del nombre
+ * (sin "banco", "de", "pcia"...) coincide, aunque esté abreviada.
+ */
 function mismoBanco_(a, b) {
-  const p = x => normalizar_(x).replace(/^(banco|bco\.?)\s+(del?\s+)?/i, '').split(/\s+/)[0] || '';
+  const vacias = /^(banco|bco|de|del|la|pcia|prov|provincia|nacional|sa|s\.a\.?)$/;
+  const p = x => normalizar_(x).replace(/[().]/g, ' ').split(/\s+/).filter(w => w.length >= 4 && !vacias.test(w));
   const x = p(a), y = p(b);
-  return x.length >= 3 && y.length >= 3 && (x.startsWith(y) || y.startsWith(x));
+  return x.some(u => y.some(v => u.startsWith(v) || v.startsWith(u)));
 }
 
 function partidaFbs_(a, origen) {
