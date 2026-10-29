@@ -1077,7 +1077,7 @@ function observacion_(p) {
   if (p.fechaRef2 && CORTE_ && p.fechaRef2 > CORTE_) return 'Cargado después del cierre (' + fechaTexto_(p.fechaRef2) + ') con fecha del mes';
   if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores' + (p.cuenta === 'O' ? ' (sigue sin confirmar en O)' : '');
   if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
-  if (/Diferencia asiento gastos/.test(p.texto)) return 'Revisar asiento de gastos bancarios';
+  if (/Diferencia asiento gastos/.test(p.texto)) return p.explicacion || 'Revisar asiento de gastos bancarios';
   if (p.cuenta === 'O') return 'No confirmado (cuenta O)';
   if (p.cuenta === 'E') return 'Pendiente en cuenta E: posible error de registración, revisar';
   return '';
@@ -2908,8 +2908,36 @@ function gastosAsiento_(banco, fbs) {
     // la diferencia queda como partida pendiente para que el control no la esconda
     ajuste = partidaFbs_({ fecha: f[0].fecha, comentario: 'Diferencia asiento gastos bancarios (FBS vs. banco) - revisar',
       referencia: '', asiento: f[0].asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+    // la base solo trae las cuentas bancarias (no el detalle del asiento por cuenta de gasto): se busca qué líneas del banco
+    // explican la diferencia (el comentario no se toca: con él se netea contra la diferencia del mes siguiente)
+    const exp = explicarDifGastos_(b, dif);
+    if (exp) ajuste.explicacion = 'La diferencia coincide con ' + exp + ': revisar si está en el asiento de FBS';
   }
   return { dif, ajuste };
+}
+
+/**
+ * Qué líneas del banco explican la diferencia del asiento de gastos: una línea sola, todo un concepto (mismo código o
+ * descripción) o hasta 3 líneas de los primeros o últimos 2 días del mes (lo que FBS suele pasar al mes siguiente).
+ */
+function explicarDifGastos_(b, dif) {
+  const txt = l => l.map(x => String(x.texto).split(' - ')[0].trim() + ' ' + fechaTexto_(x.fecha).slice(0, 5) + ' ' + formato_(x.importe)).join(' + ');
+  const una = b.find(x => Math.abs(x.importe - dif) <= TOLERANCIA);
+  if (una) return txt([una]);
+  const grupos = new Map();
+  b.forEach(x => { const k = x.causal || normalizar_(x.texto).split(' - ')[0]; grupos.set(k, (grupos.get(k) || []).concat([x])); });
+  for (const l of grupos.values()) {
+    const t = redondear_(l.reduce((a, x) => a + x.importe, 0));
+    if (l.length > 1 && Math.abs(t - dif) <= TOLERANCIA) return 'todo "' + String(l[0].texto).split(' - ')[0].trim() + '" del mes (' + l.length + ' líneas, ' + formato_(t) + ')';
+  }
+  const fechas = Array.from(new Set(b.map(x => x.fecha.getTime()))).sort((x, y) => x - y);
+  const bordes = new Set(fechas.slice(0, 2).concat(fechas.slice(-2)));
+  const cands = b.filter(x => bordes.has(x.fecha.getTime())).slice(0, 30);
+  for (let n = 2; n <= 3 && cands.length >= n; n++) {
+    const combo = primeraCombinacion_(cands, n, dif);
+    if (combo) return txt(combo);
+  }
+  return '';
 }
 
 function conciliar_(banco, fbs) {
@@ -3783,6 +3811,8 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   pendientePorNroCorto_(banco, fbs);
   const difGastos = conciliar_(banco, fbs);
+  const difExp = fbs.find(p => p.explicacion);
+  if (difExp) avisos.push('Asiento de gastos bancarios: ' + difExp.explicacion.charAt(0).toLowerCase() + difExp.explicacion.slice(1) + '.');
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
