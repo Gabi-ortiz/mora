@@ -1957,7 +1957,7 @@ function leerFotoBase_(ss) {
   return m;
 }
 
-function leerBase_(filas, cuentaE, cuentaO) {
+function leerBase_(filas, cuentaE, cuentaO, banco) {
   const h = encabezados_(filas, {
     plan: /^detplan$/, asiento: /^detmovnro$/, fecha: /^detfecha$/, ref: /^detref$/, debe: /^detdebe$/, haber: /^dethaber$/,
     com: /^detcomenta$/, aux: /^detcomentaaux$/, id: /^detmovid$/, cc: /centrocosto/, estado: /^_estado$/, tardio: /^_tardio$/,
@@ -1977,6 +1977,7 @@ function leerBase_(filas, cuentaE, cuentaO) {
       comentario: String(r[c.com] || '').replace(/\s+/g, ' ').trim(), debe: parseNum_(r[c.debe]) || 0, haber: parseNum_(r[c.haber]) || 0,
       aux: aux instanceof Date ? aux : (typeof aux === 'number' ? String(Math.round(aux)) : String(aux || '').trim()),
       id: c.id !== undefined ? String(r[c.id] || '').replace(/\.0+$/, '') : '', cuentaBancoPropia: propia,
+      bancoSinO: /^__/.test(String(cuentaO)) ? String(banco || '') : '',
       cc: c.cc !== undefined ? String(r[c.cc] || '').trim() : '', tardio: c.tardio !== undefined && r[c.tardio] === 'SI' });
   });
   return out;
@@ -2153,6 +2154,13 @@ function partidaBanco_(m, origen) {
     cat: m.cat || '', causal: m.causal || '', match: null, metodo: '', cruces: '' };
 }
 
+/** "BANCO SANTAN" y "Banco Santander" son el mismo banco: se compara la primera palabra después de "Banco" (una abreviada). */
+function mismoBanco_(a, b) {
+  const p = x => normalizar_(x).replace(/^(banco|bco\.?)\s+(del?\s+)?/i, '').split(/\s+/)[0] || '';
+  const x = p(a), y = p(b);
+  return x.length >= 3 && y.length >= 3 && (x.startsWith(y) || y.startsWith(x));
+}
+
 function partidaFbs_(a, origen) {
   const com = a.comentario;
   let cuit = '', dni = '';
@@ -2170,7 +2178,9 @@ function partidaFbs_(a, origen) {
   if (cuitNro) { cuit = cuitNro; dni = cuitNro.slice(2, 10); }
   else if (ax.dniValor) { cuit = ''; dni = ax.dniValor; }
   const fr = ax.fecha || (a.fecha ? fechaEnTexto_(com, a.fecha) : null);
-  const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
+  // sin cuenta O (Chexa) el valor igual dice la O del mismo banco ("BANCO SANTAN(1103024)" = Santander (O)): no es otro banco
+  const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) &&
+    !(a.bancoSinO && mismoBanco_(ax.banco, a.bancoSinO)) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
     fechaRef: fr || null, fechaRef2: ax.fecha2 && (!fr || dias_(ax.fecha2, fr) > 0) ? ax.fecha2 : null, cruces: '', valor: ax.numero,
     otroBanco, cuentaValor: otroBanco ? ax.cuentaBanco : '', aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
@@ -3486,7 +3496,7 @@ function revisarPendientes() {
     const cpc = cambiosPostCierre_(r.ctx, desde, fechaUltimoCierre_(ss));
     if (cpc.filas.length > 1) filas = agregarTardias_(filas, cpc.filas);
   }
-  const b = leerBase_(filas, ctas.E, ctas.O || '__sin_cuenta_O__');
+  const b = leerBase_(filas, ctas.E, ctas.O || '__sin_cuenta_O__', paramDe_(parametros, '^cuenta bancaria$'));
   const movs = b.E.map(a => Object.assign(a, { cuenta: 'E' })).concat(b.O.map(a => Object.assign(a, { cuenta: 'O' })));
   const v = sh.getDataRange().getValues();
   const c = colsPend_(v[0]);
@@ -3656,7 +3666,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   if (entrada.base) {
     const ctas = cuentasDe_(entrada.parametros), sinO = !ctas.O;
     const cuentaO = sinO ? '__sin_cuenta_O__' : ctas.O;
-    const b = leerBase_(entrada.base, ctas.E, cuentaO);
+    const b = leerBase_(entrada.base, ctas.E, cuentaO, param('^cuenta bancaria$'));
     let siE = parseNum_(param('^saldo inicial cuenta e'));
     let siO = sinO ? 0 : parseNum_(param('^saldo inicial cuenta o'));
     if (entrada.saldosIniciales) {
