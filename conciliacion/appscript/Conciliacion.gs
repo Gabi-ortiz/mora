@@ -3872,6 +3872,18 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   pendientePorNroCorto_(banco, fbs);
   const difGastos = conciliar_(banco, fbs);
+  // una operación agrupada por el número del comentario ("31082026-DEP ECHEQ", 5 registros) que no cruzó vuelve a sus
+  // líneas: así cada una se trabaja por separado en "Pendientes en trabajo" (y se compensa o se corrige solo la que corresponde)
+  for (let i = fbs.length - 1; i >= 0; i--) {
+    const p = fbs[i];
+    if (p.match !== null || !p.lineas || !String(p.liq || '').startsWith('OP ')) continue;
+    fbs.splice(i, 1, ...p.lineas.map(l => {
+      const q = partidaFbs_({ fecha: l.fecha, comentario: l.texto, referencia: '', asiento: l.asiento,
+        debe: Math.max(l.importe, 0), haber: Math.max(-l.importe, 0) }, 'Mes');
+      q.cuenta = 'E';
+      return q;
+    }));
+  }
   const difExp = fbs.find(p => p.explicacion);
   if (difExp) avisos.push('Asiento de gastos bancarios: ' + difExp.explicacion.charAt(0).toLowerCase() + difExp.explicacion.slice(1) + '.');
   limpiezaO_(banco, ao.pendientes);
