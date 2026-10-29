@@ -2173,9 +2173,11 @@ function partidaFbs_(a, origen) {
   const otroBanco = ax.cuentaBanco && a.cuentaBancoPropia && ax.cuentaBanco !== String(a.cuentaBancoPropia) ? ax.banco : '';
   return { lado: 'FBS', origen: origen || 'Mes', fecha: a.fecha, importe: redondear_(a.debe - a.haber), texto: com,
     fechaRef: fr || null, fechaRef2: ax.fecha2 && (!fr || dias_(ax.fecha2, fr) > 0) ? ax.fecha2 : null, cruces: '', valor: ax.numero,
-    otroBanco, aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
+    otroBanco, cuentaValor: otroBanco ? ax.cuentaBanco : '', aux: a.aux instanceof Date ? fechaTexto_(a.aux) : (a.aux || ''),
     ref: a.referencia || '', asiento: a.asiento || '', cuenta: a.cuenta || '', cc: a.cc || '', tardio: !!a.tardio,
-    alerta: otroBanco ? 'El Nº del valor dice otro banco (' + otroBanco + ' ' + ax.cuentaBanco + ') pero el registro está en esta cuenta: corregir el valor en FBS' : '', cuit, dni,
+    // el valor del cobro dice que la plata entró en otra cuenta bancaria, pero el registro se hizo en esta
+    alerta: otroBanco ? 'El valor de FBS dice que entró en la cuenta ' + ax.cuentaBanco + ' (' + otroBanco + '), pero el registro está en esta ' +
+      'cuenta (' + a.cuentaBancoPropia + '): revisar en FBS cuál es la correcta' : '', cuit, dni,
     nombre: partes.length > 1 ? tokens_(partes[partes.length - 1]) : new Set(), cat: '', causal: '', match: null, metodo: '' };
 }
 
@@ -3828,9 +3830,9 @@ function conciliarTodo_(entrada, redondoUnico) {
   // la alerta puede ser un duplicado o un valor imputado a otro banco: el aviso nombra cada caso
   const otroBco = dup.filter(p => p.otroBanco), dupReal = dup.filter(p => !p.otroBanco);
   if (dupReal.length) avisos.push(dupReal.length + ' registros de FBS parecen duplicados (ver columna Observación en "' + HOJA.pendFbs + '").');
-  if (otroBco.length) avisos.push(otroBco.length + ' registros de FBS están en esta cuenta pero el Nº del valor dice otro banco (' +
-    otroBco.map(p => p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe)) + ' → ' + p.otroBanco).join('; ') +
-    '): corregir el valor en FBS (la cuenta del registro es la que vale).');
+  if (otroBco.length) avisos.push(otroBco.length + ' registros de FBS están en esta cuenta, pero su valor dice que la plata entró en otra cuenta (' +
+    otroBco.map(p => p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe)) + ' → cuenta ' + p.cuentaValor).join('; ') +
+    '): revisar en FBS cuál es la correcta. La conciliación los toma en esta cuenta.');
   const conMarca = ao.pendientes.filter(p => p.cruces).length;
   if (conMarca) avisos.push(conMarca + ' líneas de O sin confirmar tienen un posible cruce (columna "Cruces encontrados" en "' + HOJA.pendO + '").');
   if (enE.length) avisos.push(enE.length + ' registros de la cuenta E no se encontraron en el banco, por ' + formato_(enE.reduce((x, p) => x + Math.abs(p.importe), 0)) +
