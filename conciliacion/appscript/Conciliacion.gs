@@ -3754,6 +3754,15 @@ function conciliarTodo_(entrada, redondoUnico) {
   const apertura = { fbs: redondear_(e.info.saldoInicial + o.info.saldoInicial), pendientes: redondear_(neto),
     banco: saldoInicialBanco };
   apertura.diferencia = redondear_(apertura.fbs + apertura.pendientes - apertura.banco);
+  // el extracto tiene que arrancar donde terminó el del cierre: si no, el banco cargó movimientos con fecha del mes anterior
+  // después de que se bajara aquel extracto (ej. el SIRCREB del último día) y no se pegaron
+  const saldoCierre = parseNum_(param('^saldo del extracto'));
+  if (saldoCierre !== null && movs[0].saldo !== null && Math.abs(saldoInicialBanco - saldoCierre) > TOLERANCIA) {
+    avisos.unshift('El extracto arranca con saldo ' + formato_(saldoInicialBanco) + ' y el del cierre anterior terminó en ' +
+      formato_(saldoCierre) + ' (diferencia ' + formato_(redondear_(saldoInicialBanco - saldoCierre)) + '): el banco cargó movimientos con ' +
+      'fecha del mes anterior después de bajar aquel extracto. Pegá el extracto desde unos días antes del mes y procesá de nuevo: ' +
+      'los que no estaban en el cierre se toman solos.');
+  }
   if (Math.abs(apertura.diferencia) >= 1000) {
     avisos.unshift('La apertura no cierra por ' + formato_(apertura.diferencia) + ': revisá los saldos iniciales de E y O' +
       (entrada.base ? ' en "' + HOJA.parametros + '"' : '') + ' (tienen que ser los saldos al cierre del mes anterior) y los pendientes ' +
