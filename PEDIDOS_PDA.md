@@ -576,3 +576,22 @@ Fiat (OWBSO040 del 22/10):
   CD5/CD6/CD8, FP3/FP4).
 - TN5 y TV6 pasan a IVA 10,5% en el Prec CC s/IVA, como el resto de Toro.
 - DP1 tampoco figura en la lista (queda con la versión del suscripto de FBS).
+
+## RESUMEN reordenado: clientes y TP (29/10/2026)
+- Se sacó el bloque ESTADO DEL ACTO. La tarjeta "Aprobados del acto" calcula
+  sola (COUNTIFS del acto con pedido y carpeta aprobados).
+- Fila 8: ADJUDICADOS DEL ACTO (B:E), CIERRES DEL MES (F:I) e INCENTIVO PEDIDOS
+  (J:M), uno al lado del otro. Celdas que cambiaron de lugar: netos del mes I9,
+  objetivo I13, % cumplimiento I16, VM netos I17, categoría M9, % bonus de
+  cumplimiento M11.
+- Cuadros con su PROYECCION al lado:
+  - POR FAMILIA · CLIENTES (sin TP), filas 20-33.
+  - POR MODELO PEDIDO · CLIENTES (sin TP), filas 35-76 (con los AJUSTES).
+  - POR MODELO PEDIDO · TP, filas 78-109.
+  - Línea de control en la fila 111: clientes + TP = netos del mes.
+- TP = "TP" en la columna Responsable de BASE.
+- Solo se ven las filas con modelo: `ajustarFilasResumen` oculta las filas
+  vacías. Corre al cambiar el mes, al editar BASE (Pedido, Carpeta, Mes cierre,
+  Modelo PEDIDO, Modelo ahorro, Responsable), AJUSTES o PRECIOS, al abrir el
+  archivo y al agregar un acto.
+- VM netos del mes = VM clientes + VM TP.
