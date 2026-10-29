@@ -555,14 +555,34 @@ function procesar_(ss) {
   const trabajo = leer(hojaAnteriores);
   const shCierre = ss.getSheetByName(HOJA.cierrePend);
   const delCierre = shCierre && shCierre.getLastRow() > 0 ? shCierre.getDataRange().getValues() : null;
-  const res = conciliarTodo_({
+  const props = PropertiesService.getDocumentProperties();
+  let pasarDifOk = [];
+  try { pasarDifOk = JSON.parse(props.getProperty('PASAR_DIF_OK') || '[]'); } catch (e) { pasarDifOk = []; }
+  const entrada = {
     extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: delCierre || trabajo, trabajo,
     reglas, empresas, parametros,
-    desconciliar: desc.claves,
-  });
+    desconciliar: desc.claves, pasarDifOk,
+  };
+  // conciliarTodo_ modifica la entrada de los avisos: se guarda para poder cruzar de nuevo
+  const avisosBase0 = (avisosBase || []).slice();
+  let res = conciliarTodo_(entrada);
+  if (res.pasarSinConfirmar.length) {
+    // "Pasar a diferencia" no se corrige en FBS: se confirma una vez, con el importe a la vista
+    const l = res.pasarSinConfirmar;
+    const neto = redondear_(l.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
+    const ui = SpreadsheetApp.getUi();
+    const msg = 'Se van a quitar ' + l.length + ' pendientes sumándolos a la diferencia de control (' + formato_(neto) + '):\n\n' +
+      l.map(p => '• ' + sector_(p) + ' ' + fechaTexto_(p.fecha) + ' ' + String(p.texto).slice(0, 40) + ' ' + formato_(Math.abs(p.importe))).join('\n') +
+      '\n\nNo se corrigen en FBS: la diferencia de control cambia en ese importe. ¿Es correcto?';
+    if (ui.alert('Pasar a diferencia', msg, ui.ButtonSet.YES_NO) === ui.Button.YES) {
+      pasarDifOk = pasarDifOk.concat(l.map(p => p.idPend).filter(Boolean)).slice(-500);
+      props.setProperty('PASAR_DIF_OK', JSON.stringify(pasarDifOk));
+      res = conciliarTodo_(Object.assign(entrada, { pasarDifOk, avisosBase: avisosBase0 }));
+    }
+  }
   res.baseCtx = ctxBase; res.hastaBase = hastaBase;
   marca('cruzar');
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
@@ -846,10 +866,13 @@ function guardarCierrePend_(ss, items) {
   if (!sh.getProtections(SpreadsheetApp.ProtectionType.SHEET).length) sh.protect().setWarningOnly(true)
     .setDescription('Pendientes del último cierre: los usa el proceso. Se trabajan en "' + HOJA.anterioresAlt[0] + '".');
 }
-const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Compensado', 'Justificado'];
+const ESTADOS_PEND = ['Pendiente', 'En gestión', 'Resuelto en FBS', 'Compensado', 'Justificado', 'Pasar a diferencia'];
 // estados que sacan el pendiente de la conciliación (Compensado: solo si todo lo marcado así suma cero). "Error de la lista"
 // ya no está en el desplegable; se sigue respetando si quedó en una lista vieja
-const ESTADO_SALE = /^(Resuelto|Error|Compensado)/i;
+// "Pasar a diferencia": sale sin corrección en FBS y su importe queda en la diferencia de control (ej. un redondeo de centavos);
+// se confirma una vez al procesar
+const ESTADO_SALE = /^(Resuelto|Error|Compensado|Pasar a dif)/i;
+const ESTADO_PASAR = /^Pasar a dif/i;
 
 /** Clave estable de un pendiente (sector, fecha, concepto, importe) para conservar estado y comentarios entre cierres. */
 function clavePend_(sector, fecha, concepto, importe) {
@@ -874,7 +897,7 @@ function pasarPendientes_(ss, res) {
   const claves = items.map(p => [sector_(p), p.fecha, p.texto, valorSector_(p)]);
   const ids = idsPend_(claves);
   const filas = items.map((p, i) => [claves[i][0], ORIGEN_ANT, p.fecha, p.texto, claves[i][3],
-    p.estado && !ESTADO_SALE.test(p.estado) ? p.estado : 'Pendiente', p.resp || '', p.com || '',
+    p.estado && (!ESTADO_SALE.test(p.estado) || p.sinConfirmar) ? p.estado : 'Pendiente', p.resp || '', p.com || '',
     observacion_(p), p.cruces || '', '', '', ids[i]]);
   let sh = hojaDe_(ss, nombresAnteriores_());
   // se escribe siempre en "Pendientes en trabajo"; la lista vieja ("Pend mes anterior") ya quedó absorbida y se borra
@@ -901,7 +924,7 @@ function actualizarPendTrabajo_(ss, res, nombre) {
   const filas = abiertos.map(p => ({ p, f: fila(p, ORIGEN_ANT, p.situacion, p.revAuto, p.revFecha) }))
     .concat(res.pendMes.map(p => ({ p, f: fila(p, ORIGEN_MES, p.situacion === 'Sigue pendiente' ? observacion_(p) : p.situacion) })));
   // primero lo que hay que trabajar; al final lo que sale por el Estado
-  const sale = x => ESTADO_SALE.test(x.p.estado || '') && !x.p.compFalla;
+  const sale = x => ESTADO_SALE.test(x.p.estado || '') && !x.p.compFalla && !x.p.sinConfirmar;
   escribirPendTrabajo_(sh, filas.filter(x => !sale(x)).concat(filas.filter(sale)).map(x => x.f));
 }
 
@@ -2905,6 +2928,9 @@ function gastosAsiento_(banco, fbs) {
   const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?) \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
     !/LIQ/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
+  // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
+  // asiento de este mes: así se limpia sola, sin que nadie la toque
+  fbs.filter(x => x.match === null && x.origen === 'Arrastre' && /^Diferencia asiento gastos/.test(x.texto)).forEach(x => f.push(x));
   const dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
   unir_(b, f, 'Asiento gastos bancarios (dif. ' + formato_(dif) + ')');
   let ajuste = null;
@@ -3857,15 +3883,25 @@ function conciliarTodo_(entrada, redondoUnico) {
     avisos.push(marcadosComp.length + ' pendientes marcados "Compensado" en "' + HOJA.anterioresAlt[0] + '" no se compensan entre sí (diferencia ' +
       formato_(netoComp) + '): siguen en la conciliación hasta que lo marcado sume cero.');
   }
-  const sacar = p => ESTADO_SALE.test(p.estado || '') && !p.compFalla;
+  // "Pasar a diferencia" sale solo si el usuario ya lo confirmó (procesar_ pregunta y vuelve a cruzar)
+  const pasarOk = new Set(entrada.pasarDifOk || []);
+  const sinConfirmar = banco.concat(fbs).filter(p => p.match === null).concat(ao.pendientes)
+    .filter(p => ESTADO_PASAR.test(p.estado || '') && !pasarOk.has(p.idPend));
+  sinConfirmar.forEach(p => { p.sinConfirmar = true; });
+  const sacar = p => ESTADO_SALE.test(p.estado || '') && !p.compFalla && !p.sinConfirmar;
   banco.concat(fbs).forEach(p => { if (p.match === null) (sacar(p) ? quitados : pend[sector_(p)]).push(p); });
   ao.pendientes.forEach(p => (sacar(p) ? quitados : pend[sector_(p)]).push(p));   // no confirmados en O: directo a pendientes
-  if (quitados.length) {
-    const neto = redondear_(quitados.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
-    avisos.push(quitados.length + ' pendientes marcados "Resuelto en FBS" o "Compensado" en "' + HOJA.anterioresAlt[0] +
-      '" salieron de la conciliación (' + quitados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + ')' +
+  const pasados = quitados.filter(p => ESTADO_PASAR.test(p.estado || '')), otrosQuitados = quitados.filter(p => !ESTADO_PASAR.test(p.estado || ''));
+  const netoDe = l => redondear_(l.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
+  if (otrosQuitados.length) {
+    const neto = netoDe(otrosQuitados);
+    avisos.push(otrosQuitados.length + ' pendientes marcados "Resuelto en FBS" o "Compensado" en "' + HOJA.anterioresAlt[0] +
+      '" salieron de la conciliación (' + otrosQuitados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + ')' +
       (Math.abs(neto) > 0.005 ? '. Neto ' + formato_(neto) + ': si no está corregido en FBS, la diferencia de control cambia en ese importe.' : '. Se compensan entre sí: el control no cambia.'));
   }
+  if (pasados.length) avisos.push(pasados.length + ' pendientes pasaron a la diferencia de control por ' + formato_(netoDe(pasados)) + ' (' +
+    pasados.map(p => sector_(p) + ' ' + p.texto.slice(0, 30) + ' ' + formato_(Math.abs(p.importe))).join('; ') + '): no se corrigen en FBS.');
+  if (sinConfirmar.length) avisos.push(sinConfirmar.length + ' pendientes marcados "Pasar a diferencia" siguen en la conciliación porque no se confirmó al procesar.');
   const tot = {};
   Object.keys(pend).forEach(s => { tot[s] = redondear_(pend[s].reduce((x, p) => x + valorSector_(p), 0)); });
   const fbsPend = pend.S3.concat(pend.S4).filter(p => p.origen === 'Mes');
@@ -3913,7 +3949,10 @@ function conciliarTodo_(entrada, redondoUnico) {
   const listas = { O: ao.pendientes.filter(p => !fuera.has(p)), E: fbs.filter(p => p.match === null && !fuera.has(p)),
     B: banco.filter(p => p.match === null && !fuera.has(p)) };
   const situacion = p => p.compFalla ? 'Marcado Compensado, pero lo marcado así no se compensa (diferencia ' + formato_(netoComp) + '): sigue en la conciliación'
-    : fuera.has(p) ? (/^Compensado/i.test(p.estado) ? 'Compensado: sale de la conciliación' : 'Sale de la conciliación por el Estado "' + p.estado + '"')
+    : p.sinConfirmar ? 'Marcado "Pasar a diferencia" sin confirmar: sigue en la conciliación (confirmalo al procesar)'
+    : fuera.has(p) ? (/^Compensado/i.test(p.estado) ? 'Compensado: sale de la conciliación'
+      : ESTADO_PASAR.test(p.estado) ? 'Pasado a la diferencia de control: sale sin corregir en FBS'
+      : 'Sale de la conciliación por el Estado "' + p.estado + '"')
     : enPend.has(p) ? 'Sigue pendiente'
     : 'Cruzado este mes' + (p.metodo ? ' (' + p.metodo.split(' (dif')[0] + ')' : '') + ': no hay que hacer nada, se borra al cerrar';
   anteriores.concat(pendMes).forEach(p => { p.situacion = situacion(p); });
@@ -3924,7 +3963,7 @@ function conciliarTodo_(entrada, redondoUnico) {
     if (ie >= 0) { const f = entrada.base.slice(1).find(r => String(r[ie] || '').trim()); empresa = f ? String(f[ie]).trim() : ''; }
   }
   return { empresa, cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
-    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs, anteriores, pendMes };
+    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs, anteriores, pendMes, pasarSinConfirmar: sinConfirmar };
 }
 
 if (typeof module !== 'undefined') module.exports = { gastosBancarios_, claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
