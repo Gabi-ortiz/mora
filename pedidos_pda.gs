@@ -596,6 +596,8 @@ function armarResumen(ss, listas) {
     .find(esMesValido) || '';
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
+  sh.clearNotes(); // clear() no borra las notas ni las alturas de fila del armado anterior
+  sh.setRowHeights(1, sh.getMaxRows(), 21);
   sh.clearConditionalFormatRules();
   sh.setFrozenRows(0);
   if (sh.getMaxColumns() < 10) sh.insertColumnsAfter(sh.getMaxColumns(), 10 - sh.getMaxColumns());
