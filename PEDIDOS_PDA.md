@@ -595,3 +595,7 @@ Fiat (OWBSO040 del 22/10):
   Modelo PEDIDO, Modelo ahorro, Responsable), AJUSTES o PRECIOS, al abrir el
   archivo y al agregar un acto.
 - VM netos del mes = VM clientes + VM TP.
+- (29/10) ADJUDICADOS DEL ACTO sin la línea CHEXA: Netos licitación = por
+  licitación − bajas − TP. Los títulos del cuadro TP y de su proyección van en
+  azul `COLOR_TP` (#6d9eeb). Al armar se borran las notas y se reinician las
+  alturas de fila del armado anterior.

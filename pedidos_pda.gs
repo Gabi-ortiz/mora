@@ -588,6 +588,7 @@ const GRIS_TEXTO = '#666666';
 const GRIS_LINEA = '#e0e0e0';
 const FONDO_TARJETA = '#f8f4f4';
 const FONDO_TOTAL = '#efe7e7';
+const COLOR_TP = '#6d9eeb'; // títulos del cuadro TP en el RESUMEN (azul, para distinguirlo del de clientes)
 
 function armarResumen(ss, listas) {
   const { sh } = hoja(ss, HOJA_RESUMEN, 2);
@@ -640,8 +641,7 @@ function armarResumen(ss, listas) {
     ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`],
     ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`, true],
-    ['   CHEXA', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"CHEXA")`, true],
-    ['   Netos licitación', '=E10-E11-E12-E13', true],
+    ['   Netos licitación', '=E10-E11-E12', true],
     ['Por sorteo', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo")`],
     ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Pedido},"BAJA ADJ")`, true],
     ['   ADM', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.RESPONSABLE},"ADM")`, true],
@@ -699,7 +699,7 @@ function armarResumen(ss, listas) {
 
   // --- Tarjetas (filas 4-6): lo más importante, a la vista.
   const tarjetas = [
-    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E15', '0'],
+    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E14', '0'],
     ['D', 'E', 'Aprobados del acto', `=COUNTIFS(${acto},${aprob})`,
       '=IF(N(B5)=0,"","Conversión "&TEXT(D5/B5,"0%"))', '0'],
     ['F', 'G', 'Netos del mes', '=I9', '="Del acto "&I10&"   ·   Anteriores "&I11', '0'],
@@ -735,10 +735,10 @@ function armarResumen(ss, listas) {
   // (ajustarFilasResumen).
   const enc = ['Modelo', 'Familia', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido',
     'Total incentivos', 'Descuentos', 'Total'];
-  const titulo = (fila, texto, encabezados) => {
+  const titulo = (fila, texto, encabezados, color) => {
     const n = encabezados.length;
     sh.getRange(fila, 2, 1, n).merge().setValue(texto)
-      .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
+      .setFontWeight('bold').setBackground(color || COLOR_ENCABEZADO).setFontColor('white');
     sh.getRange(fila + 1, 2, 1, n).setValues([encabezados]).setFontWeight('bold').setFontSize(9)
       .setFontColor(GRIS_TEXTO).setWrap(true).setHorizontalAlignment('center').setVerticalAlignment('middle')
       .setBorder(null, null, true, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID);
@@ -775,9 +775,9 @@ function armarResumen(ss, listas) {
 
   // PROYECCION al lado de cada cuadro: Cantidad, Descuentos ($ descuento), Incentivos / bonus (Prec CC
   // s/IVA del mes × (Bonus pedidos + Inc pedido)) e Incentivos esperados (incentivos - descuentos).
-  const proyeccion = (fTitulo, fTotal, fUlt, col, texto) => {
+  const proyeccion = (fTitulo, fTotal, fUlt, col, texto, color) => {
     sh.getRange(fTitulo, col, 1, 4).merge().setValue(texto).setFontWeight('bold')
-      .setBackground(COLOR_ENCABEZADO).setFontColor('white').setHorizontalAlignment('center').setWrap(true)
+      .setBackground(color || COLOR_ENCABEZADO).setFontColor('white').setHorizontalAlignment('center').setWrap(true)
       .setVerticalAlignment('middle');
     const encP = sh.getRange(fTitulo + 1, col, 1, 4);
     encP.setValues([['Cantidad', 'Descuentos', 'Incentivos / bonus', 'Incentivos esperados']]).setFontWeight('bold')
@@ -804,14 +804,14 @@ function armarResumen(ss, listas) {
 
   // Un cuadro POR MODELO PEDIDO (B:K) con su PROYECCION (M:P). tp = true: solo TP; false: clientes (sin TP,
   // con los AJUSTES del mes).
-  const cuadroModelo = (t, tp, texto, textoProy) => {
+  const cuadroModelo = (t, tp, texto, textoProy, color) => {
     const cond = tp ? esTP : `(1-${esTP})`;
     const f1 = t.total + 1;
     const f2 = t.ultima;
     const rg = (l) => `${l}${f1}:${l}${f2}`;
     const lista = rg('B');
     const mapa = (expr) => `=LET(mp,${mp},MAP(${lista},LAMBDA(m,IF(m="","",${expr}))))`;
-    titulo(t.titulo, texto, enc);
+    titulo(t.titulo, texto, enc, color);
     const h = t.titulo + 1;
     sh.getRange(h, 3).setNote('Familia del modelo en PRECIOS (columna Familia).');
     sh.getRange(h, 7).setNote('% de "Bonus cumplimiento pedidos totales" del bloque INCENTIVO PEDIDOS (M11): ' +
@@ -855,7 +855,7 @@ function armarResumen(ss, listas) {
       `(N($M$11)+SUMIFS(${pr}$D:$D,${pr}$A:$A,${M},${pr}$B:$B,m)))))`);
     sh.getRange(f1, 16).setFormula(`=MAP(${lista},${rg('N')},${rg('O')},LAMBDA(m,d,i,IF(OR(m="",AND(d="",i="")),"",` +
       'N(i)-N(d))))');
-    proyeccion(t.titulo, t.total, f2, 13, textoProy);
+    proyeccion(t.titulo, t.total, f2, 13, textoProy, color);
   };
 
   // --- Por familia (clientes): suma el cuadro por modelo de clientes según su familia. Solo importes.
@@ -887,7 +887,7 @@ function armarResumen(ss, listas) {
   cuadroModelo(c, false, 'POR MODELO PEDIDO · CLIENTES (sin TP)   (V.M. = Precio CC sin iva)',
     'PROYECCION CLIENTES (sin carpeta aprobada)');
   cuadroModelo(T.tp, true, 'POR MODELO PEDIDO · TP   (V.M. = Precio CC sin iva)',
-    'PROYECCION TP (sin carpeta aprobada)');
+    'PROYECCION TP (sin carpeta aprobada)', COLOR_TP);
 
   // Control: clientes + TP = netos del mes.
   sh.getRange(T.control, 2, 1, 10).merge()
