@@ -2735,6 +2735,11 @@ function reversionesFbs_(fbs) {
     const o = fbs.find(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA && dias_(x.fecha, a.fecha) <= 60);
     if (o) compensar_([a, o], 'Compensa dentro de FBS (anulación)');
   });
+  // correcciones ("CORRIGE ERROR IMP CBLE" 8.094.000 contra el recibo de 8.094.000 cargado de más): solo con un candidato
+  fbs.filter(a => a.match === null && /CORRIG|REVIERT|REVERS|CONTRAASIENTO|CONTRA ASIENTO/i.test(a.texto)).forEach(a => {
+    const os = fbs.filter(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA && dias_(x.fecha, a.fecha) <= 60);
+    if (os.length === 1) compensar_([a, os[0]], 'Compensa dentro de FBS (corrección) (revisar)');
+  });
   const grupos = new Map();
   fbs.forEach(f => {
     if (f.match !== null || f.origen !== 'Mes') return;
@@ -2898,13 +2903,17 @@ function liquidacionPorNumero_(banco, fbs) {
   return ajustes;
 }
 
-/** Mismo CUIT / nombre e importe con centavos de diferencia (hasta $1): ej. "veronesi" 298.280 y el recibo 298.280,13. */
+/**
+ * Mismo CUIT / nombre e importe con centavos de diferencia (hasta $1): ej. "veronesi" 298.280 y el recibo 298.280,13. En
+ * importes grandes se admite un poco más (una parte en cien millones: General Motors 207.955.353,70 contra 207.955.352,69).
+ */
 function difCentavos_(banco, fbs, ventana) {
   const ajustes = [];
   banco.slice().sort((a, b) => a.fecha - b.fecha).forEach(b => {
     if (b.match !== null) return;
     const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && (f.importe > 0) === (b.importe > 0) &&
-      Math.abs(f.importe - b.importe) > 0.005 && Math.abs(f.importe - b.importe) <= 1 && distancia_(b, f) <= ventana &&
+      Math.abs(f.importe - b.importe) > 0.005 && Math.abs(f.importe - b.importe) <= Math.max(1, Math.abs(b.importe) * 1e-8) &&
+      distancia_(b, f) <= ventana &&
       (MISMO_ID_(b, f) || POR_NOMBRE_(b, f)));
     if (cands.length !== 1) return;
     const f = cands[0], dif = redondear_(b.importe - f.importe);
@@ -2924,9 +2933,10 @@ function gastosAsiento_(banco, fbs) {
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)) &&
     !ivaDeOtra(x));
-  // el asiento mensual "Gastos bancarios MM/AAAA" o "Gtos MM/AAAA" (Chexa: "30550726-Gtos 07/2026"); no las "Liq ... gastos
+  // el asiento mensual "Gastos bancarios MM/AAAA" o "Gtos MM/AAAA" (Chexa: "30550726-Gtos 07/2026"), o uno por quincena
+  // (Chexa Macro: "24147126-Gtos 1° Q 07/2026" y "24107226-Gtos 2° Q 07/2026"); no las "Liq ... gastos
   // bancarios", que son otros registros
-  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?) \d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?)\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
     !/LIQ/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
   // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
@@ -2971,6 +2981,25 @@ function explicarDifGastos_(b, dif) {
   return '';
 }
 
+/**
+ * Sueldos: FBS registra el pago del mes en una línea ("3107-Sueldos" 91.067.275) y el banco lo debita en varias ("DB PAGO
+ * REMUNERACIONES", 8 líneas). Primero todo el mes junto; si no da, cada registro contra una combinación de hasta 8 débitos.
+ */
+function sueldos_(banco, fbs) {
+  const b = banco.filter(x => x.match === null && x.origen === 'Mes' && x.importe < 0 && (x.cat === 'SUELDOS' || /REMUNERAC|SUELDO|HABERES/i.test(x.texto)));
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && x.importe < 0 && /SUELDO|REMUNERAC|HABERES/i.test(x.texto));
+  if (!b.length || !f.length) return;
+  const suma = l => redondear_(l.reduce((t, x) => t + x.importe, 0));
+  if (Math.abs(suma(b) - suma(f)) <= 1) { unir_(b, f, 'Sueldos: pago de remuneraciones en varias líneas'); return; }
+  f.sort((x, y) => x.importe - y.importe).forEach(r => {
+    const cands = b.filter(x => x.match === null && dias_(x.fecha, r.fecha) <= 31).slice(0, 20);
+    for (let n = 1; n <= Math.min(8, cands.length); n++) {
+      const combo = primeraCombinacion_(cands, n, r.importe, 1);
+      if (combo) { unir_(combo, [r], 'Sueldos: pago de remuneraciones en varias líneas (revisar)'); break; }
+    }
+  });
+}
+
 function conciliar_(banco, fbs) {
   // las liquidaciones de tarjeta van primero y solo contra movimientos de tarjeta del día de la liquidación
   const ajustesTarjeta = liquidacionPorNumero_(banco, fbs).concat(liquidacionesTarjeta_(banco, fbs));
@@ -2989,6 +3018,7 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
+  sueldos_(banco, fbs);
   compensacionesFbs_(fbs, true);
   // regla: sin CUIT / referencia / nombre, solo se cruza si coincide la fecha y el importe es específico (no redondo)
   pasada_(banco, fbs, b => especifico_(b.importe), '4. Fecha + importe específico', 0, true);
