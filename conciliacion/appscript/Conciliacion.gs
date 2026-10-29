@@ -1528,6 +1528,7 @@ function leerExtracto_(filas, reglas, empresas, cierre) {
       if (corte < 0) info.saldoCierreNoEncontrado = cierre.saldo;
       else movs.forEach((m, i) => { if (i > corte && mes(m) === mesPrevio) tomar.add(i); });
     }
+    info.conCierre = !!(cierre && cierre.movs && cierre.movs.length) || (cierre && cierre.saldo != null && info.saldoCierreNoEncontrado === undefined);
     const quedan = movs.filter((m, i) => delMes(m) || tomar.has(i));
     info.tardiosBanco = quedan.filter(m => !delMes(m));
     info.mesesAnteriores = movs.length - quedan.length;
@@ -3708,7 +3709,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   if (quiebres) avisos.push('Extracto: ' + quiebres + ' filas donde el saldo no sigue a la anterior (¿faltan movimientos?).');
   if (ext.info.mesesAnteriores) avisos.push('Extracto: trae ' + ext.info.mesesAnteriores + ' movimientos de meses anteriores ' +
-    (ext.info.tardiosBanco ? 'que ya estaban en el extracto del cierre: no se vuelven a tomar.' : '; se concilia solo el último mes.'));
+    (ext.info.conCierre ? 'que ya estaban en el extracto del cierre: no se vuelven a tomar.' : '; se concilia solo el último mes.'));
   if (ext.info.tardiosBanco && ext.info.tardiosBanco.length) avisos.push('Extracto: ' + ext.info.tardiosBanco.length + ' movimientos con fecha ' +
     'del mes anterior que no estaban en el extracto del cierre se concilian en este mes (' + ext.info.tardiosBanco.map(m => fechaTexto_(m.fecha) +
     ' ' + String(m.concepto).slice(0, 30).trim() + ' ' + formato_(m.importe)).join('; ') + ').');
