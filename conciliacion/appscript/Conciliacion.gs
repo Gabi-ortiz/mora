@@ -617,6 +617,30 @@ function procesar_(ss) {
 }
 
 /**
+ * Compensado que no suma cero: busca el grupo más chico (1 a 3 partidas) cuyo neto es la diferencia; sin esas, lo demás
+ * suma cero. Devuelve null si no hay o si hay más de un grupo posible del mismo tamaño (no se sabe cuál sobra).
+ */
+function sobranCompensado_(marcados, neto) {
+  const v = marcados.map(p => p.lado === 'BANCO' ? p.importe : -p.importe), n = v.length;
+  const ok = s => Math.abs(redondear_(s - neto)) <= TOLERANCIA;
+  for (let k = 1; k <= Math.min(n > 150 ? 2 : 3, n - 1); k++) {
+    const hallados = [];
+    for (let i = 0; i < n; i++) {
+      if (k === 1) { if (ok(v[i])) hallados.push([i]); continue; }
+      for (let j = i + 1; j < n; j++) {
+        if (k === 2) { if (ok(v[i] + v[j])) hallados.push([i, j]); continue; }
+        for (let m = j + 1; m < n; m++) if (ok(v[i] + v[j] + v[m])) hallados.push([i, j, m]);
+      }
+    }
+    // mismos importes en otro orden (dos líneas iguales) no son grupos distintos
+    const distintos = new Set(hallados.map(g => g.map(i => redondear_(v[i])).sort((a, b) => a - b).join('|')));
+    if (distintos.size === 1) return hallados[0].map(i => marcados[i]);
+    if (distintos.size > 1) return null;
+  }
+  return null;
+}
+
+/**
  * Pestañas en el mismo orden en todas las planillas: primero las de uso (color), después las de consulta (gris). Las del
  * administrador (Parámetros, Reglas, Empresas grupo) quedan al final y ocultas (ocultarHojasAdmin_).
  */
@@ -3922,9 +3946,14 @@ function conciliarTodo_(entrada, redondoUnico) {
   const netoComp = redondear_(marcadosComp.reduce((x, p) => x + (p.lado === 'BANCO' ? p.importe : -p.importe), 0));
   const compOk = Math.abs(netoComp) <= TOLERANCIA;
   if (marcadosComp.length && !compOk) {
-    marcadosComp.forEach(p => { p.compFalla = true; });
-    avisos.push(marcadosComp.length + ' pendientes marcados "Compensado" en "' + HOJA.anterioresAlt[0] + '" no se compensan entre sí (diferencia ' +
-      formato_(netoComp) + '): siguen en la conciliación hasta que lo marcado sume cero.');
+    // si unas pocas partidas (hasta 3) suman justo la diferencia, solo esas quedan con error y el resto se compensa
+    // (ej. 1.193.262,01 en el banco contra 1.193.262,81 en FBS); si hay más de una forma de explicarla, quedan todas
+    const fallan = sobranCompensado_(marcadosComp, netoComp) || marcadosComp;
+    fallan.forEach(p => { p.compFalla = true; });
+    avisos.push(fallan.length + ' pendientes marcados "Compensado" en "' + HOJA.anterioresAlt[0] + '" no se compensan (diferencia ' +
+      formato_(netoComp) + '): siguen en la conciliación hasta que lo marcado sume cero' +
+      (fallan.length < marcadosComp.length ? ' (' + fallan.map(p => sector_(p) + ' ' + fechaTexto_(p.fecha) + ' ' + String(p.texto).slice(0, 30) +
+        ' ' + formato_(Math.abs(p.importe))).join('; ') + '); los otros ' + (marcadosComp.length - fallan.length) + ' sí se compensan y salen' : '') + '.');
   }
   // "Pasar a diferencia" sale solo si el usuario ya lo confirmó (procesar_ pregunta y vuelve a cruzar)
   const pasarOk = new Set(entrada.pasarDifOk || []);
@@ -3991,7 +4020,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const fuera = new Set(quitados), enPend = new Set([].concat(pend.S1, pend.S2, pend.S3, pend.S4));
   const listas = { O: ao.pendientes.filter(p => !fuera.has(p)), E: fbs.filter(p => p.match === null && !fuera.has(p)),
     B: banco.filter(p => p.match === null && !fuera.has(p)) };
-  const situacion = p => p.compFalla ? 'Marcado Compensado, pero lo marcado así no se compensa (diferencia ' + formato_(netoComp) + '): sigue en la conciliación'
+  const situacion = p => p.compFalla ? 'Marcado Compensado, pero no se compensa (diferencia ' + formato_(netoComp) + '): sigue en la conciliación'
     : p.sinConfirmar ? 'Marcado "Pasar a diferencia" sin confirmar: sigue en la conciliación (confirmalo al procesar)'
     : fuera.has(p) ? (/^Compensado/i.test(p.estado) ? 'Compensado: sale de la conciliación'
       : ESTADO_PASAR.test(p.estado) ? 'Pasado a la diferencia de control: sale sin corregir en FBS'
