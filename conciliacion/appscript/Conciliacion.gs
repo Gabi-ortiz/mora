@@ -128,6 +128,11 @@ const REGLAS_GALICIA = [
   ["907189", "Débito", "", "GASTOS BANCARIOS", "Comisión rechazo de cheques"],
   ["907291", "Débito", "", "GASTOS BANCARIOS", "Comisión depósito de cheque en otra sucursal"],
   ["907394", "Débito", "", "GASTOS BANCARIOS", "Comisión servicio de cuenta"],
+  ["907172", "Débito", "", "GASTOS BANCARIOS", "Percepción IVA RG 2408"],
+  ["907207", "Débito", "", "GASTOS BANCARIOS", "Comisión servicio CIG (cobranza integrada)"],
+  ["907807", "Débito", "", "GASTOS BANCARIOS", "Comisión caja de seguridad"],
+  ["907428", "Débito", "", "DEBITOS AUTOMATICOS", "Servicio terminal Payway"],
+  ["917122", "Crédito", "", "COBRANZA CLIENTES", "Rendición depósitos por servicio CIG (cobranza integrada)"],
 ];
 
 /** Reglas iniciales según el banco de la planilla (fila "Cuenta bancaria" de Parámetros). */
@@ -1517,7 +1522,9 @@ function leerExtracto_(filas, reglas, empresas, cierre) {
     let concepto, causal, nombre;
     if (c.descripcion !== undefined) {
       // Galicia (Office Banking): Descripción + leyendas (nombre, CUIT, motivo, banco); el código de "Concepto" es el causal
-      const ley = ['ley1', 'ley2', 'ley3', 'ley4'].map(k => (c[k] !== undefined ? String(r[c[k]] == null ? '' : r[c[k]]).trim() : ''));
+      // una leyenda que la hoja convirtió en fecha ("06/2026" → 01/06/2026) se escribe como fecha, no "Mon Jun 01 2026 ..."
+      const ley = ['ley1', 'ley2', 'ley3', 'ley4'].map(k => (c[k] === undefined ? '' : r[c[k]] instanceof Date ? fechaTexto_(r[c[k]])
+        : String(r[c[k]] == null ? '' : r[c[k]]).trim()));
       // Patagonia: sin leyendas ni código; la Referencia trae el CUIT y el nombre ("30500007539 MAPFRE ARG SEGUR")
       const sinLey = c.concepto === undefined && ['ley1', 'ley2', 'ley3', 'ley4'].every(k => c[k] === undefined);
       const extra = sinLey && c.ref !== undefined ? [String(r[c.ref] == null ? '' : r[c.ref]).trim()] : [];
@@ -2594,7 +2601,7 @@ function fechaEnTexto_(texto, base) {
 function primeraCombinacion_(cands, n, objetivo, tolerancia) {
   const idx = [];
   const buscar = (inicio, suma) => {
-    if (idx.length === n) return Math.abs(suma - objetivo) <= (tolerancia || TOLERANCIA);
+    if (idx.length === n) return redondear_(Math.abs(suma - objetivo)) <= (tolerancia || TOLERANCIA);
     for (let i = inicio; i <= cands.length - (n - idx.length); i++) {
       idx.push(i);
       if (buscar(i + 1, suma + cands[i].importe)) return true;
@@ -2670,25 +2677,35 @@ function combinacionesFechaEscrita_(banco, fbs) {
   });
   grupos.forEach(g => { if (g.length > 1) unidades.push(g); });
   const total = l => redondear_(l.reduce((x, p) => x + p.importe, 0));
-  // banco (uno o un grupo del día) = varias líneas de FBS
-  unidades.sort((x, y) => Math.abs(total(y)) - Math.abs(total(x))).forEach(u => {
+  // banco (uno o un grupo del día) = varias líneas de FBS; después, con total específico, el banco hasta 3 días después de la
+  // fecha escrita (Galicia JEA: "RM-028402 / BANCO GALICIA Nº 10-07-26" = los diez "Pago De Servicios FCA PLAN" del lunes 13/07)
+  const despues = (x, d) => x < d && (d - x) / 864e5 <= 3;
+  [false, true].forEach(corrida => unidades.sort((x, y) => Math.abs(total(y)) - Math.abs(total(x))).forEach(u => {
     if (u.some(b => b.match !== null)) return;
     const t = total(u), d = u[0].fecha.getTime(), esp = especifico_(t);
     if (u.length > 1 && !esp) return;   // grupos del día solo con total específico
+    if (corrida && (!esp || u.length === 1)) return;
     const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && (f.importe > 0) === (t > 0) &&
-      Math.abs(f.importe) <= Math.abs(t) + TOLERANCIA && (esp ? fechasFbs(f) : [f.fechaRef && f.fechaRef.getTime()]).indexOf(d) >= 0).slice(0, 25);
+      Math.abs(f.importe) <= Math.abs(t) + TOLERANCIA && (corrida ? !!f.fechaRef && despues(f.fechaRef.getTime(), d)
+        : (esp ? fechasFbs(f) : [f.fechaRef && f.fechaRef.getTime()]).indexOf(d) >= 0))
+      .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 25);
     for (let n = u.length > 1 ? 1 : 2; n <= (esp ? 5 : 3) && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, t);
-      if (combo) { unir_(u, combo, 'Suma de registros con la misma fecha (escrita o de O) (revisar)'); break; }
+      if (combo) {
+        unir_(u, combo, corrida ? 'Suma de movimientos del banco hasta 3 días después de la fecha escrita (revisar)'
+          : 'Suma de registros con la misma fecha (escrita o de O) (revisar)');
+        break;
+      }
     }
-  });
+  }));
   // una línea de FBS con fecha escrita = varios movimientos del banco de ese día
   fbs.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(f => {
     if (f.match !== null || f.origen !== 'Mes') return;
     const ds = fechasFbs(f), esp = especifico_(f.importe);
     if (!ds.length || (!esp && !f.fechaRef)) return;
     const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && (b.importe > 0) === (f.importe > 0) &&
-      Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0).slice(0, 25);
+      Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0)
+      .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 25);   // los más grandes: los chicos son impuestos del día
     // importe redondo (ej. RM por 2.420.000 = comisión 2.000.000 + IVA 420.000 del día): solo de a dos
     for (let n = 2; n <= (esp ? 4 : 2) && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, f.importe);
@@ -2818,7 +2835,9 @@ function asientosNetos_(banco, fbs) {
     const neto = g.reduce((x, f) => x + f.importe, 0);
     let mejor = null;
     banco.forEach(b => {
-      if (b.match !== null || b.origen !== 'Mes' || Math.abs(b.importe - neto) > TOLERANCIA || dias_(b.fecha, g[0].fecha) > 7 ||
+      // importes grandes, hasta 10 días (Galicia JEA: "Pago Transferencia Cig FIAT" del 13/07 y el RM-028291 de cuatro líneas del 22/07)
+      if (b.match !== null || b.origen !== 'Mes' || redondear_(Math.abs(b.importe - neto)) > TOLERANCIA ||
+        dias_(b.fecha, g[0].fecha) > (Math.abs(neto) >= 1e7 ? 10 : 7) ||
         !especifico_(b.importe)) return;
       if (!mejor || dias_(b.fecha, g[0].fecha) < dias_(mejor.fecha, g[0].fecha)) mejor = b;
     });
@@ -3033,6 +3052,8 @@ function conciliar_(banco, fbs) {
   pasada_(banco, fbs, MISMO_ID_, '1. CUIT/DNI', VENTANA_ID, false);
   pasada_(banco, fbs, POR_REF_, '2. Referencia', 60, false);
   pasada_(banco, fbs, POR_NOMBRE_, '3. Nombre', 15, false);
+  lineasOp_(banco, fbs);
+  boletas_(banco, fbs);
   pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   // depósitos de cheques: el comentario trae la fecha del depósito y el banco lo acredita hasta 5 días después (fines de semana)
   // (importes redondos solo si es un cheque / depósito / canje)
@@ -3064,6 +3085,62 @@ function conciliar_(banco, fbs) {
   ajustesTarjeta.forEach(a => fbs.push(a));
   marcarDuplicados_(fbs);
   return gastos ? gastos.dif : null;
+}
+
+/**
+ * Operación de FBS con varias líneas del mismo número ("03072026-G. de Echeq": seis echeqs depositados) en la que cada
+ * línea tiene su propio movimiento en el banco, hasta 10 días de diferencia: se cruza línea por línea (el más cercano en
+ * fecha), antes de buscar combinaciones por suma, que con muchos importes pueden dar con otra suma igual por casualidad.
+ */
+function lineasOp_(banco, fbs) {
+  fbs.forEach(p => {
+    if (p.match !== null || !p.lineas || p.lineas.length < 2 || !String(p.liq || '').startsWith('OP ')) return;
+    const usados = new Set();
+    for (const l of p.lineas) {
+      const cands = banco.filter(b => b.match === null && !usados.has(b) && Math.abs(b.importe - l.importe) <= TOLERANCIA &&
+        dias_(b.fecha, l.fecha) <= 10);
+      if (!cands.length) return;
+      usados.add(cands.sort((x, y) => dias_(x.fecha, l.fecha) - dias_(y.fecha, l.fecha))[0]);
+    }
+    unir_(Array.from(usados), [p], 'Operación de varias líneas: cada una con su movimiento del banco');
+  });
+}
+
+/**
+ * Boletas de depósito de cheques (Galicia: "G.de Cheque Q00125723 Bol78572487", un crédito por cheque): FBS registra la
+ * boleta entera en un solo registro ("441353-[Depósito a Banco ...]" 6.547.544,08) o con varias líneas del mismo número
+ * ("274425-[Depósito a Banco ...]", que pueden ser dos boletas del mismo día). Se suman los cheques de cada boleta (y de
+ * hasta 3 boletas del mismo día) y se cruzan contra un registro de FBS con ese total, hasta 10 días de diferencia; solo si
+ * hay un único registro posible.
+ */
+function boletas_(banco, fbs) {
+  const porDia = new Map();
+  banco.forEach(b => {
+    const m = b.match === null && b.importe > 0 && String(b.texto).match(/\bBol\s*(\d{5,})/i);
+    if (!m) return;
+    const d = b.fecha.getTime();
+    if (!porDia.has(d)) porDia.set(d, new Map());
+    const bol = porDia.get(d);
+    if (!bol.has(m[1])) bol.set(m[1], []);
+    bol.get(m[1]).push(b);
+  });
+  porDia.forEach(bol => {
+    const grupos = Array.from(bol.values()).slice(0, 8);
+    const combos = [];
+    for (let n = 1; n <= Math.min(3, grupos.length); n++) {
+      const armar = (desde, elegidos) => {
+        if (elegidos.length === n) { combos.push([].concat.apply([], elegidos)); return; }
+        for (let i = desde; i < grupos.length; i++) armar(i + 1, elegidos.concat([grupos[i]]));
+      };
+      armar(0, []);
+    }
+    combos.forEach(items => {
+      if (items.length < 2 || items.some(b => b.match !== null)) return;
+      const total = redondear_(items.reduce((x, b) => x + b.importe, 0));
+      const fs = fbs.filter(f => f.match === null && f.importe > 0 && Math.abs(f.importe - total) <= TOLERANCIA && dias_(f.fecha, items[0].fecha) <= 10);
+      if (fs.length === 1) unir_(items, fs, 'Boleta de depósito de cheques (suma de la boleta)');
+    });
+  });
 }
 
 /** Importe "específico": tiene centavos o no es múltiplo de $1.000 (123.852,68 o 7.234.300 sí; 500.000 o 5.800.000 no). */
@@ -3108,7 +3185,8 @@ function mismaCantidad_(banco, fbs, d) {
     // (o pagos RM de banco a banco: "RM-388981 / BANCO PATAGONIA Nº ..." y "RM-388967 / BANCO GALICIA Nº ...")
     if (!especifico_(b.importe) && fs.some(f => /^RC-/.test(f.texto) ||
       (detalle(f) !== detalle(fs[0]) && !(/^RM-/.test(f.texto) && /^BANCO /i.test(detalle(f)))))) return;
-    const fechas = bs.map(x => x.fecha.getTime()).concat(fs.map(f => f.fecha.getTime()));
+    // de FBS cuenta la fecha escrita o la de O si la hay (pago del 10/07 confirmado en E el 22/07)
+    const fechas = bs.map(x => x.fecha.getTime()).concat(fs.map(f => (f.fechaRef || f.fechaO || f.fecha).getTime()));
     if ((Math.max.apply(null, fechas) - Math.min.apply(null, fechas)) / 864e5 > 7) return;
     const orden = (x, y) => x.fecha - y.fecha;
     fs.sort(orden);
@@ -3900,6 +3978,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const difGastos = conciliar_(banco, fbs);
   // una operación agrupada por el número del comentario ("31082026-DEP ECHEQ", 5 registros) que no cruzó vuelve a sus
   // líneas: así cada una se trabaja por separado en "Pendientes en trabajo" (y se compensa o se corrige solo la que corresponde)
+  let separadas = 0;
   for (let i = fbs.length - 1; i >= 0; i--) {
     const p = fbs[i];
     if (p.match !== null || !p.lineas || !String(p.liq || '').startsWith('OP ')) continue;
@@ -3909,6 +3988,15 @@ function conciliarTodo_(entrada, redondoUnico) {
       q.cuenta = 'E';
       return q;
     }));
+    separadas++;
+  }
+  if (separadas) {
+    // con las líneas sueltas se vuelve a cruzar lo que quedó libre (Galicia JEA: los tres "03072026-G. de Echeq" contra tres
+    // créditos del banco, cada uno con su importe); las diferencias ya calculadas (asiento de gastos, tarjetas) no entran
+    const libres = fbs.filter(p => p.match === null && !/^Diferencia (asiento|de redondeo)/.test(p.texto));
+    const conAjustes = libres.slice();
+    conciliar_(banco.filter(b => b.match === null), conAjustes);
+    conAjustes.slice(libres.length).forEach(a => fbs.push(a));
   }
   const difExp = fbs.find(p => p.explicacion);
   if (difExp) avisos.push('Asiento de gastos bancarios: ' + difExp.explicacion.charAt(0).toLowerCase() + difExp.explicacion.slice(1) + '.');
