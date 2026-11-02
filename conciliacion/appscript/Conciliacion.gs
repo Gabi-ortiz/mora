@@ -3420,8 +3420,9 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   // importe de los dos lados en +-5 días (Córdoba: crédito "creditos" 8.200.000 del 29/06 = recibo cargado con fecha 30/06)
   pasada_(antBanco, eItems, (b, f) => f.tardio, 'Pendiente anterior: registro tardío, importe único en +-5 días (revisar)', 5, true);
   // valores de Dome Taller: el Nº es la fecha de la transferencia ("Nº 96" = 9/6), aunque el importe sea redondo
-  pasada_(antBanco, eItems, (b, f) => !!f.cc && CC_NUMERO_ES_FECHA.test(f.cc) && !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= 3,
-    'Pendiente anterior: valor de Dome Taller (fecha del Nº) + importe', v, true);
+  // (primero la fecha exacta: "Nº 2807" 150.000 es la transferencia de LASCANO del 28/07, no la de ALEMANY del 27/07)
+  [0, 3].forEach(d => pasada_(antBanco, eItems, (b, f) => !!f.cc && CC_NUMERO_ES_FECHA.test(f.cc) && !!f.fechaRef && dias_(f.fechaRef, b.fecha) <= d,
+    'Pendiente anterior: valor de Dome Taller (fecha del Nº) + importe', v, true));
   // importe con centavos, un solo candidato en +-15 días (ej. descuento de documento del 25/06 y "01072026-G. de Echeq")
   pasada_(antBanco, eItems, b => Math.round(Math.abs(b.importe) * 100) % 100 !== 0,
     'Pendiente anterior: importe con centavos, único en +-15 días (revisar)', 15, true);
