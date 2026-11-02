@@ -377,6 +377,8 @@ const REGLAS_INICIALES = [
   ["1215", "Ambos", "", "GASTOS BANCARIOS", "Percepción IVA caja de seguridad"],
   ["5", "Ambos", "", "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente + IVA"],
   ["4", "Ambos", "", "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente sin acuerdo + IVA"],
+  ["504", "Ambos", "", "GASTOS BANCARIOS", "Ajuste de intereses por saldo deudor + IVA"],
+  ["7", "Ambos", "", "CHEQUES", "Acreditación cheque remesas"],
   ["1801", "Ambos", "", "GASTOS BANCARIOS", "Comisión servicio descubierto no autorizado + IVA"],
   ["2025", "Ambos", "", "PAGO PROVEEDORES", "Factura servicio Datanet"],
   ["2011", "Ambos", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Circuito cerrado (CCERR)"],
@@ -384,6 +386,7 @@ const REGLAS_INICIALES = [
   ["1479", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos Córdoba (DGR)"],
   ["1972", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Retención IIBB Tucumán"],
   ["4196", "Ambos", "PLAN", "PLAN DE AHORRO / TERMINAL", "Débito plan de ahorro (Chevrolet, Fiat, etc.)"],
+  ["4196", "Ambos", "", "DEBITOS AUTOMATICOS", "Débito automático de servicios (Claro, etc.)"],
   ["*", "Crédito", "LIQ COMER (PRISMA|CABAL|PAYWAY)", "COBRANZA TARJETAS", "Liquidación de tarjetas (Prisma, Cabal, Payway)"],
   ["*", "Crédito", "CCERR TARJETA NAR", "COBRANZA TARJETAS", "Liquidación Tarjeta Naranja (circuito cerrado)"],
   ["*", "Crédito", "TARJETA NARANJA", "COBRANZA TARJETAS", "Liquidación Tarjeta Naranja (Datanet)"]
@@ -3078,6 +3081,18 @@ function gastosAsiento_(banco, fbs) {
     const m = x.texto.match(/(\d{2})[\/-](\d{4})\s*$/);
     return !!m && b.length > 0 && (Number(m[1]) !== mesB.getMonth() + 1 || Number(m[2]) !== mesB.getFullYear());
   };
+  // líneas de gastos al debe del mismo día que suman un solo registro al haber (Macro JEA 30/09: nueve "NNNN-Gastos
+  // Bancarios 07/08/09-2026" que suman 1.810.941,41 = "RM-029304 / BANCO MACRO Nº 300920261"): se compensan en FBS
+  const porDia = new Map();
+  fbs.filter(x => x.match === null && x.origen === 'Mes' && x.importe > 0 && /GASTOS BANCARIOS|\bGTOS\b/i.test(x.texto))
+    .forEach(x => porDia.set(x.fecha.getTime(), (porDia.get(x.fecha.getTime()) || []).concat([x])));
+  porDia.forEach(l => {
+    if (l.length < 2) return;
+    const t = redondear_(l.reduce((s, x) => s + x.importe, 0));
+    const rm = fbs.filter(y => y.match === null && y.origen === 'Mes' && y.fecha.getTime() === l[0].fecha.getTime() &&
+      redondear_(Math.abs(y.importe + t)) <= TOLERANCIA);
+    if (rm.length === 1) compensar_(l.concat(rm), 'Gastos reclasificados y pagados en el mismo día (compensa en FBS)');
+  });
   // (o sin fecha, si el comentario termina ahí: "31082026-Gastos Bancarios"); no la anulación del asiento del mes anterior
   // ("35577-Anulacion Gastos Bancarios 07-2026"), que se compensa en FBS con el que lo reemplaza
   const f = fbs.filter(x => x.match === null && x.origen === 'Mes' &&
@@ -3379,7 +3394,9 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   pasada_(antBanco, eItems, POR_REF_, 'Pendiente anterior: referencia', v, false);
   // por nombre, no si el recibo trae escrita otra fecha (Macro JEA: "ALI, NATALIA BELEN" con Nº 24082026 es la
   // transferencia de NATALIA B del 24/08, no el pendiente de NATALIA CORREA de febrero)
-  pasada_(antBanco, eItems, (b, f) => POR_NOMBRE_(b, f) && !fechaEscritaContradice_(b, f, 5), 'Pendiente anterior: nombre', v, false);
+  // (la fecha escrita cuenta solo si no es la misma del registro: "Nº 14/0/-8...-29/09/2026" no dice nada)
+  pasada_(antBanco, eItems, (b, f) => POR_NOMBRE_(b, f) &&
+    !(f.fechaRef && dias_(f.fechaRef, f.fecha) !== 0 && fechaEscritaContradice_(b, f, 5)), 'Pendiente anterior: nombre', v, false);
   pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe),
     'Pendiente anterior: fecha del comentario + importe', v, true);
   // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
@@ -3800,8 +3817,8 @@ function gastosBancarios_(movs) {
       else if (t.includes('SELLOS')) g.sellos += d;
       else if (t.startsWith('INTERES')) g.int += d;
       else if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
-      else if (t.includes('IVA') || t.includes('I.V.A.')) { if (m.causal === '5' || m.causal === '4') g.iva105 += d; else g.iva += d; }
-      else if (m.causal === '5' || m.causal === '4') g.int += d;   // Macro: intereses de adelanto con y sin acuerdo
+      else if (t.includes('IVA') || t.includes('I.V.A.')) { if (['4', '5', '504'].includes(m.causal)) g.iva105 += d; else g.iva += d; }
+      else if (['4', '5', '504'].includes(m.causal)) g.int += d;   // Macro: intereses de adelanto con y sin acuerdo
       else g.com += d;
     }
   });
