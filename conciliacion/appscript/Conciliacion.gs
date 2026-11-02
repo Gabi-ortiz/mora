@@ -1681,7 +1681,8 @@ function precargarGviz_(id, hoja, consultas) {
 function leerBaseExterna_(id, hoja, ctas, desde, hasta) {
   let sh;
   try { sh = abrirBase_(id).getSheetByName(hoja); } catch (e) {
-    throw new Error('No pude abrir la base FBS (' + id + '): revisá el link en "' + HOJA.parametros + '" y que tengas acceso.');
+    throw new Error('No pude abrir la base FBS (' + id + '): revisá el link en "' + HOJA.parametros + '" y que tengas acceso. ' +
+      'Detalle de Google: ' + e.message);
   }
   if (!sh) throw new Error('La base FBS no tiene la hoja "' + hoja + '".');
   const cab = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(normalizar_);
