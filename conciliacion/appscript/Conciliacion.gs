@@ -524,7 +524,12 @@ function procesar_(ss) {
   const shExt = ss.getSheetByName(HOJA.extCierre);
   const extractoCierre = shExt && shExt.getLastRow() > 1 ? shExt.getRange(2, 1, shExt.getLastRow() - 1, 3).getValues() : null;
   asegurarReglasDelBanco_(ss, paramDe_(parametros, '^cuenta bancaria$'));
-  const reglas = leer(HOJA.reglas);
+  // las reglas del motor para el banco valen en todas las planillas (se cargan una vez acá y llegan a todos los archivos);
+  // la hoja "Reglas" de la planilla suma las propias y, si repite un código, manda la de la planilla
+  const reglasHoja = leer(HOJA.reglas);
+  const claveRegla = r => [String(r[0]).trim().replace(/^0+(?=\d)/, ''), normalizar_(r[1]).charAt(0), String(r[2] || '').trim()].join('|');
+  const enHoja = new Set(reglasHoja.slice(1).map(claveRegla));
+  const reglas = reglasHoja.concat(reglasDelBanco_(paramDe_(parametros, '^cuenta bancaria$')).filter(r => !enHoja.has(claveRegla(r))));
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null, posterioresO = null;
   if (idBase) {
