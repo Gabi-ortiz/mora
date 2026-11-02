@@ -3765,6 +3765,24 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     if (B().filter(x => x !== b && Math.abs(x.importe - b.importe) <= TOLERANCIA).length) return;
     unir_([b], pares[0], 'Pendientes: liquidación partida en FBS (confirmación + liquidación = crédito del banco) (revisar)');
   });
+  // pago de haberes en FBS en varias líneas iguales de un día ("BANCO GALICIA" x 40 del 06/07, 75.629.993,50) = los débitos
+  // de haberes del banco desde ese día hasta 10 días después (seis "SERVICIO ACREDITAMIENTO DE HABERES" del 06/07 al 13/07)
+  const gruposHab = new Map();
+  F().filter(f => f.importe < 0 && !/^R[CM]-/.test(f.texto)).forEach(f => {
+    const k = f.fecha.getTime() + '|' + normalizar_(f.texto);
+    gruposHab.set(k, (gruposHab.get(k) || []).concat([f]));
+  });
+  gruposHab.forEach(g => {
+    if (g.length < 3 || g.some(f => f.match !== null)) return;
+    const t = redondear_(g.reduce((x, f) => x + f.importe, 0));
+    const cands = B().filter(b => b.importe < 0 && /HABERES|SUELDO|REMUNERAC/i.test(b.texto) && b.fecha >= g[0].fecha &&
+      dias_(g[0].fecha, b.fecha) <= 10).sort((x, y) => x.fecha - y.fecha);
+    if (!cands.length || cands.length > 16) return;
+    for (let n = 1; n <= Math.min(10, cands.length); n++) {
+      const combo = primeraCombinacion_(cands, n, t);
+      if (combo) { unir_(combo, g, 'Pendientes: pago de haberes en FBS (' + g.length + ' líneas) = débitos de haberes del banco (revisar)'); return; }
+    }
+  });
   // RM a banco con fecha escrita = débitos pendientes de ese día (Galicia TURIN: "RM-389991 / BANCO GALICIA Nº 31/7/26"
   // 1.129.800 = tres "TRF INMED PROVEED ... Gigy Gregoret" de 376.600 del 31/07; "RM-389912 ... Nº 31070226" 100.000 =
   // Bessone 99.343,40 + 656,60): de a uno solo si es el único de ese importe en el día
