@@ -2779,7 +2779,10 @@ function combinacionesFechaEscrita_(banco, fbs) {
       desde(f, b) >= -3 && desde(f, b) <= 5).slice(0, 25);
     for (let n = especifico_(f.importe) ? 1 : 2; n <= 5 && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, f.importe);
-      if (combo && combo.some(b => b.cat === 'CHEQUES')) { unir_(combo, [f], 'Depósito de echeq acreditado en varias líneas (revisar)'); break; }
+      // (si FBS dice echeq, todas las líneas del banco tienen que ser echeq: "22082026-G. de Echeq" 8.000.000 no son los dos
+      // "G.DE CHEQUE ... BOL79605" de 4.000.000 del 27/08, que son cheques del depósito "8260064157-DP CHEQUES")
+      const soloEcheq = !/E-?CHEQ/i.test(f.texto) || combo && combo.every(b => /E-?CHEQ/i.test(b.texto));
+      if (combo && soloEcheq && combo.some(b => b.cat === 'CHEQUES')) { unir_(combo, [f], 'Depósito de echeq acreditado en varias líneas (revisar)'); break; }
     }
   });
 }
@@ -2823,7 +2826,93 @@ function pagosDelDia_(banco, fbs) {
       ajustes.push(a);
     }
   });
+  // si el día no da junto, por servicio (Galicia TURIN 19/08: cinco "PAGO DE SERVICIOS FCA PLAN" = "RM-390612 / BANCO
+  // GALICIA Nº 19082026" 29.998.000; el "OMINT" del mismo día va aparte): tres o más líneas, un solo pago exacto en +-4 días
+  const servicio = b => normalizar_(b.texto).split(/\s+/).slice(0, 4).join(' ');
+  const porServicio = new Map();
+  banco.forEach(b => {
+    if (b.match !== null || b.origen !== 'Mes') return;
+    const k = b.fecha.getTime() + '|' + b.causal + '|' + servicio(b) + '|' + (b.importe > 0);
+    porServicio.set(k, (porServicio.get(k) || []).concat([b]));
+  });
+  porServicio.forEach(g => {
+    if (g.length < 3 || g.some(b => b.match !== null)) return;
+    const t = redondear_(g.reduce((x, b) => x + b.importe, 0));
+    const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && Math.abs(f.importe - t) <= TOLERANCIA && dias_(fe(f), g[0].fecha) <= 4);
+    if (cands.length === 1) unir_(g, cands, 'Débitos del día del mismo servicio contra un pago con fecha escrita cercana (revisar)');
+  });
   return ajustes;
+}
+
+/**
+ * Haberes: el banco debita las acreditaciones del día y a veces anula parte (Galicia TURIN 07/08: "SERVICIO ACREDITAMIENTO
+ * DE HABERES" 21.530.498 y "ANULACION DEBITOS ACRED.HABERES" 2.120.487); el neto es la suma de los RM del mismo detalle
+ * ("RM-3908.. / BANCO GALICIA Nº 7/2026-07/08", diez líneas, 19.410.011), hasta 5 días después. Solo con un grupo posible.
+ */
+function haberesNetos_(banco, fbs) {
+  const dias = new Map();
+  banco.forEach(b => {
+    if (b.match !== null || b.origen !== 'Mes' || !/HABERES/i.test(b.texto)) return;
+    dias.set(b.fecha.getTime(), (dias.get(b.fecha.getTime()) || []).concat([b]));
+  });
+  const clave = f => f.texto.split(' / ').slice(1).join(' / ');
+  dias.forEach(l => {
+    const deb = l.filter(b => b.importe < 0), anu = l.filter(b => b.importe > 0 && /ANULACI/i.test(b.texto));
+    if (!deb.length || !anu.length) return;
+    const neto = redondear_(deb.concat(anu).reduce((x, b) => x + b.importe, 0));
+    const grupos = new Map();
+    fbs.filter(f => f.match === null && f.origen === 'Mes' && f.importe < 0 && /^RM-/.test(f.texto) && clave(f) &&
+      f.fecha >= deb[0].fecha && dias_(deb[0].fecha, f.fecha) <= 5).forEach(f => grupos.set(clave(f), (grupos.get(clave(f)) || []).concat([f])));
+    const ok = Array.from(grupos.values()).filter(g => Math.abs(redondear_(g.reduce((x, f) => x + f.importe, 0)) - neto) <= TOLERANCIA);
+    if (ok.length === 1) unir_(deb.concat(anu), ok[0], 'Haberes del día menos la anulación = pagos de FBS del mismo detalle (revisar)');
+  });
+}
+
+/**
+ * Operación con la fecha al principio del comentario ("1808-vta ch" y "1808-g. de echeq", siete líneas registradas el 31/08
+ * por 7.140.354,73): la suma es la de los créditos de cheques / descuento de documentos del banco de hasta 5 días antes o
+ * después de esa fecha (el echeq del 14/08 y cuatro "CREDITO DESCUENTO DOCUMENTO" del 18/08).
+ */
+function operacionDelDia_(banco, fbs) {
+  const grupos = new Map();
+  fbs.forEach(f => {
+    if (f.match !== null || f.origen !== 'Mes' || !/CH|CHEQ/i.test(f.texto)) return;
+    const m = f.texto.trim().match(/^(\d{2})(\d{2})\s*-/);
+    if (!m || Number(m[1]) < 1 || Number(m[1]) > 31 || Number(m[2]) < 1 || Number(m[2]) > 12) return;
+    const k = m[1] + m[2] + '|' + (f.importe > 0) + '|' + f.fecha.getTime();   // (las líneas de un mismo día de registro)
+    grupos.set(k, (grupos.get(k) || []).concat([f]));
+  });
+  grupos.forEach((g, k) => {
+    if (g.length < 2) return;
+    const t = redondear_(g.reduce((x, f) => x + f.importe, 0));
+    const ref = new Date(g[0].fecha.getFullYear(), Number(k.slice(2, 4)) - 1, Number(k.slice(0, 2)));
+    const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && (b.importe > 0) === (t > 0) &&
+      Math.abs(b.importe) <= Math.abs(t) + TOLERANCIA && dias_(ref, b.fecha) <= 5 && /CHEQ|DESCUENTO|DOCUMENTO/i.test(b.texto))
+      .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 20);
+    for (let n = 1; n <= Math.min(8, cands.length); n++) {
+      const combo = primeraCombinacion_(cands, n, t);
+      if (combo) { unir_(combo, g, 'Operación con la fecha al inicio del comentario: suma de las líneas = créditos del banco (revisar)'); break; }
+    }
+  });
+}
+
+/**
+ * Varias líneas de un mismo RM con distinto Nº ("RM-391163 / BANCO GALICIA Nº 4196576" 50.424.209,25 y "... Nº 4203554"
+ * 45.821.250,73) = un solo débito del banco por la suma ("PAGO TRANSFERENCIA CIG" 96.245.459,98), del día hasta 3 después.
+ */
+function lineasDeUnRm_(banco, fbs) {
+  const porRm = new Map();
+  fbs.forEach(f => {
+    const m = f.match === null && f.origen === 'Mes' && f.texto.match(/^(RM-\d+)\s*\//);
+    if (m) porRm.set(m[1] + '|' + (f.importe > 0), (porRm.get(m[1] + '|' + (f.importe > 0)) || []).concat([f]));
+  });
+  porRm.forEach(g => {
+    if (g.length < 2 || g.some(f => f.match !== null)) return;
+    const t = redondear_(g.reduce((x, f) => x + f.importe, 0)), d0 = g.reduce((m, f) => (f.fecha < m ? f.fecha : m), g[0].fecha);
+    const bs = banco.filter(b => b.match === null && b.origen === 'Mes' && Math.abs(b.importe - t) <= TOLERANCIA &&
+      b.fecha >= d0 && dias_(d0, b.fecha) <= 3);
+    if (bs.length === 1) unir_(bs, g, 'Líneas del mismo RM = un movimiento del banco por la suma (revisar)');
+  });
 }
 
 function agrupados_(banco, fbs) {
@@ -3203,6 +3292,8 @@ function conciliar_(banco, fbs) {
     '3. Fecha escrita en el comprobante + importe, acreditado hasta 5 días después', 60, true);
   pasada_(banco, fbs, MISMO_NUMERO_, '3. Número de cheque + importe', 45, true);
   combinacionesFechaEscrita_(banco, fbs);
+  haberesNetos_(banco, fbs);
+  lineasDeUnRm_(banco, fbs);
   pagosDelDia_(banco, fbs).forEach(a => ajustesTarjeta.push(a));
   pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   agrupados_(banco, fbs);
@@ -3211,6 +3302,7 @@ function conciliar_(banco, fbs) {
   compensacionesFbs_(fbs, true);
   // regla: sin CUIT / referencia / nombre, solo se cruza si coincide la fecha y el importe es específico (no redondo)
   pasada_(banco, fbs, b => especifico_(b.importe), '4. Fecha + importe específico', 0, true);
+  operacionDelDia_(banco, fbs);
   if (CRUZAR_REDONDO_UNICO_DIA) unicoDelDia_(banco, fbs);
   if (CRUZAR_REDONDO_UNICO_DIA >= 2) {
     // transferencias propias / FCI contra pases, fondos o registros "BANCO ..." de E, hasta 3 días, candidato único
@@ -3396,6 +3488,26 @@ const MISMO_ID_ = (b, f) => (b.cuit && b.cuit === f.cuit) || (b.dni && b.dni ===
 const POR_REF_ = (b, f) => b.ref.length >= 5 && ((f.valor && f.valor === b.ref) ||
   (f.texto + ' ' + f.ref + ' ' + (f.aux || '')).replace(/\./g, '').indexOf(b.ref) >= 0);
 const POR_NOMBRE_ = (b, f) => comparten_(b.nombre, f.nombre);
+
+/**
+ * Un recibo y un RM de la cuenta E con el mismo Nº del valor y el mismo importe al revés (Galicia TURIN: "RC-...377205 /
+ * TRONCONI" +5.000.000 y "RM-390198 / BANCO GALICIA Nº 23/07/-1453" -5.000.000): el RM revierte el recibo, se compensan en
+ * FBS. Solo si el par es único para ese Nº e importe.
+ */
+function mismoValorRcRm_(eItems) {
+  // (el Nº a veces viene solo: "23/07/-1453" en el RM, "Nº 23/07/-1453-BANCO GALICI(1103097)-06/08/2026" en el recibo)
+  const nro = f => String(f.aux || '').replace(/^Nº\s*/i, '').replace(/-[A-Z].*$/i, '').replace(/\.$/, '').trim();
+  const grupos = new Map();
+  eItems.forEach(f => {
+    if (f.match !== null || !nro(f) || !/^R[CM]-/.test(f.texto)) return;
+    const k = nro(f) + '|' + Math.abs(f.importe).toFixed(2);
+    grupos.set(k, (grupos.get(k) || []).concat([f]));
+  });
+  grupos.forEach(g => {
+    const rc = g.filter(f => f.importe > 0 && /^RC-/.test(f.texto)), rm = g.filter(f => f.importe < 0 && /^RM-/.test(f.texto));
+    if (rc.length === 1 && rm.length === 1) compensar_([rc[0], rm[0]], 'Compensa dentro de FBS: recibo revertido con un RM del mismo Nº (revisar)');
+  });
+}
 
 /**
  * Paso 2a: la cuenta E contra los pendientes de la conciliación anterior.
@@ -3617,14 +3729,35 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
   // crédito del banco contra un par de FBS (uno al debe y otro al haber, alguno de liquidación) que netea lo mismo; único
   B().filter(b => b.importe > 0 && especifico_(b.importe)).forEach(b => {
     if (b.match !== null) return;
-    const cerca = F().filter(f => (f.fecha - b.fecha) / 864e5 >= -10 && (f.fecha - b.fecha) / 864e5 <= 31);
+    // (o con la fecha de la liquidación escrita igual a la del crédito: "110103-liq.-. mc. 10/04" de julio y el crédito
+    // "ACREDITAMIENTO PRISMA-COMERCIOS" 148.531,50 del 10/04 = "Confirmación de Valores Agrupados" 440.672 - 292.140,50)
+    const cerca = F().filter(f => ((f.fecha - b.fecha) / 864e5 >= -10 && (f.fecha - b.fecha) / 864e5 <= 31) ||
+      (f.fechaRef && dias_(f.fechaRef, b.fecha) === 0) || /^CONFIRMACI/i.test(f.texto));
     const pares = [];
     cerca.filter(p => p.importe > 0).forEach(p => cerca.filter(q => q.importe < 0).forEach(q => {
       if (Math.abs(p.importe + q.importe - b.importe) <= TOLERANCIA && /LIQ|CONFIRMACI/i.test(p.texto + ' ' + q.texto)) pares.push([p, q]);
     }));
-    if (pares.length !== 1) return;
+    // (fuera de la ventana, la liquidación tiene que tener escrita la fecha del crédito)
+    const ok = pares.filter(([p, q]) => [p, q].some(f => (f.fecha - b.fecha) / 864e5 >= -10 && (f.fecha - b.fecha) / 864e5 <= 31 &&
+      !/^CONFIRMACI/i.test(f.texto)) || [p, q].some(f => /LIQ/i.test(f.texto) && f.fechaRef && dias_(f.fechaRef, b.fecha) === 0));
+    if (ok.length !== 1) return;
+    pares.splice(0, pares.length, ok[0]);
     if (B().filter(x => x !== b && Math.abs(x.importe - b.importe) <= TOLERANCIA).length) return;
     unir_([b], pares[0], 'Pendientes: liquidación partida en FBS (confirmación + liquidación = crédito del banco) (revisar)');
+  });
+  // RM a banco con fecha escrita = débitos pendientes de ese día (Galicia TURIN: "RM-389991 / BANCO GALICIA Nº 31/7/26"
+  // 1.129.800 = tres "TRF INMED PROVEED ... Gigy Gregoret" de 376.600 del 31/07; "RM-389912 ... Nº 31070226" 100.000 =
+  // Bessone 99.343,40 + 656,60): de a uno solo si es el único de ese importe en el día
+  F().filter(f => f.importe < 0 && rmBanco(f) && f.fechaRef).sort((x, y) => x.importe - y.importe).forEach(f => {
+    if (f.match !== null) return;
+    const cands = B().filter(b => b.importe < 0 && dias_(b.fecha, f.fechaRef) === 0 && Math.abs(b.importe) <= Math.abs(f.importe) + TOLERANCIA);
+    if (!cands.length || cands.length > 20) return;
+    const iguales = cands.filter(b => Math.abs(b.importe - f.importe) <= TOLERANCIA);
+    if (iguales.length === 1) { unir_(iguales, [f], 'Pendientes: pago a banco (RM) con la fecha del débito escrita (revisar)'); return; }
+    for (let n = 2; n <= Math.min(4, cands.length); n++) {
+      const combo = primeraCombinacion_(cands, n, f.importe);
+      if (combo) { unir_(combo, [f], 'Pendientes: pago a banco (RM) = débitos del día escrito en el Nº (revisar)'); return; }
+    }
   });
   // varias líneas de FBS del mismo día y comentario ("Canje de Valor - BANCO PCIA DE CORDOBA" 70.000 + 132.000 + 70.000 del
   // 14/09) que son todos los créditos pendientes de un mismo CUIT (las tres transferencias de LASCANO de agosto y septiembre)
@@ -3692,6 +3825,22 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     const dup = cs.filter(p => /duplicado/i.test(p.alerta || ''));
     const el = mismoDia.length === 1 ? mismoDia[0] : dup.length ? dup[0] : (cs.length === 1 && especifico_(r.importe) ? cs[0] : null);
     if (el) compensar_([r, el], 'Neteo S3 ↔ S4: pago a banco (RM) contra recibo' + (el.alerta ? ' duplicado' : '') + ' (revisar)');
+  });
+  // FBS ↔ FBS: RM a banco contra la liquidación de gastos del mismo día con centavos de diferencia ("RM-391672 / BANCO
+  // GALICIA Nº 31082026" 6.714.854,25 y "66128-Liq gastos bancarios 31/08/26" 6.714.854,22): los centavos van a ajuste
+  F().filter(r => r.importe < 0 && rmBanco(r)).forEach(r => {
+    if (r.match !== null) return;
+    const cs = F().filter(p => p.importe > 0 && /LIQ.*GASTOS|GASTOS.*LIQ/i.test(p.texto) && dias_(p.fecha, r.fecha) === 0 &&
+      Math.abs(p.importe + r.importe) <= 1);
+    if (cs.length !== 1) return;
+    const dif = redondear_(cs[0].importe + r.importe);
+    compensar_([r, cs[0]], 'Neteo S3 ↔ S4: pago a banco (RM) contra la liquidación de gastos' + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : '') + ' (revisar)');
+    if (Math.abs(dif) > 0.005) {
+      const a = partidaFbs_({ fecha: r.fecha, comentario: 'Diferencia de redondeo ' + r.texto.slice(0, 40) + ' - ajustar',
+        referencia: '', asiento: r.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+      a.cuenta = 'E';
+      fbs.push(a);
+    }
   });
   // FBS ↔ FBS: RM a banco igual a la suma de registros del mismo día
   F().filter(r => r.importe < 0 && rmBanco(r)).forEach(r => {
@@ -4206,6 +4355,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   const sinEncontrar = Object.keys(aBloquear).reduce((x, k) => x + aBloquear[k], 0);
   if (bloqueadas.length || sinEncontrar) avisos.push(bloqueadas.length + ' partidas desconciliadas a mano quedan pendientes (hoja "' + HOJA.desconciliados + '")' +
     (sinEncontrar ? '; partidas de la lista que ya no se encuentran en el mes (se cambiaron en FBS o en el extracto): ' + sinEncontrar + ', revisá la hoja' : '') + '.');
+  mismoValorRcRm_(eItems);
   cruzarAnteriores_(eItems, anterioresBanco, antFbsRestantes);
   const banco = bancoMes.concat(anterioresBanco);
   const fbs = eItems.concat(antFbsRestantes);
