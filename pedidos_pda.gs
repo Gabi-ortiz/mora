@@ -587,6 +587,10 @@ const CELDA_CATEGORIA_RESUMEN = 'M9';
 const GRIS_TEXTO = '#666666';
 const GRIS_LINEA = '#e0e0e0';
 const FONDO_TARJETA = '#f8f4f4';
+// Tarjetas del acto (adjudicados, clientes y T.P.): gris azulado suave para separarlas de los resultados.
+const FONDO_TARJETA_ACTO = '#eef2f8';
+const TEXTO_TARJETA_ACTO = '#4a5a73';
+const LINEA_TARJETA_ACTO = '#c9d3e3';
 const FONDO_TOTAL = '#efe7e7';
 const COLOR_TP = '#6d9eeb'; // títulos del cuadro TP en el RESUMEN (azul, para distinguirlo del de clientes)
 
@@ -697,29 +701,40 @@ function armarResumen(ss, listas) {
   sh.setRowHeight(7, 10);
   sh.setRowHeight(19, 14);
 
-  // --- Tarjetas (filas 4-6): lo más importante, a la vista.
+  // --- Tarjetas (filas 4-6): lo más importante, a la vista. Las tres primeras (el acto: adjudicados, clientes y
+  // T.P.) van en un gris azulado suave, separadas de los resultados (aprobados, netos y cumplimiento).
+  const tp = `${r.Responsable},"TP"`;
+  const noTp = `${r.Responsable},"<>TP"`;
+  const aprobados = (filtro) => `COUNTIFS(${acto},${aprob},${filtro})`;
+  const conAprobados = (filtro, total) =>
+    `=IF(N(${total})=0,"","Aprobados "&${aprobados(filtro)}&"   ·   "&TEXT(${aprobados(filtro)}/${total},"0%"))`;
   const tarjetas = [
-    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E14', '0'],
-    ['D', 'E', 'Aprobados del acto', `=COUNTIFS(${acto},${aprob})`,
-      '=IF(N(B5)=0,"","Conversión "&TEXT(D5/B5,"0%"))', '0'],
-    ['F', 'G', 'Netos del mes', '=I9', '="Del acto "&I10&"   ·   Anteriores "&I11', '0'],
-    ['H', 'I', 'Cumplimiento objetivo', '=I16',
+    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E14', '0', true],
+    ['D', 'E', 'Clientes del acto', `=COUNTIFS(${acto},${noTp})`, conAprobados(noTp, 'D5'), '0', true],
+    ['F', 'G', 'T.P. del acto', `=COUNTIFS(${acto},${tp})`, conAprobados(tp, 'F5'), '0', true],
+    ['H', 'I', 'Aprobados del acto', `=COUNTIFS(${acto},${aprob})`,
+      '=IF(N(B5)=0,"","Conversión "&TEXT(H5/B5,"0%"))', '0'],
+    ['J', 'K', 'Netos del mes', '=I9', '="Del acto "&I10&"   ·   Anteriores "&I11', '0'],
+    ['L', 'M', 'Cumplimiento objetivo', '=I16',
       '=IF(I13="","Sin objetivo cargado","Objetivo "&I13&"   ·   Categoría "&M9)', '0%'],
   ];
-  tarjetas.forEach(([c1, c2, titulo, valor, detalle, formato]) => {
-    sh.getRange(`${c1}4:${c2}6`).setBackground(FONDO_TARJETA)
+  tarjetas.forEach(([c1, c2, titulo, valor, detalle, formato, delActo]) => {
+    sh.getRange(`${c1}4:${c2}6`).setBackground(delActo ? FONDO_TARJETA_ACTO : FONDO_TARJETA)
       .setBorder(true, null, null, null, null, null, COLOR_ENCABEZADO, SpreadsheetApp.BorderStyle.SOLID_THICK);
-    sh.getRange(`${c1}4:${c2}4`).merge().setValue(titulo).setFontSize(9).setFontColor(GRIS_TEXTO)
-      .setHorizontalAlignment('center');
+    sh.getRange(`${c1}4:${c2}4`).merge().setValue(titulo).setFontSize(9)
+      .setFontColor(delActo ? TEXTO_TARJETA_ACTO : GRIS_TEXTO).setHorizontalAlignment('center');
     sh.getRange(`${c1}5:${c2}5`).merge().setFormula(valor).setFontSize(22).setFontWeight('bold')
       .setHorizontalAlignment('center').setNumberFormat(formato);
     sh.getRange(`${c1}6:${c2}6`).merge().setFormula(detalle).setFontSize(9).setFontColor(GRIS_TEXTO)
       .setHorizontalAlignment('center');
   });
+  // Línea fina entre el grupo del acto y los resultados.
+  sh.getRange('G4:G6').setBorder(null, null, null, true, null, null, LINEA_TARJETA_ACTO,
+    SpreadsheetApp.BorderStyle.SOLID_MEDIUM);
   sh.setRowHeight(5, 40);
 
   // Semáforo del cumplimiento (tarjeta y bloques).
-  const semaforo = [sh.getRange('H5'), sh.getRange('I16'), sh.getRange('M10')];
+  const semaforo = [sh.getRange('L5'), sh.getRange('I16'), sh.getRange('M10')];
   sh.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(1)
       .setFontColor('#38761d').setRanges(semaforo).build(),

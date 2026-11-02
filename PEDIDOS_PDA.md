@@ -599,3 +599,7 @@ Fiat (OWBSO040 del 22/10):
   licitación − bajas − TP. Los títulos del cuadro TP y de su proyección van en
   azul `COLOR_TP` (#6d9eeb). Al armar se borran las notas y se reinician las
   alturas de fila del armado anterior.
+- (02/11) Tarjetas del RESUMEN: seis tarjetas (B:M). Adjudicados, Clientes y
+  T.P. del acto (Responsable "TP"), con sus aprobados y el % de conversión,
+  van en gris azulado (#eef2f8), separadas por una línea de Aprobados, Netos
+  del mes y Cumplimiento objetivo. El semáforo de cumplimiento pasa a L5.
