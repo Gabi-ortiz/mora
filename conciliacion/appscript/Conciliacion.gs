@@ -3377,7 +3377,9 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   cuitMasCercano_(antBanco, eItems, 'Pendiente anterior: CUIT/DNI', v);
   pasada_(antBanco, eItems, MISMO_ID_, 'Pendiente anterior: CUIT/DNI', v, false);
   pasada_(antBanco, eItems, POR_REF_, 'Pendiente anterior: referencia', v, false);
-  pasada_(antBanco, eItems, POR_NOMBRE_, 'Pendiente anterior: nombre', v, false);
+  // por nombre, no si el recibo trae escrita otra fecha (Macro JEA: "ALI, NATALIA BELEN" con Nº 24082026 es la
+  // transferencia de NATALIA B del 24/08, no el pendiente de NATALIA CORREA de febrero)
+  pasada_(antBanco, eItems, (b, f) => POR_NOMBRE_(b, f) && !fechaEscritaContradice_(b, f, 5), 'Pendiente anterior: nombre', v, false);
   pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe),
     'Pendiente anterior: fecha del comentario + importe', v, true);
   // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
