@@ -374,6 +374,10 @@ const REGLAS_INICIALES = [
   ["1214", "Ambos", "", "GASTOS BANCARIOS", "IVA caja de seguridad"],
   ["1215", "Ambos", "", "GASTOS BANCARIOS", "Percepción IVA caja de seguridad"],
   ["5", "Ambos", "", "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente + IVA"],
+  ["4", "Ambos", "", "GASTOS BANCARIOS", "Intereses adelanto en cuenta corriente sin acuerdo + IVA"],
+  ["1801", "Ambos", "", "GASTOS BANCARIOS", "Comisión servicio descubierto no autorizado + IVA"],
+  ["2025", "Ambos", "", "PAGO PROVEEDORES", "Factura servicio Datanet"],
+  ["2011", "Ambos", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Circuito cerrado (CCERR)"],
   ["1802", "Ambos", "", "GASTOS BANCARIOS", "Comisión cheque consulta + IVA"],
   ["1479", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos Córdoba (DGR)"],
   ["1972", "Ambos", "", "IMPUESTOS Y RETENCIONES", "Retención IIBB Tucumán"],
@@ -2734,9 +2738,21 @@ function combinacionesFechaEscrita_(banco, fbs) {
       Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0)
       .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 25);   // los más grandes: los chicos son impuestos del día
     // importe redondo (ej. RM por 2.420.000 = comisión 2.000.000 + IVA 420.000 del día): solo de a dos
-    for (let n = 2; n <= (esp ? 4 : 2) && cands.length >= n; n++) {
+    let hecho = false;
+    for (let n = 2; n <= (esp ? 4 : 2) && cands.length >= n && !hecho; n++) {
       const combo = primeraCombinacion_(cands, n, f.importe);
-      if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); break; }
+      if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); hecho = true; }
+    }
+    // con importe específico, hasta 8 movimientos del mismo concepto del banco (Macro JEA: "RM-028459 / BANCO MACRO Nº
+    // 31/07/2026" 289.880 = siete "TEF DATANET BTOB" del 31/07)
+    if (hecho || !esp) return;
+    const porCausal = new Map();
+    cands.forEach(b => porCausal.set(b.causal, (porCausal.get(b.causal) || []).concat([b])));
+    for (const g of porCausal.values()) {
+      if (g.length < 5 || g.length > 12) continue;
+      let combo = null;
+      for (let n = 5; n <= Math.min(8, g.length) && !combo; n++) combo = primeraCombinacion_(g, n, f.importe);
+      if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); return; }
     }
   });
   // depósito de echeq (Chexa Santander "02092026-DEP ECHEQ"): el banco acredita cada cheque en su línea, desde 3 días antes
@@ -3516,6 +3532,28 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     }
   });
   unico(b => especifico_(b.importe), 62, TOLERANCIA, 'Pendientes: importe específico, único en +-62 días (revisar)');
+  // ajuste de FBS por un crédito del banco que quedó pendiente (Macro JEA: "Ajuste por error en Bco de Acreditación"
+  // 5.000.000 del 01/07 contra la transferencia del 17/06), aunque el importe sea redondo
+  unico((b, f) => /AJUSTE|ERROR|CORRIG/i.test(f.texto), 31, TOLERANCIA, 'Pendientes: ajuste de FBS por el mismo importe, único en +-31 días (revisar)');
+  // el mismo día, hasta $1 de diferencia y único de los dos lados (Macro JEA: "TEF DATANET PR GRUPO FINENSE" 469.397 y
+  // el recibo de RONCONI por 469.396,10): los centavos quedan como ajuste
+  unico((b, f) => dias_(b.fecha, f.fecha) === 0 && especifico_(b.importe), 0, 1, 'Pendientes: mismo día, importe con centavos de diferencia (revisar)');
+  // el mismo importe específico repetido en el mes, la misma cantidad de veces en el banco y en FBS (Macro JEA: cuatro
+  // "TEF DATANET PR FCA" de 23.929.269 y cuatro recibos): se cruzan en orden de fecha
+  const porImporte = new Map();
+  B().concat(F()).forEach(x => {
+    if (x.match !== null || !especifico_(x.importe)) return;
+    const k = Math.round(x.importe * 100);
+    if (!porImporte.has(k)) porImporte.set(k, { b: [], f: [] });
+    porImporte.get(k)[x.lado === 'BANCO' ? 'b' : 'f'].push(x);
+  });
+  porImporte.forEach(({ b, f }) => {
+    if (b.length < 2 || b.length !== f.length) return;
+    const orden = (x, y) => x.fecha - y.fecha;
+    b.sort(orden); f.sort(orden);
+    if (b.some((x, i) => dias_(x.fecha, f[i].fecha) > 31)) return;
+    b.forEach((x, i) => unir_([x], [f[i]], 'Pendientes: mismo importe repetido en el mes, en orden de fecha (revisar)'));
+  });
   unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 3, TOLERANCIA,
     'Pendientes: transferencia propia contra pase de E, importe único en +-3 días (revisar)');
   // hasta 31 días: si hay más de una transferencia propia por ese importe, vale la única del mismo mes que el registro de E
@@ -3737,8 +3775,8 @@ function gastosBancarios_(movs) {
       else if (t.includes('SELLOS')) g.sellos += d;
       else if (t.startsWith('INTERES')) g.int += d;
       else if (t.includes('PERCEP') || t.includes('IVA_PER')) g.perc += d;
-      else if (t.includes('IVA') || t.includes('I.V.A.')) { if (m.causal === '5') g.iva105 += d; else g.iva += d; }
-      else if (m.causal === '5') g.int += d;
+      else if (t.includes('IVA') || t.includes('I.V.A.')) { if (m.causal === '5' || m.causal === '4') g.iva105 += d; else g.iva += d; }
+      else if (m.causal === '5' || m.causal === '4') g.int += d;   // Macro: intereses de adelanto con y sin acuerdo
       else g.com += d;
     }
   });
