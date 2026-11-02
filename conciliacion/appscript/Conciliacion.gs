@@ -1132,7 +1132,7 @@ function observacion_(p) {
   if (p.origen === 'Arrastre') return 'Pendiente de meses anteriores' + (p.cuenta === 'O' ? ' (sigue sin confirmar en O)' : '');
   if (p.lado === 'BANCO') return p.cat === 'A IDENTIFICAR' ? 'Concepto del banco sin identificar' : 'Registrar en FBS';
   if (/Diferencia asiento gastos/.test(p.texto)) return p.explicacion || 'Revisar asiento de gastos bancarios';
-  if (p.cuenta === 'O') return 'No confirmado (cuenta O)';
+  if (p.cuenta === 'O') return 'No confirmado (cuenta O)' + (p.obs ? ': ' + p.obs : '');
   if (p.cuenta === 'E') return 'Pendiente en cuenta E: posible error de registración, revisar';
   return '';
 }
@@ -2301,6 +2301,21 @@ function netear_(lista) {
   });
   let resto = libres.filter(x => x.match === null);
   if (resto.length > 1 && Math.abs(resto.reduce((x, p) => x + p.importe, 0)) <= TOLERANCIA) { resto.forEach(usar); resto = []; }
+  // un ingreso pasado a E en parte (Galicia JEA: depósito "75534" de 18.343.494,66 en O y 21 cheques pasados a E por
+  // 16.804.812,66): los pases quedan confirmados y del ingreso queda sin confirmar solo la diferencia
+  const signo = x => x.importe > 0;
+  const solos = resto.filter(x => x.origen === 'Mes');
+  const uno = solos.filter(x => signo(x)), otros = solos.filter(x => !signo(x));
+  [[uno, otros], [otros, uno]].forEach(([a, b]) => {
+    if (a.length !== 1 || b.length < 2) return;
+    const sumaB = b.reduce((x, p) => x + p.importe, 0);
+    if (Math.abs(sumaB) >= Math.abs(a[0].importe) - TOLERANCIA) return;
+    b.forEach(x => { x.match = []; x.metodo = 'Confirmado en O (pase parcial del ingreso)'; });
+    a[0].importeOriginal = a[0].importe;
+    a[0].importe = redondear_(a[0].importe + sumaB);
+    a[0].obs = 'Sin confirmar: ' + formato_(Math.abs(a[0].importe)) + ' de ' + formato_(Math.abs(a[0].importeOriginal)) + ' (el resto se pasó a E)';
+  });
+  resto = resto.filter(x => x.match === null);
   // pendiente anterior cargado sin centavos (ej. 456.048.014 en la lista y 456.048.014,26 en FBS): mismo comprobante,
   // hasta $1 de diferencia
   resto.filter(a => a.origen === 'Arrastre').forEach(a => {
@@ -2431,7 +2446,7 @@ function partidasE_(asientosE, asientosO) {
   // "25082026" con los gastos): el banco acredita el neto
   const opDe = a => {
     const t = String(a.comentario || '').trim();
-    const m = t.match(/^(\d{6,9})(\s*-|$)/);
+    const m = t.match(/^(\d{5,9})(\s*-|$)/);   // (Galicia JEA: "45118-[Depósito a Banco ...]", seis líneas)
     return m && !/GASTOS|LIQ/i.test(t) ? 'OP ' + m[1] : null;
   };
   const cuentaOp = new Map();
@@ -2693,10 +2708,12 @@ function combinacionesFechaEscrita_(banco, fbs) {
     // todas las líneas con el mismo comentario (Galicia JEA: "872-Vta Cheques 24/08", 3.000.000 + 3 x 7.000.000 = el
     // "Credito Descuento Documento" de 24.000.000 del 24/08), aunque sean más de 5 o el importe sea redondo
     if (!corrida) {
+      // (o el mismo detalle después del comprobante: seis "RM-0289.. / BANCO GALICIA Nº 8/2026-04/09." = haberes del 04/09)
+      const clave = f => (/^R[MC]-/.test(f.texto) && f.texto.split(' / ').slice(1).join(' / ')) || f.texto;
       const porTexto = new Map();
-      cands.forEach(f => porTexto.set(f.texto, (porTexto.get(f.texto) || []).concat([f])));
+      cands.forEach(f => porTexto.set(clave(f), (porTexto.get(clave(f)) || []).concat([f])));
       const mismo = Array.from(porTexto.values()).filter(l => l.length > 1 && redondear_(Math.abs(total(l) - t)) <= TOLERANCIA &&
-        fbs.filter(f => f.match === null && f.texto === l[0].texto).length === l.length);
+        fbs.filter(f => f.match === null && clave(f) === clave(l[0])).length === l.length);
       if (mismo.length === 1) { unir_(u, mismo[0], 'Suma de las líneas con el mismo comentario y fecha escrita (revisar)'); return; }
     }
     for (let n = u.length > 1 ? 1 : 2; n <= (esp ? 5 : 3) && cands.length >= n; n++) {
@@ -3155,7 +3172,7 @@ function conciliar_(banco, fbs) {
 
 /**
  * Operación de FBS con varias líneas del mismo número ("03072026-G. de Echeq": seis echeqs depositados) en la que cada
- * línea tiene su propio movimiento en el banco, hasta 10 días de diferencia: se cruza línea por línea (el más cercano en
+ * línea tiene su propio movimiento en el banco, hasta 15 días de diferencia: se cruza línea por línea (el más cercano en
  * fecha), antes de buscar combinaciones por suma, que con muchos importes pueden dar con otra suma igual por casualidad.
  */
 function lineasOp_(banco, fbs) {
@@ -3164,7 +3181,7 @@ function lineasOp_(banco, fbs) {
     const usados = new Set();
     for (const l of p.lineas) {
       const cands = banco.filter(b => b.match === null && !usados.has(b) && Math.abs(b.importe - l.importe) <= TOLERANCIA &&
-        dias_(b.fecha, l.fecha) <= 10);
+        dias_(b.fecha, l.fecha) <= 15);
       if (!cands.length) return;
       usados.add(cands.sort((x, y) => dias_(x.fecha, l.fecha) - dias_(y.fecha, l.fecha))[0]);
     }
@@ -3176,13 +3193,14 @@ function lineasOp_(banco, fbs) {
  * Boletas de depósito de cheques (Galicia: "G.de Cheque Q00125723 Bol78572487", un crédito por cheque): FBS registra la
  * boleta entera en un solo registro ("441353-[Depósito a Banco ...]" 6.547.544,08) o con varias líneas del mismo número
  * ("274425-[Depósito a Banco ...]", que pueden ser dos boletas del mismo día). Se suman los cheques de cada boleta (y de
- * hasta 3 boletas del mismo día) y se cruzan contra un registro de FBS con ese total, hasta 10 días de diferencia; solo si
+ * hasta 3 boletas del mismo día) y se cruzan contra un registro de FBS con ese total, hasta 15 días de diferencia; solo si
  * hay un único registro posible.
  */
 function boletas_(banco, fbs) {
   const porDia = new Map();
   banco.forEach(b => {
-    const m = b.match === null && b.importe > 0 && String(b.texto).match(/\bBol\s*(\d{5,})/i);
+    // ("G.de Cheque Q00125723 Bol78572487" o "Acreditamiento Canje Galicia 62188099BOL73836265")
+    const m = b.match === null && b.importe > 0 && String(b.texto).match(/BOL\s*(\d{5,})/i);
     if (!m) return;
     const d = b.fecha.getTime();
     if (!porDia.has(d)) porDia.set(d, new Map());
@@ -3203,7 +3221,7 @@ function boletas_(banco, fbs) {
     combos.forEach(items => {
       if (items.length < 2 || items.some(b => b.match !== null)) return;
       const total = redondear_(items.reduce((x, b) => x + b.importe, 0));
-      const fs = fbs.filter(f => f.match === null && f.importe > 0 && Math.abs(f.importe - total) <= TOLERANCIA && dias_(f.fecha, items[0].fecha) <= 10);
+      const fs = fbs.filter(f => f.match === null && f.importe > 0 && Math.abs(f.importe - total) <= TOLERANCIA && dias_(f.fecha, items[0].fecha) <= 15);
       if (fs.length === 1) unir_(items, fs, 'Boleta de depósito de cheques (suma de la boleta)');
     });
   });
