@@ -67,10 +67,10 @@ const SECTORES = [
 
 const VENTANA_DIAS = 10;
 const VENTANA_ID = 31;
-const TOLERANCIA = 0.02;
+const TOLERANCIA = 0.02 + 1e-6;   // 2 centavos (el millonésimo absorbe el error de redondeo de las sumas: 221.591.279,30 - 221.591.279,28)
 const NUM_FMT = '#,##0.00;[Red]-#,##0.00';
 const CAUSALES_IMPUESTOS = ['1684', '1685', '1297', '4145', '1479', '1972',   // Macro: van al asiento mensual de gastos
-  '907176', '907376', '917376', '907173', '905130',                             // Galicia: imp. déb./créd., IIBB, sellos
+  '907176', '907376', '917376', '917235', '907173', '905130',                   // Galicia: imp. déb./créd., IIBB, sellos
   '4637', '4633', '9637', '9633', '1384', '1387', '6387', '566'];              // Santander: imp. déb./créd. (y anulaciones), SIRCREB, Tucumán
 const PALABRAS_VACIAS = new Set(['SA', 'SRL', 'SAS', 'DE', 'LA', 'EL', 'BANCO', 'MACRO', 'TRANSF', 'VAR', 'VARIOS',
   'CUO', 'CUOTAS', 'FAC', 'FACTURAS', 'TEF', 'DATANET', 'ING', 'CIRC', 'CERRADO', 'CCERR']);
@@ -118,6 +118,7 @@ const REGLAS_GALICIA = [
   ["907176", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre débitos"],
   ["907376", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto Ley 25.413 sobre créditos"],
   ["917376", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Devolución impuesto Ley 25.413"],
+  ["917235", "Crédito", "", "IMPUESTOS Y RETENCIONES", "Devolución impuesto Ley 25.413 sobre débitos"],
   ["907173", "Débito", "", "IMPUESTOS Y RETENCIONES", "Ingresos brutos s/ créditos (SIRCREB / Tucumán)"],
   ["905130", "Débito", "", "IMPUESTOS Y RETENCIONES", "Impuesto de sellos"],
   ["907171", "Débito", "", "GASTOS BANCARIOS", "IVA 21% sobre comisiones"],
@@ -2624,7 +2625,7 @@ function pasada_(banco, fbs, criterio, metodo, ventana, unico) {
     if (b.match !== null) return;
     const k = Math.round(b.importe), cands = [];
     [k - 1, k, k + 1].forEach(kk => (libres.get(kk) || []).forEach(f => {
-      if (f.match === null && Math.abs(f.importe - b.importe) <= TOLERANCIA && distancia_(b, f) <= ventana && criterio(b, f)) cands.push(f);
+      if (f.match === null && redondear_(Math.abs(f.importe - b.importe)) <= TOLERANCIA && distancia_(b, f) <= ventana && criterio(b, f)) cands.push(f);
     }));
     if (!cands.length) return;
     if (unico && cands.length > 1) {
@@ -2689,6 +2690,15 @@ function combinacionesFechaEscrita_(banco, fbs) {
       Math.abs(f.importe) <= Math.abs(t) + TOLERANCIA && (corrida ? !!f.fechaRef && despues(f.fechaRef.getTime(), d)
         : (esp ? fechasFbs(f) : [f.fechaRef && f.fechaRef.getTime()]).indexOf(d) >= 0))
       .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 25);
+    // todas las líneas con el mismo comentario (Galicia JEA: "872-Vta Cheques 24/08", 3.000.000 + 3 x 7.000.000 = el
+    // "Credito Descuento Documento" de 24.000.000 del 24/08), aunque sean más de 5 o el importe sea redondo
+    if (!corrida) {
+      const porTexto = new Map();
+      cands.forEach(f => porTexto.set(f.texto, (porTexto.get(f.texto) || []).concat([f])));
+      const mismo = Array.from(porTexto.values()).filter(l => l.length > 1 && redondear_(Math.abs(total(l) - t)) <= TOLERANCIA &&
+        fbs.filter(f => f.match === null && f.texto === l[0].texto).length === l.length);
+      if (mismo.length === 1) { unir_(u, mismo[0], 'Suma de las líneas con el mismo comentario y fecha escrita (revisar)'); return; }
+    }
     for (let n = u.length > 1 ? 1 : 2; n <= (esp ? 5 : 3) && cands.length >= n; n++) {
       const combo = primeraCombinacion_(cands, n, t);
       if (combo) {
@@ -2724,6 +2734,48 @@ function combinacionesFechaEscrita_(banco, fbs) {
       if (combo && combo.some(b => b.cat === 'CHEQUES')) { unir_(combo, [f], 'Depósito de echeq acreditado en varias líneas (revisar)'); break; }
     }
   });
+}
+
+/**
+ * Débitos del mismo concepto en un día (Galicia JEA: 69 "Deb. Autom. De Serv. FIAT PLAN" del 10/08) pagados en FBS con
+ * un solo registro de fecha escrita cercana ("RM-028574 / BANCO GALICIA Nº 13082026" 43.497.264,95), hasta 4 días antes
+ * o después y hasta $1 de diferencia (los centavos quedan como "Diferencia de redondeo ... - ajustar"). Por fecha, el
+ * registro más cercano.
+ */
+function pagosDelDia_(banco, fbs) {
+  const ajustes = [], grupos = new Map();
+  banco.forEach(b => {
+    if (b.match !== null || b.origen !== 'Mes') return;
+    const k = b.fecha.getTime() + '|' + b.causal + '|' + (b.importe > 0);
+    grupos.set(k, (grupos.get(k) || []).concat([b]));
+  });
+  // fecha escrita o, si no se entiende ("Nº 3108206"), la del registro
+  const fe = f => f.fechaRef || f.fecha;
+  Array.from(grupos.values()).filter(g => g.length > 1).sort((x, y) => x[0].fecha - y[0].fecha).forEach(g0 => {
+    if (g0.some(b => b.match !== null)) return;
+    // los débitos rechazados el mismo día ("Rechazo De Debito Automatico" por el mismo importe) no se pagaron: quedan afuera
+    // (se netean después con su rechazo)
+    const rech = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.importe > 0) !== (g0[0].importe > 0) &&
+      x.fecha.getTime() === g0[0].fecha.getTime());
+    const g = g0.slice();
+    rech.forEach(x => { const i = g.findIndex(b => Math.abs(b.importe + x.importe) < 0.005); if (i >= 0) g.splice(i, 1); });
+    if (g.length < 2) return;
+    const t = redondear_(g.reduce((x, b) => x + b.importe, 0));
+    if (!especifico_(t)) return;
+    const cands = fbs.filter(f => f.match === null && f.origen === 'Mes' && (f.importe > 0) === (t > 0) &&
+      Math.abs(f.importe - t) <= 1 && dias_(fe(f), g[0].fecha) <= 4)
+      .sort((x, y) => dias_(fe(x), g[0].fecha) - dias_(fe(y), g[0].fecha) || Math.abs(x.importe - t) - Math.abs(y.importe - t));
+    if (!cands.length) return;
+    const f = cands[0], dif = redondear_(t - f.importe);
+    unir_(g, [f], 'Débitos del día contra un pago con fecha escrita cercana' + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : '') + ' (revisar)');
+    if (Math.abs(dif) > 0.005) {
+      const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.slice(0, 40) + ' - ajustar',
+        referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+      a.cuenta = 'E';
+      ajustes.push(a);
+    }
+  });
+  return ajustes;
 }
 
 function agrupados_(banco, fbs) {
@@ -2775,7 +2827,11 @@ function reversionesFbs_(fbs) {
   // anulaciones: "Anulacion As ..." contra el registro anulado (del mes o de un pendiente anterior), mismo importe opuesto
   fbs.filter(a => a.match === null && /ANULA/i.test(a.texto)).forEach(a => {
     const o = fbs.find(x => x !== a && x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA && dias_(x.fecha, a.fecha) <= 60);
-    if (o) compensar_([a, o], 'Compensa dentro de FBS (anulación)');
+    if (o) { compensar_([a, o], 'Compensa dentro de FBS (anulación)'); return; }
+    // hasta $1 de diferencia, con un solo candidato del mes (anulación del asiento de gastos de julio, 3.620.767,30, y el RM
+    // que lo reemplaza, 3.620.767,23): los centavos van a la diferencia de control
+    const os = fbs.filter(x => x !== a && x.match === null && x.origen === 'Mes' && Math.abs(x.importe + a.importe) <= 1 && dias_(x.fecha, a.fecha) <= 60);
+    if (os.length === 1) compensar_([a, os[0]], 'Compensa dentro de FBS (anulación, dif. ' + formato_(redondear_(a.importe + os[0].importe)) + ') (revisar)');
   });
   // correcciones ("CORRIGE ERROR IMP CBLE" 8.094.000 contra el recibo de 8.094.000 cargado de más): solo con un candidato
   fbs.filter(a => a.match === null && /CORRIG|REVIERT|REVERS|CONTRAASIENTO|CONTRA ASIENTO/i.test(a.texto)).forEach(a => {
@@ -2981,13 +3037,22 @@ function gastosAsiento_(banco, fbs) {
   // principio del comentario (JEA: "33107202-GASTOS 07/2026" o "31082026-Gastos Bancarios 08-2026"), o uno por quincena
   // (Chexa Macro: "24147126-Gtos 1° Q 07/2026" y "24107226-Gtos 2° Q 07/2026"); no las "Liq ... gastos
   // bancarios", que son otros registros
-  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-]\d{4}/.test(x.texto.toUpperCase()) &&
-    !/LIQ/.test(x.texto.toUpperCase()));
+  // (o sin fecha, si el comentario termina ahí: "31082026-Gastos Bancarios"); no la anulación del asiento del mes anterior
+  // ("35577-Anulacion Gastos Bancarios 07-2026"), que se compensa en FBS con el que lo reemplaza
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' &&
+    /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)(\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-]\d{4}|\s*$)/.test(x.texto.toUpperCase().trim()) &&
+    !/LIQ|ANUL/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
   // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
   // asiento de este mes: así se limpia sola, sin que nadie la toque
   fbs.filter(x => x.match === null && x.origen === 'Arrastre' && /^Diferencia asiento gastos/.test(x.texto)).forEach(x => f.push(x));
-  const dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
+  let dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
+  // parte de los gastos registrada aparte, por el mismo total (Galicia JEA: comisiones, IVA e intereses con la factura del
+  // banco, "RM-028873 / BANCO GALICIA Nº 31082026" 8.699.778,83): si hay un único registro así en el mes, entra en el cruce
+  if (Math.abs(dif) > TOLERANCIA) {
+    const resto = fbs.filter(x => x.match === null && x.origen === 'Mes' && f.indexOf(x) < 0 && Math.abs(x.importe - dif) <= 1);
+    if (resto.length === 1) { f.push(resto[0]); dif = redondear_(dif - resto[0].importe); }
+  }
   unir_(b, f, 'Asiento gastos bancarios (dif. ' + formato_(dif) + ')');
   let ajuste = null;
   if (Math.abs(dif) > TOLERANCIA) {
@@ -3062,6 +3127,7 @@ function conciliar_(banco, fbs) {
     '3. Fecha escrita en el comprobante + importe, acreditado hasta 5 días después', 60, true);
   pasada_(banco, fbs, MISMO_NUMERO_, '3. Número de cheque + importe', 45, true);
   combinacionesFechaEscrita_(banco, fbs);
+  pagosDelDia_(banco, fbs).forEach(a => ajustesTarjeta.push(a));
   pasada_(banco, fbs, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
   agrupados_(banco, fbs);
   const gastos = gastosAsiento_(banco, fbs);
@@ -3181,7 +3247,9 @@ function mismaCantidad_(banco, fbs, d) {
     }
     if (bs.length < 2 || bs.length !== fs.length) return;
     // importe redondo: solo registros que no son de personas (no recibos) y con el mismo detalle ("BANCO GALICIA Nº ...")
-    const detalle = f => (f.texto.split(' / ').slice(1).join(' / ') || f.texto).replace(/Nº.*$/, '').replace(/\s+/g, ' ').trim().toUpperCase();
+    // (depósitos "64637-[Depósito a Banco ...]" y "64905-[Depósito a Banco ...]": el número de boleta no cuenta)
+    const detalle = f => (f.texto.split(' / ').slice(1).join(' / ') || f.texto).replace(/Nº.*$/, '').replace(/^\d+-(?=\[DEP)/i, '')
+      .replace(/\s+/g, ' ').trim().toUpperCase();
     // (o pagos RM de banco a banco: "RM-388981 / BANCO PATAGONIA Nº ..." y "RM-388967 / BANCO GALICIA Nº ...")
     if (!especifico_(b.importe) && fs.some(f => /^RC-/.test(f.texto) ||
       (detalle(f) !== detalle(fs[0]) && !(/^RM-/.test(f.texto) && /^BANCO /i.test(detalle(f)))))) return;
@@ -3371,6 +3439,15 @@ function netearPendientesBanco_(items) {
     const metodo = 'Neteo S1 ↔ S2: anulación del banco y el movimiento anulado';
     [a, b].forEach(x => { x.match = []; x.metodo = metodo; });
     CRUCES_.push({ metodo, banco: [a, b], fbs: [] });
+  });
+  // transferencia que entra y sale el mismo día, mismo CUIT e importe (Galicia JEA: "Credito Transferencia Coelsa Diego
+  // Zagaglia" y "Trf Inmed Proveed Diego Zagaglia" del 07/08): no pasa por FBS
+  items.filter(a => a.match === null && a.importe > 0 && a.cuit).forEach(a => {
+    const b = items.filter(x => x.match === null && x.cuit === a.cuit && Math.abs(x.importe + a.importe) < 0.005 && dias_(x.fecha, a.fecha) === 0);
+    if (b.length !== 1) return;
+    const metodo = 'Neteo S1 ↔ S2: entra y sale el mismo día (mismo CUIT e importe) (revisar)';
+    [a, b[0]].forEach(x => { x.match = []; x.metodo = metodo; });
+    CRUCES_.push({ metodo, banco: [a, b[0]], fbs: [] });
   });
 }
 
@@ -3609,14 +3686,14 @@ function gastosBancarios_(movs) {
   const impDe = (m, t, d) => {
     g.imp += d;
     if (['1685', '907376', '917376', '4637', '9637'].includes(m.causal) || /CR[EÉ]D|S\/CR\b/.test(t)) g.impCr += d;
-    else if (['1684', '907176', '4633', '9633'].includes(m.causal) || /D[EÉ]B|S\/DB\b/.test(t)) g.impDb += d;
+    else if (['1684', '907176', '917235', '4633', '9633'].includes(m.causal) || /D[EÉ]B|S\/DB\b/.test(t)) g.impDb += d;
   };
   // el IVA de una comisión que se registra aparte (Patagonia "COMISION POR CONVENIOS") no va al asiento de gastos
   const ivaDeOtra = x => /^IVA/i.test(x.concepto) && movs.some(c => c !== x && c.cat !== 'GASTOS BANCARIOS' && /^COMISION/i.test(c.concepto) &&
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   movs.filter(m => !ivaDeOtra(m)).forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
-    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633', '9637', '9633'].includes(m.causal)) impDe(m, t, d);
+    if (['1684', '1685', '907176', '907376', '917376', '917235', '4637', '4633', '9637', '9633'].includes(m.causal)) impDe(m, t, d);
     else if (['1384', '1387', '6387'].includes(m.causal)) g.sircreb += d;   // Santander
     else if (m.causal === '566') g.tuc += d;        // Santander
     else if (m.causal === '907173') { if (t.includes('TUCUMAN')) g.tuc += d; else g.sircreb += d; }
