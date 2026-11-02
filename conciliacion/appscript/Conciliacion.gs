@@ -349,6 +349,8 @@ const REGLAS_INICIALES = [
   ["1693", "Ambos", "", "SUELDOS", "Pago de remuneraciones"],
   ["23", "Ambos", "", "DEBITOS AUTOMATICOS", "Débito automático (seguros, peajes, cámara)"],
   ["1735", "Ambos", "", "DEPOSITOS EN EFECTIVO", "Interdepósito en efectivo"],
+  ["1494", "Ambos", "", "CHEQUES", "Depósito canje interno"],
+  ["560", "Ambos", "", "GASTOS BANCARIOS", "Comisión interdepósito de cheques + IVA"],
   ["4061", "Ambos", "", "FINANCIACION / PRESTAMOS", "Transf. 'Presta' Banco del Sol"],
   ["4066", "Ambos", "", "A IDENTIFICAR", "Transf. Varios VAZCAR SAS"],
   ["3862", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transf. MacrOnline 'CCDO DIST T'"],
@@ -3070,15 +3072,26 @@ function gastosAsiento_(banco, fbs) {
   // principio del comentario (JEA: "33107202-GASTOS 07/2026" o "31082026-Gastos Bancarios 08-2026"), o uno por quincena
   // (Chexa Macro: "24147126-Gtos 1° Q 07/2026" y "24107226-Gtos 2° Q 07/2026"); no las "Liq ... gastos
   // bancarios", que son otros registros
+  // el asiento de otro mes ("28187-Gastos Bancarios 07-2026" cargado en agosto) no es el de este mes
+  const mesB = b.reduce((m, x) => (x.fecha > m ? x.fecha : m), b.length ? b[0].fecha : new Date(0));
+  const deOtroMes = x => {
+    const m = x.texto.match(/(\d{2})[\/-](\d{4})\s*$/);
+    return !!m && b.length > 0 && (Number(m[1]) !== mesB.getMonth() + 1 || Number(m[2]) !== mesB.getFullYear());
+  };
   // (o sin fecha, si el comentario termina ahí: "31082026-Gastos Bancarios"); no la anulación del asiento del mes anterior
   // ("35577-Anulacion Gastos Bancarios 07-2026"), que se compensa en FBS con el que lo reemplaza
   const f = fbs.filter(x => x.match === null && x.origen === 'Mes' &&
     /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)(\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-]\d{4}|\s*$)/.test(x.texto.toUpperCase().trim()) &&
-    !/LIQ|ANUL/.test(x.texto.toUpperCase()));
+    !/LIQ|ANUL/.test(x.texto.toUpperCase()) && !deOtroMes(x));
   if (!b.length || !f.length) return null;
   // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
-  // asiento de este mes: así se limpia sola, sin que nadie la toque
-  fbs.filter(x => x.match === null && x.origen === 'Arrastre' && /^Diferencia asiento gastos/.test(x.texto)).forEach(x => f.push(x));
+  // asiento de este mes: así se limpia sola, sin que nadie la toque. Si FBS la registró aparte por el mismo importe (Macro
+  // JEA: "RM-028895 / BANCO MACRO Nº 72026" 176.139,70), se compensa con ese registro
+  fbs.filter(x => x.match === null && x.origen === 'Arrastre' && /^Diferencia asiento gastos/.test(x.texto)).forEach(x => {
+    const reg = fbs.filter(y => y.match === null && y.origen === 'Mes' && f.indexOf(y) < 0 && Math.abs(y.importe + x.importe) <= 1);
+    if (reg.length === 1) compensar_([x, reg[0]], 'Diferencia de gastos del mes anterior, registrada en FBS');
+    else f.push(x);
+  });
   let dif = redondear_(b.reduce((s, x) => s + x.importe, 0) - f.reduce((s, x) => s + x.importe, 0));
   // parte de los gastos registrada aparte, por el mismo total (Galicia JEA: comisiones, IVA e intereses con la factura del
   // banco, "RM-028873 / BANCO GALICIA Nº 31082026" 8.699.778,83): si hay un único registro así en el mes, entra en el cruce
@@ -3515,7 +3528,9 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
   const F = () => fbs.concat(oPend).filter(x => x.match === null && !x.desfasado && !/^Diferencia (de redondeo|asiento gastos)/.test(x.texto));
   const rmBanco = f => /^RM-\d+\s*\/\s*BANCO/i.test(f.texto);
   // los pendientes de meses anteriores no traen categoría: se reconocen por el CUIT de una empresa del grupo
-  const propia = b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat) || !!(b.cuit && empresas && empresas[b.cuit]);
+  // (los pendientes anteriores sin categoría, como "Transf. MacrOnline E-set M/T", también, contra un "Pasefondo")
+  const propia = b => /^(TRANSFERENCIA ENTRE|INVERSIONES)/.test(b.cat) || !!(b.cuit && empresas && empresas[b.cuit]) ||
+    (b.origen === 'Arrastre' && !b.cat);
   const unico = (cond, ventana, tol, metodo) => B().forEach(b => {
     if (b.match !== null) return;
     const igual = (x, y) => Math.abs(x.importe - y.importe) <= tol;
@@ -3535,6 +3550,14 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
   // ajuste de FBS por un crédito del banco que quedó pendiente (Macro JEA: "Ajuste por error en Bco de Acreditación"
   // 5.000.000 del 01/07 contra la transferencia del 17/06), aunque el importe sea redondo
   unico((b, f) => /AJUSTE|ERROR|CORRIG/i.test(f.texto), 31, TOLERANCIA, 'Pendientes: ajuste de FBS por el mismo importe, único en +-31 días (revisar)');
+  // pendiente anterior registrado meses después con su fecha escrita en el comentario (Macro JEA: "reg dolar mep grupo
+  // del plata 29-4-26" contra la transferencia del 29/04; "23-2-26-deposito passerini ..." contra la del 23/02)
+  const fechasEscritas = t => (String(t).match(/\b\d{1,2}[-\/]\d{1,2}[-\/](\d{4}|\d{2})(?!\d)/g) || []).map(x => {
+    const [d, m, a] = x.split(/[-\/]/).map(Number);
+    return new Date(a < 100 ? a + 2000 : a, m - 1, d);
+  });
+  unico((b, f) => b.origen === 'Arrastre' && fechasEscritas(f.texto).some(d => dias_(d, b.fecha) === 0), 400, TOLERANCIA,
+    'Pendiente anterior: registrado con su fecha escrita en el comentario (revisar)');
   // el mismo día, hasta $1 de diferencia y único de los dos lados (Macro JEA: "TEF DATANET PR GRUPO FINENSE" 469.397 y
   // el recibo de RONCONI por 469.396,10): los centavos quedan como ajuste
   unico((b, f) => dias_(b.fecha, f.fecha) === 0 && especifico_(b.importe), 0, 1, 'Pendientes: mismo día, importe con centavos de diferencia (revisar)');
@@ -4140,6 +4163,12 @@ function conciliarTodo_(entrada, redondoUnico) {
   }
   const difExp = fbs.find(p => p.explicacion);
   if (difExp) avisos.push('Asiento de gastos bancarios: ' + difExp.explicacion.charAt(0).toLowerCase() + difExp.explicacion.slice(1) + '.');
+  // la diferencia del asiento de gastos registrada en la cuenta O y todavía sin confirmar (Macro JEA: "RM-028885 / BANCO
+  // MACRO Nº 8/2026" 196.171,53, el resto de los gastos de agosto): se compensan; los centavos quedan en el control
+  fbs.filter(p => p.match === null && /^Diferencia asiento gastos/.test(p.texto) && p.origen === 'Mes').forEach(a => {
+    const os = ao.pendientes.filter(o => o.match === null && o.origen === 'Mes' && Math.abs(o.importe + a.importe) <= 1);
+    if (os.length === 1) compensar_([a, os[0]], 'Diferencia del asiento de gastos registrada en la cuenta O (revisar)');
+  });
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
