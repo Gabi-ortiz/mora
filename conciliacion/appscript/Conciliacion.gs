@@ -3604,13 +3604,19 @@ function valorSector_(p) {
 const COMISION_CON_IVA = ['3914', '3872', '1450'];
 
 function gastosBancarios_(movs) {
-  const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0 };
+  const g = { com: 0, iva: 0, iva105: 0, perc: 0, int: 0, sircreb: 0, ret: 0, tuc: 0, sellos: 0, imp: 0, impDb: 0, impCr: 0 };
+  // Ley 25.413: sobre débitos o sobre créditos, por el código (Macro, Galicia, Santander) o por la descripción (Córdoba, Nación)
+  const impDe = (m, t, d) => {
+    g.imp += d;
+    if (['1685', '907376', '917376', '4637', '9637'].includes(m.causal) || /CR[EÉ]D|S\/CR\b/.test(t)) g.impCr += d;
+    else if (['1684', '907176', '4633', '9633'].includes(m.causal) || /D[EÉ]B|S\/DB\b/.test(t)) g.impDb += d;
+  };
   // el IVA de una comisión que se registra aparte (Patagonia "COMISION POR CONVENIOS") no va al asiento de gastos
   const ivaDeOtra = x => /^IVA/i.test(x.concepto) && movs.some(c => c !== x && c.cat !== 'GASTOS BANCARIOS' && /^COMISION/i.test(c.concepto) &&
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   movs.filter(m => !ivaDeOtra(m)).forEach(m => {
     const t = m.concepto.toUpperCase(), d = -m.importe;
-    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633', '9637', '9633'].includes(m.causal)) g.imp += d;
+    if (['1684', '1685', '907176', '907376', '917376', '4637', '4633', '9637', '9633'].includes(m.causal)) impDe(m, t, d);
     else if (['1384', '1387', '6387'].includes(m.causal)) g.sircreb += d;   // Santander
     else if (m.causal === '566') g.tuc += d;        // Santander
     else if (m.causal === '907173') { if (t.includes('TUCUMAN')) g.tuc += d; else g.sircreb += d; }
@@ -3629,7 +3635,7 @@ function gastosBancarios_(movs) {
     else if (m.cat === 'GASTOS BANCARIOS') {
       // Patagonia: sin código, por la descripción
       if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES') || t.startsWith('GRAVAMEN LEY 25413') ||
-        t.startsWith('GRAVAMEN IBTC')) g.imp += d;   // Nación: "GRAVAMEN LEY 25413 S/DEB", "GRAVAMEN IBTC S/CRED"
+        t.startsWith('GRAVAMEN IBTC')) impDe(m, t, d);   // Nación: "GRAVAMEN LEY 25413 S/DEB", "GRAVAMEN IBTC S/CRED"
       else if (t.startsWith('RETEN. I.V.A')) g.perc += d;   // Nación: percepción IVA RG 2408
       else if (t.includes('SIRCREB')) g.sircreb += d;
       else if (t.includes('IIBB TUCUMAN')) g.tuc += d;
@@ -3648,7 +3654,8 @@ function gastosBancarios_(movs) {
   }
   const filas = [['Comisiones', g.com], ['IVA 21%', g.iva], ['Intereses', g.int], ['IVA 10,5%', g.iva105],
     ['Percepciones IVA', g.perc], ['Percepciones IIBB (SIRCREB)', g.sircreb], ['Retenciones IIBB rentas financieras', g.ret],
-    ['Percepciones IIBB Tucumán', g.tuc], ['Impuesto de sellos', g.sellos], ['Imp. créditos y débitos (total)', g.imp],
+    ['Percepciones IIBB Tucumán', g.tuc], ['Impuesto de sellos', g.sellos], ['Imp. sobre débitos', g.impDb], ['Imp. sobre créditos', g.impCr],
+    ['Imp. créditos y débitos sin distinguir', redondear_(g.imp - g.impDb - g.impCr)], ['Imp. créditos y débitos (total)', g.imp],
     ['    Crédito computable 33%', g.imp * 0.33], ['    Imp. créditos y débitos (gasto 67%)', g.imp * 0.67]];
   const total = g.com + g.iva + g.int + g.iva105 + g.perc + g.sircreb + g.ret + g.tuc + g.sellos + g.imp;
   return filas.filter(f => Math.abs(f[1]) > 0.004).concat([['TOTAL (debe coincidir con el asiento de FBS)', total]]);
