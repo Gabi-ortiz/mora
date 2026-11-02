@@ -82,6 +82,8 @@ const EMPRESAS_INICIALES = [['30669400167', 'TURIN SA'], ['30681026386', 'CHEXA 
 // Código causal | Sentido (Débito/Crédito/Ambos) | Patrón en concepto (regex, vacío = todos) | Categoría | Descripción
 /** Galicia: "Código causal" = número de la columna "Concepto" del Excel de Office Banking (ej. "907173 - ING. BRUTOS S/ CRED"). */
 const REGLAS_GALICIA = [
+  ["918107", "Crédito", "", "OTROS CREDITOS DEL BANCO", "Anulación de débitos (haberes, débitos de terceros)"],
+  ["917247", "Crédito", "", "COBRANZA CLIENTES", "Transferencia PEI"],
   ["917151", "Crédito", "", "COBRANZA CLIENTES", "Transferencia de terceros"],
   ["917123", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Servicio pago a proveedores (cobro de empresas)"],
   ["917187", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago a proveedores factura (cobro de empresas)"],
@@ -1499,8 +1501,25 @@ function clasificar_(reglas, empresas, causal, concepto, importe, cuit) {
         (!r.patron || r.patron.test(concepto))) return [r.cat, r.desc];
     }
   }
+  // código nuevo: se clasifica por el texto del movimiento para que no quede sin categoría (queda avisado para fijar la regla)
+  // (no se sugieren gastos ni impuestos: esos van al asiento mensual y necesitan la regla confirmada)
+  const s = TEXTO_SUGERIDO.find(([re, sen]) => sen === sentido && re.test(concepto));
+  if (s) return [s[2], 'Regla sugerida por el texto'];
   return ['A IDENTIFICAR', 'Código causal nuevo'];
 }
+
+/** Categoría sugerida para un código sin regla, por palabras del concepto (el primero que coincide). */
+const TEXTO_SUGERIDO = [
+  [/ANULACI|REVERS|DEVOLUCI|REINTEGRO|CONTRASIENTO/i, 'C', 'OTROS CREDITOS DEL BANCO'],
+  [/PRISMA|PAYWAY|FISERV|NARANJA|CABAL|VISA|MASTER|TARJETA/i, 'C', 'COBRANZA TARJETAS'],
+  [/E-?CHEQ|CHEQUE|CANJE|BOLETA/i, 'C', 'CHEQUES'],
+  [/EFVO|EFECTIVO/i, 'C', 'DEPOSITOS EN EFECTIVO'],
+  [/TRANSF|TRF|CREDIN|DEBIN|\bPEI\b|COELSA|HOMEBANKING/i, 'C', 'COBRANZA CLIENTES'],
+  [/HABERES|SUELDO|REMUNERAC/i, 'D', 'SUELDOS'],
+  [/E-?CHEQ|CHEQUE/i, 'D', 'CHEQUES'],
+  [/DEBITO AUTOM|DEB\.? ?AUTOM|PAGO DE SERVICIOS/i, 'D', 'DEBITOS AUTOMATICOS'],
+  [/TRANSF|TRF|PROVEED/i, 'D', 'PAGO PROVEEDORES'],
+];
 
 /** Extracto Macro: "Últimos Movimientos" (Importe con signo) o "Resumen" (Débito / Crédito). */
 function leerExtracto_(filas, reglas, empresas, cierre) {
@@ -4329,6 +4348,10 @@ function conciliarTodo_(entrada, redondoUnico) {
   if (nuevos.length) avisos.push('Extracto: ' + nuevos.length + ' movimientos sin regla (' +
     Array.from(new Set(nuevos.map(m => m.causal || String(m.concepto).slice(0, 35).trim()))).join(', ') +
     '): quedan como "A IDENTIFICAR". Avisale al administrador para agregar la regla.');
+  const sugeridos = movs.filter(m => m.desc === 'Regla sugerida por el texto');
+  if (sugeridos.length) avisos.push('Extracto: ' + sugeridos.length + ' movimientos con código nuevo se clasificaron por el texto (' +
+    Array.from(new Set(sugeridos.map(m => (m.causal || String(m.concepto).slice(0, 35).trim()) + ' → ' + m.cat))).join(', ') +
+    '). Se cruzan igual; avisale al administrador para que confirme la regla.');
 
   CRUCES_ = [];
   CORTE_ = corte;
