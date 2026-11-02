@@ -2958,10 +2958,11 @@ function gastosAsiento_(banco, fbs) {
     c.fecha.getTime() === x.fecha.getTime() && Math.abs(c.importe * 0.21 - x.importe) <= 0.02);
   const b = banco.filter(x => x.match === null && x.origen === 'Mes' && (x.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(x.causal)) &&
     !ivaDeOtra(x));
-  // el asiento mensual "Gastos bancarios MM/AAAA" o "Gtos MM/AAAA" (Chexa: "30550726-Gtos 07/2026"), o uno por quincena
+  // el asiento mensual "Gastos bancarios MM/AAAA", "Gtos MM/AAAA" (Chexa: "30550726-Gtos 07/2026") o "Gastos MM/AAAA" al
+  // principio del comentario (JEA: "33107202-GASTOS 07/2026"), o uno por quincena
   // (Chexa Macro: "24147126-Gtos 1° Q 07/2026" y "24107226-Gtos 2° Q 07/2026"); no las "Liq ... gastos
   // bancarios", que son otros registros
-  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?)\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
+  const f = fbs.filter(x => x.match === null && x.origen === 'Mes' && /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}\/\d{4}/.test(x.texto.toUpperCase()) &&
     !/LIQ/.test(x.texto.toUpperCase()));
   if (!b.length || !f.length) return null;
   // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
