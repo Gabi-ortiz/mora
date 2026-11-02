@@ -607,6 +607,7 @@ function procesar_(ss) {
     }
   }
   res.baseCtx = ctxBase; res.hastaBase = hastaBase;
+  avisarCodigosNuevos_(ss, res, parametros);
   marca('cruzar');
   HOJA.viejas.forEach(n => { const v = ss.getSheetByName(n); if (v) ss.deleteSheet(v); });
   escribirCuatroPuntas_(ss, res);
@@ -4559,7 +4560,52 @@ function conciliarTodo_(entrada, redondoUnico) {
     if (ie >= 0) { const f = entrada.base.slice(1).find(r => String(r[ie] || '').trim()); empresa = f ? String(f[ie]).trim() : ''; }
   }
   return { empresa, cuentaBanco: param('^cuenta bancaria') || 'Banco Macro', info: ext.info, infoE: e.info, infoO: o.info, corte, saldoE, saldoO, saldoBanco, pend, tot, ajustado, apertura, analisisO: ao.resumen, listas,
-    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs, anteriores, pendMes, pasarSinConfirmar: sinConfirmar };
+    metodos, difGastos, gastos: gastosBancarios_(movs), conciliados, avisos, banco, fbs, anteriores, pendMes, pasarSinConfirmar: sinConfirmar,
+    codigosNuevos: codigosNuevos_(movs) };
+}
+
+/** Códigos del extracto sin regla en el motor (con la categoría sugerida por el texto, si hay), uno por código y sentido. */
+function codigosNuevos_(movs) {
+  const vistos = new Map();
+  movs.filter(m => m.desc === 'Código causal nuevo' || m.desc === 'Regla sugerida por el texto').forEach(m => {
+    const k = (m.causal || String(m.concepto).slice(0, 35).trim()) + '|' + (m.importe < 0 ? 'Débito' : 'Crédito');
+    const v = vistos.get(k) || { codigo: k.split('|')[0], sentido: k.split('|')[1], ejemplo: String(m.concepto).slice(0, 80).trim(),
+      fecha: m.fecha, importe: m.importe, cat: m.cat, sugerida: m.desc === 'Regla sugerida por el texto', cantidad: 0 };
+    v.cantidad++;
+    vistos.set(k, v);
+  });
+  return Array.from(vistos.values());
+}
+
+/**
+ * Mail al administrador con los códigos nuevos del extracto (una sola vez por código en cada planilla). El mail sale a la
+ * fila "Mail del administrador" de "Parámetros" o, si no está, al dueño de la planilla. Si falla (sin permiso para mandar
+ * mails), queda un aviso y el proceso sigue.
+ */
+function avisarCodigosNuevos_(ss, res, parametros) {
+  const nuevos = res.codigosNuevos || [];
+  if (!nuevos.length) return;
+  try {
+    const props = PropertiesService.getDocumentProperties();
+    let ya = [];
+    try { ya = JSON.parse(props.getProperty('CODIGOS_AVISADOS') || '[]'); } catch (e) { ya = []; }
+    const pend = nuevos.filter(n => ya.indexOf(n.codigo + '|' + n.sentido) < 0);
+    if (!pend.length) return;
+    let para = String(paramDe_(parametros, '^mail del administrador') || '').trim();
+    if (!para) { const o = ss.getOwner(); para = o ? o.getEmail() : ''; }
+    if (!para) return;
+    const banco = res.cuentaBanco || '', empresa = res.empresa || '';
+    const lineas = pend.map(n => '• ' + n.codigo + ' (' + n.sentido + ', ' + n.cantidad + ' mov.): "' + n.ejemplo + '" — ' +
+      (n.sugerida ? 'clasificado por el texto como ' + n.cat + ' (confirmar)' : 'queda A IDENTIFICAR'));
+    MailApp.sendEmail(para, 'Conciliación ' + banco + (empresa ? ' — ' + empresa : '') + ': ' + pend.length + ' códigos nuevos sin regla',
+      'Al procesar la planilla "' + ss.getName() + '" aparecieron códigos del extracto que no tienen regla en el motor:\n\n' +
+      lineas.join('\n') + '\n\nHay que agregar la regla en el motor (lista del banco) para que se clasifiquen siempre igual.\n' +
+      'Planilla: ' + ss.getUrl());
+    props.setProperty('CODIGOS_AVISADOS', JSON.stringify(ya.concat(pend.map(n => n.codigo + '|' + n.sentido)).slice(-300)));
+  } catch (e) {
+    res.avisos.push('No se pudo mandar el mail de códigos nuevos al administrador (' + String(e.message || e).slice(0, 80) +
+      '): avisale a mano.');
+  }
 }
 
 if (typeof module !== 'undefined') module.exports = { gastosBancarios_, claveCruce_, armarCambios_, agregarTardias_, REGLAS_NACION, REGLAS_CORDOBA, REGLAS_PATAGONIA, REGLAS_SANTANDER, REGLAS_GALICIA, reglasDelBanco_, revisarPendientesCore_, idsPend_, clavePend_, parseGviz_, cuentasDe_, idDeLink_, letra_, armarCuatroPuntas_, armarRevisar_, conciliarTodo_, leerExtracto_, leerMayor_, leerReglas_, leerEmpresas_, parseNum_, parseFecha_, REGLAS_INICIALES, EMPRESAS_INICIALES };
