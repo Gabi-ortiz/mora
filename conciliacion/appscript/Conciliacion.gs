@@ -2296,7 +2296,7 @@ function claveO_(texto) {
   const t = String(texto || '').replace(/\s+/g, ' ').trim().toUpperCase();
   let m = t.match(/^(RC-[A-Z]-\d{4}-\d{8}|RM-\d+)/);
   if (m) return m[1];
-  m = t.match(/^(\d{4,})\s*-\s*LIQ/);
+  m = t.match(/^(\d{3,})\s*-\s*LIQ/);   // (TURIN Córdoba: "469-LIQ. CORDOBESA 7/9")
   if (m && !/GASTOS/.test(t)) return 'LIQ ' + m[1];
   return t;
 }
@@ -2445,7 +2445,7 @@ function partidasE_(asientosE, asientosO) {
     if (liqPorAsiento.has(String(a.asiento))) return liqPorAsiento.get(String(a.asiento));
     const k = claveO_(a.comentario);
     if (k.startsWith('LIQ ')) return k;
-    const d = String(a.comentario || '').trim().match(/^(\d{4,})\b/);
+    const d = String(a.comentario || '').trim().match(/^(\d{3,})\b/);
     if (d) {
       const num = Array.from(numeros).filter(n => d[1].startsWith(n)).sort((x, y) => y.length - x.length)[0];
       if (num) return 'LIQ ' + num;
@@ -2740,12 +2740,17 @@ function combinacionesFechaEscrita_(banco, fbs) {
     }
   }));
   // una línea de FBS con fecha escrita = varios movimientos del banco de ese día
+  const esGasto = b => b.cat === 'GASTOS BANCARIOS' || CAUSALES_IMPUESTOS.includes(b.causal);
+  const hayAsiento = fbs.some(f => f.match === null && f.origen === 'Mes' && f.importe < 0 && !/LIQ|ANUL/i.test(f.texto) &&
+    /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)(\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-](\d{4}|\d{2})(?!\d)|\s*$)/.test(f.texto.toUpperCase().trim()));
   fbs.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(f => {
     if (f.match !== null || f.origen !== 'Mes') return;
     const ds = fechasFbs(f), esp = especifico_(f.importe);
     if (!ds.length || (!esp && !f.fechaRef)) return;
+    // (sin las líneas de gastos e impuestos si FBS tiene el asiento del mes: van con él. TURIN Córdoba 30/09: mantenimiento
+    // 57.400 + IVA 12.054 están en "8300926-gastos bancarios 09/26", no en "RM-393268 ... Nº 300926" 69.454)
     const cands = banco.filter(b => b.match === null && b.origen === 'Mes' && (b.importe > 0) === (f.importe > 0) &&
-      Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0)
+      Math.abs(b.importe) < Math.abs(f.importe) && ds.indexOf(b.fecha.getTime()) >= 0 && !(hayAsiento && esGasto(b)))
       .sort((x, y) => Math.abs(y.importe) - Math.abs(x.importe)).slice(0, 25);   // los más grandes: los chicos son impuestos del día
     // importe redondo (ej. RM por 2.420.000 = comisión 2.000.000 + IVA 420.000 del día): solo de a dos
     let hecho = false;
@@ -3083,8 +3088,10 @@ function gastosAsiento_(banco, fbs) {
   // el asiento de otro mes ("28187-Gastos Bancarios 07-2026" cargado en agosto) no es el de este mes
   const mesB = b.reduce((m, x) => (x.fecha > m ? x.fecha : m), b.length ? b[0].fecha : new Date(0));
   const deOtroMes = x => {
-    const m = x.texto.match(/(\d{2})[\/-](\d{4})\s*$/);
-    return !!m && b.length > 0 && (Number(m[1]) !== mesB.getMonth() + 1 || Number(m[2]) !== mesB.getFullYear());
+    // (con el año de 2 dígitos también: "8300926-gastos bancarios 09/26")
+    const m = x.texto.match(/(\d{2})[\/-](\d{4}|\d{2})\s*$/);
+    const anio = m ? (m[2].length === 2 ? 2000 + Number(m[2]) : Number(m[2])) : 0;
+    return !!m && b.length > 0 && (Number(m[1]) !== mesB.getMonth() + 1 || anio !== mesB.getFullYear());
   };
   // líneas de gastos al debe del mismo día que suman un solo registro al haber (Macro JEA 30/09: nueve "NNNN-Gastos
   // Bancarios 07/08/09-2026" que suman 1.810.941,41 = "RM-029304 / BANCO MACRO Nº 300920261"): se compensan en FBS
@@ -3101,14 +3108,17 @@ function gastosAsiento_(banco, fbs) {
   // (o sin fecha, si el comentario termina ahí: "31082026-Gastos Bancarios"); no la anulación del asiento del mes anterior
   // ("35577-Anulacion Gastos Bancarios 07-2026"), que se compensa en FBS con el que lo reemplaza
   const f = fbs.filter(x => x.match === null && x.origen === 'Mes' &&
-    /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)(\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-]\d{4}|\s*$)/.test(x.texto.toUpperCase().trim()) &&
+    /(GASTOS BANCARIOS|\bGTOS\.?|^(\d+\s*-\s*)?GASTOS)(\s+(\d\s*[°º]?\s*(Q|QUINC\w*)\.?\s+)?\d{2}[\/-](\d{4}|\d{2})(?!\d)|\s*$)/.test(x.texto.toUpperCase().trim()) &&
     !/LIQ|ANUL/.test(x.texto.toUpperCase()) && !deOtroMes(x));
   if (!b.length || !f.length) return null;
   // la diferencia del mes anterior (ej. el SIRCREB del último día que FBS registra en este asiento) entra en el cruce del
   // asiento de este mes: así se limpia sola, sin que nadie la toque. Si FBS la registró aparte por el mismo importe (Macro
   // JEA: "RM-028895 / BANCO MACRO Nº 72026" 176.139,70), se compensa con ese registro
   fbs.filter(x => x.match === null && x.origen === 'Arrastre' && /^Diferencia asiento gastos/.test(x.texto)).forEach(x => {
-    const reg = fbs.filter(y => y.match === null && y.origen === 'Mes' && f.indexOf(y) < 0 && Math.abs(y.importe + x.importe) <= 1);
+    // primero un pendiente del mes anterior por el importe contrario (TURIN Córdoba: la diferencia de agosto -69.454 y
+    // "25789-Liq gastos bancarios 31/08/26" +69.454, ambos de agosto); si no, un registro del mes
+    const ant = fbs.filter(y => y !== x && y.match === null && y.origen === 'Arrastre' && Math.abs(y.importe + x.importe) <= 1);
+    const reg = ant.length === 1 ? ant : fbs.filter(y => y.match === null && y.origen === 'Mes' && f.indexOf(y) < 0 && Math.abs(y.importe + x.importe) <= 1);
     if (reg.length === 1) compensar_([x, reg[0]], 'Diferencia de gastos del mes anterior, registrada en FBS');
     else f.push(x);
   });
@@ -3600,6 +3610,63 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     b.sort(orden); f.sort(orden);
     if (b.some((x, i) => dias_(x.fecha, f[i].fecha) > 31)) return;
     b.forEach((x, i) => unir_([x], [f[i]], 'Pendientes: mismo importe repetido en el mes, en orden de fecha (revisar)'));
+  });
+  // liquidación de tarjeta que quedó partida en FBS (TURIN Córdoba, agosto: "CREDIN TRANSFERENCIA-E 30669400167-TURIN S A"
+  // 1.197.340,62 = "Confirmación de Valores Agrupados" 1.361.600 + "07082026-LIQ.- COREDOBESA 07/08" -164.259,38): el
+  // crédito del banco contra un par de FBS (uno al debe y otro al haber, alguno de liquidación) que netea lo mismo; único
+  B().filter(b => b.importe > 0 && especifico_(b.importe)).forEach(b => {
+    if (b.match !== null) return;
+    const cerca = F().filter(f => (f.fecha - b.fecha) / 864e5 >= -10 && (f.fecha - b.fecha) / 864e5 <= 31);
+    const pares = [];
+    cerca.filter(p => p.importe > 0).forEach(p => cerca.filter(q => q.importe < 0).forEach(q => {
+      if (Math.abs(p.importe + q.importe - b.importe) <= TOLERANCIA && /LIQ|CONFIRMACI/i.test(p.texto + ' ' + q.texto)) pares.push([p, q]);
+    }));
+    if (pares.length !== 1) return;
+    if (B().filter(x => x !== b && Math.abs(x.importe - b.importe) <= TOLERANCIA).length) return;
+    unir_([b], pares[0], 'Pendientes: liquidación partida en FBS (confirmación + liquidación = crédito del banco) (revisar)');
+  });
+  // varias líneas de FBS del mismo día y comentario ("Canje de Valor - BANCO PCIA DE CORDOBA" 70.000 + 132.000 + 70.000 del
+  // 14/09) que son todos los créditos pendientes de un mismo CUIT (las tres transferencias de LASCANO de agosto y septiembre)
+  const idDe = b => b.cuit || b.dni || '';
+  const gruposF = new Map();
+  F().filter(f => f.importe > 0 && f.origen === 'Mes').forEach(f => {
+    const k = f.fecha.getTime() + '|' + f.texto;
+    gruposF.set(k, (gruposF.get(k) || []).concat([f]));
+  });
+  const firma = l => l.map(x => Math.round(x.importe * 100)).sort((x, y) => x - y).join(',');
+  gruposF.forEach(g => {
+    if (g.length < 2 || g.some(f => f.match !== null)) return;
+    const porId = new Map();
+    B().filter(b => b.importe > 0 && idDe(b) && b.fecha <= g[0].fecha && dias_(b.fecha, g[0].fecha) <= 62)
+      .forEach(b => porId.set(idDe(b), (porId.get(idDe(b)) || []).concat([b])));
+    const ok = Array.from(porId.values()).filter(l => firma(l) === firma(g));
+    if (ok.length === 1) unir_(ok[0], g, 'Pendientes: todos los créditos de un CUIT = líneas de FBS del mismo día y comentario (revisar)');
+  });
+  // dos o más transferencias iguales del mismo CUIT en un día (CONDES SRL 2 x 300.000 del 31/08) y la misma cantidad de
+  // recibos por ese importe de un mismo día, hasta 5 días después (ROJAS y OLIVA 300.000 del 02/09): únicos los dos lados
+  const gruposB = new Map();
+  B().filter(b => b.importe > 0 && idDe(b)).forEach(b => {
+    const k = b.fecha.getTime() + '|' + idDe(b) + '|' + Math.round(b.importe * 100);
+    gruposB.set(k, (gruposB.get(k) || []).concat([b]));
+  });
+  gruposB.forEach(gb => {
+    if (gb.length < 2 || gb.some(b => b.match !== null)) return;
+    const d0 = gb[0].fecha, imp = gb[0].importe;
+    const dias = new Map();
+    F().filter(f => Math.abs(f.importe - imp) <= TOLERANCIA && f.fecha >= d0 && dias_(d0, f.fecha) <= 5)
+      .forEach(f => dias.set(f.fecha.getTime(), (dias.get(f.fecha.getTime()) || []).concat([f])));
+    const ok = Array.from(dias.values()).filter(l => l.length === gb.length);
+    if (ok.length !== 1 || dias.size !== 1) return;
+    unir_(gb, ok[0], 'Pendientes: transferencias iguales del mismo CUIT y día = recibos de un mismo día (revisar)');
+  });
+  // crédito anterior registrado después en FBS solo con el nombre del banco ("BANCO PCIA DE CORDOBA" 370.000 del 01/09 =
+  // la transferencia de ZAMBRANO del 26/06): importe único en todos los pendientes de los dos lados
+  F().filter(f => f.importe > 0 && f.origen === 'Mes' && /^BANCO\b[^/]*$/i.test(f.texto.trim())).forEach(f => {
+    if (f.match !== null) return;
+    const igual = x => Math.abs(x.importe - f.importe) <= TOLERANCIA;
+    const bs = B().filter(igual);
+    if (bs.length !== 1 || bs[0].origen !== 'Arrastre' || bs[0].fecha > f.fecha || F().filter(igual).length !== 1) return;
+    unir_(bs, [f], 'Pendiente anterior: registrado en FBS solo con el nombre del banco, importe único (revisar)');
   });
   unico((b, f) => propia(b) && /PASE|FONDO|BANCO/i.test(f.texto), 3, TOLERANCIA,
     'Pendientes: transferencia propia contra pase de E, importe único en +-3 días (revisar)');
