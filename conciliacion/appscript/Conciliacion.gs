@@ -3765,6 +3765,24 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
     if (B().filter(x => x !== b && Math.abs(x.importe - b.importe) <= TOLERANCIA).length) return;
     unir_([b], pares[0], 'Pendientes: liquidación partida en FBS (confirmación + liquidación = crédito del banco) (revisar)');
   });
+  // cobro registrado tarde en FBS (Macro CHEXA julio: "RC-... / PV 35656/0 / GALERA PIZZO" 6.000.000 del 01/07 por la
+  // transferencia del 26/06; "Canje de Valor - BANCO MACRO"), con un Nº del valor que no trae CUIT ni fecha del banco:
+  // el único crédito pendiente del banco por ese importe de hasta 90 días antes (o 3 después), y el único cobro de FBS
+  // para ese crédito. Se repite mientras aparezcan cruces nuevos (cada cruce puede dejar único a otro)
+  const cobroTarde = f => f.importe > 0 && f.origen === 'Mes' && /^RC-|CANJE DE VALOR/i.test(f.texto);
+  const ventana = (b, f) => (f.fecha - b.fecha) / 864e5 >= -3 && (f.fecha - b.fecha) / 864e5 <= 90;
+  for (let vuelta = 0, hubo = true; hubo && vuelta < 4; vuelta++) {
+    hubo = false;
+    F().filter(cobroTarde).forEach(f => {
+      if (f.match !== null) return;
+      const bs = B().filter(b => b.importe > 0 && Math.abs(b.importe - f.importe) <= TOLERANCIA && ventana(b, f));
+      if (bs.length !== 1) return;
+      const fs = F().filter(x => x.importe > 0 && Math.abs(x.importe - bs[0].importe) <= TOLERANCIA && ventana(bs[0], x));
+      if (fs.length !== 1) return;
+      unir_(bs, [f], 'Pendientes: cobro registrado después en FBS, importe único en 90 días (revisar)');
+      hubo = true;
+    });
+  }
   // pago de haberes en FBS en varias líneas iguales de un día ("BANCO GALICIA" x 40 del 06/07, 75.629.993,50) = los débitos
   // de haberes del banco desde ese día hasta 10 días después (seis "SERVICIO ACREDITAMIENTO DE HABERES" del 06/07 al 13/07)
   const gruposHab = new Map();
