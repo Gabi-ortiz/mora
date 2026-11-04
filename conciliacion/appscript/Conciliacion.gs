@@ -3690,7 +3690,7 @@ function sumaExacta_(items, total, max) {
  *  - importe con hasta $0,10 de diferencia, único en +-5 días (tarjeta Naranja vs "Confirmación de Valores Agrupados"):
  *    la diferencia queda como ajuste
  */
-function cierrePendientes_(banco, fbs, oPend, empresas) {
+function cierrePendientes_(banco, fbs, oPend, empresas, sinCuentaO) {
   const B = () => banco.filter(x => x.match === null);
   const F = () => fbs.concat(oPend).filter(x => x.match === null && !x.desfasado && !/^Diferencia (de redondeo|asiento gastos)/.test(x.texto));
   const rmBanco = f => /^RM-\d+\s*\/\s*BANCO/i.test(f.texto);
@@ -3769,17 +3769,22 @@ function cierrePendientes_(banco, fbs, oPend, empresas) {
   // transferencia del 26/06; "Canje de Valor - BANCO MACRO"), con un Nº del valor que no trae CUIT ni fecha del banco:
   // el único crédito pendiente del banco por ese importe de hasta 90 días antes (o 3 después), y el único cobro de FBS
   // para ese crédito. Se repite mientras aparezcan cruces nuevos (cada cruce puede dejar único a otro)
+  // Solo sin cuenta O (Chexa: el cobro va directo a E, tarde y con códigos internos en el Nº); hasta 60 días; y no si los
+  // datos se contradicen (CUIT/DNI distintos, o nombres de los dos lados sin ninguna palabra en común: "SOLAVAGIONE, HORACIO"
+  // no es "SALAVAGIONE, CLAUDIO"). Es transitoria: con la norma de carga (CUIT + fecha en el Nº) estos cobros cruzan por CUIT
   const cobroTarde = f => f.importe > 0 && f.origen === 'Mes' && /^RC-|CANJE DE VALOR/i.test(f.texto);
-  const ventana = (b, f) => (f.fecha - b.fecha) / 864e5 >= -3 && (f.fecha - b.fecha) / 864e5 <= 90;
-  for (let vuelta = 0, hubo = true; hubo && vuelta < 4; vuelta++) {
+  const ventana = (b, f) => (f.fecha - b.fecha) / 864e5 >= -3 && (f.fecha - b.fecha) / 864e5 <= 60;
+  const contradice = (b, f) => (b.cuit && f.cuit && b.cuit !== f.cuit) || (b.dni && f.dni && b.dni !== f.dni) ||
+    (b.nombre && f.nombre && b.nombre.size && f.nombre.size && !comparten_(b.nombre, f.nombre));
+  for (let vuelta = 0, hubo = !!sinCuentaO; hubo && vuelta < 4; vuelta++) {
     hubo = false;
     F().filter(cobroTarde).forEach(f => {
       if (f.match !== null) return;
       const bs = B().filter(b => b.importe > 0 && Math.abs(b.importe - f.importe) <= TOLERANCIA && ventana(b, f));
       if (bs.length !== 1) return;
       const fs = F().filter(x => x.importe > 0 && Math.abs(x.importe - bs[0].importe) <= TOLERANCIA && ventana(bs[0], x));
-      if (fs.length !== 1) return;
-      unir_(bs, [f], 'Pendientes: cobro registrado después en FBS, importe único en 90 días (revisar)');
+      if (fs.length !== 1 || contradice(bs[0], f)) return;
+      unir_(bs, [f], 'Pendientes: cobro registrado después en FBS, importe único en 60 días (revisar)');
       hubo = true;
     });
   }
@@ -4474,7 +4479,9 @@ function conciliarTodo_(entrada, redondoUnico) {
   limpiezaO_(banco, ao.pendientes);
   netearPendientesFbs_(fbs.filter(p => p.match === null).concat(ao.pendientes.filter(p => p.match === null && !p.desfasado)));
   netearPendientesBanco_(banco.filter(p => p.match === null));
-  cierrePendientes_(banco, fbs, ao.pendientes, empresas);
+  let sinCuentaO = false;
+  try { sinCuentaO = !!entrada.parametros && !cuentasDe_(entrada.parametros).O; } catch (e) { sinCuentaO = false; }
+  cierrePendientes_(banco, fbs, ao.pendientes, empresas, sinCuentaO);
   // pendientes anteriores del banco que recién quedan libres después de netear FBS (ej. tarjeta cargada, anulada y
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
