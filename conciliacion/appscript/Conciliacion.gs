@@ -200,7 +200,7 @@ const REGLAS_NACION = [
   ["*", "Crédito", "^CR DEBIN", "COBRANZA CLIENTES", "Crédito DEBIN"],
   ["*", "Crédito", "^CR CREDIN", "COBRANZA CLIENTES", "Crédito CREDIN (transferencia recibida)"],
   ["*", "Crédito", "^TRANSF\\.MINORISTA RECIBIDA", "COBRANZA CLIENTES", "Transferencia minorista recibida"],
-  ["*", "Crédito", "^DEPOSITO DE TERCEROS", "COBRANZA CLIENTES", "Depósito de terceros"],
+  ["*", "Crédito", "^DEPOSITO DE TER", "COBRANZA CLIENTES", "Depósito de terceros"],
   ["*", "Crédito", "^C BE TR O/BCO-DIS TIT", "COBRANZA CLIENTES", "Transferencia de otro banco (otro titular)"],
   ["*", "Crédito", "^CRED BE O BCO-MIS TIT", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia de otro banco (mismo titular)"],
   ["*", "Crédito", "^CREDITO \\+AUTOS", "COBRANZA EMPRESAS / ASEGURADORAS", "Crédito +Autos (prendario)"],
@@ -228,6 +228,10 @@ const REGLAS_NACION = [
   ["*", "Débito", "^CRUZ\\.C/DESCUB", "FINANCIACION / PRESTAMOS", "Cruce con descubierto"],
   ["*", "Crédito", "^TRANSF\\.MINORIST", "COBRANZA CLIENTES", "Transferencia minorista recibida"],
   ["*", "Débito", "^DEBITO AUTOMATICO", "DEBITOS AUTOMATICOS", "Débito automático"],
+  // comisión por depósito en otra sucursal ("COMI DPT - DEST-SUC 1070"): su IVA y su percepción vienen con otro texto
+  ["*", "Débito", "^IVA COMISION", "GASTOS BANCARIOS", "IVA 21% sobre comisiones"],
+  ["*", "Débito", "^IVA RG ?3337", "GASTOS BANCARIOS", "Percepción IVA RG 3337"],
+  ["*", "Crédito", "^LIQ\\.AGRONAC", "COBRANZA TARJETAS", "Liquidación AgroNación (tickets / cupones)"],
 ];
 
 /** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
@@ -4107,7 +4111,7 @@ function gastosBancarios_(movs) {
       // Patagonia: sin código, por la descripción
       if (t.startsWith('IMP.DB/CR') || t.startsWith('IMPUESTO SOBRE OPERACIONES') || t.startsWith('GRAVAMEN LEY 25413') ||
         t.startsWith('GRAVAMEN IBTC')) impDe(m, t, d);   // Nación: "GRAVAMEN LEY 25413 S/DEB", "GRAVAMEN IBTC S/CRED"
-      else if (t.startsWith('RETEN. I.V.A')) g.perc += d;   // Nación: percepción IVA RG 2408
+      else if (t.startsWith('RETEN. I.V.A') || /^IVA RG ?3337/.test(t)) g.perc += d;   // Nación: percepción IVA RG 2408 / RG 3337
       else if (t.includes('SIRCREB')) g.sircreb += d;
       else if (t.includes('IIBB TUCUMAN')) g.tuc += d;
       else if (t.includes('SELLOS')) g.sellos += d;
