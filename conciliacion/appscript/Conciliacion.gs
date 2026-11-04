@@ -215,6 +215,19 @@ const REGLAS_NACION = [
   ["*", "Débito", "^RETEN\\. I\\.V\\.A", "GASTOS BANCARIOS", "Percepción IVA RG 2408"],
   ["*", "Débito", "^I\\.V\\.A\\. BASE", "GASTOS BANCARIOS", "IVA (comisiones)"],
   ["*", "Débito", "^COM", "GASTOS BANCARIOS", "Comisiones"],
+  // (resumen PDF de CHEXA: otra forma de escribir los mismos conceptos)
+  ["*", "Crédito", "^DEBIN", "COBRANZA CLIENTES", "Crédito DEBIN"],
+  ["*", "Débito", "^DEBIN", "PAGO PROVEEDORES", "Débito DEBIN"],
+  ["*", "Crédito", "^TRANSF\\.INTER\\.MM", "COBRANZA CLIENTES", "Transferencia recibida (otro banco)"],
+  ["*", "Crédito", "^C BE TR O/BCO-D", "COBRANZA CLIENTES", "Transferencia de otro banco (otro titular)"],
+  ["*", "Crédito", "^CRED BE O BCO-M", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia de otro banco (mismo titular)"],
+  ["*", "Crédito", "^ACRED\\.LIQ\\.TC", "COBRANZA TARJETAS", "Acreditación liquidación tarjeta (Pyme Nación)"],
+  ["*", "Débito", "^DEB\\.TRAN\\.INTERB-LINK TIT", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia a cuenta propia de otro banco"],
+  ["*", "Débito", "^PAGO CHEVROLET", "PLAN DE AHORRO / TERMINAL", "Pago a Chevrolet (plan de ahorro)"],
+  ["*", "Débito", "^BNACONECTA", "GASTOS BANCARIOS", "Membresía BNA Conecta"],
+  ["*", "Débito", "^CRUZ\\.C/DESCUB", "FINANCIACION / PRESTAMOS", "Cruce con descubierto"],
+  ["*", "Crédito", "^TRANSF\\.MINORIST", "COBRANZA CLIENTES", "Transferencia minorista recibida"],
+  ["*", "Débito", "^DEBITO AUTOMATICO", "DEBITOS AUTOMATICOS", "Débito automático"],
 ];
 
 /** Patagonia: el Excel de "Movimientos de Cuenta" no trae código; las reglas van por la descripción (código "*"). */
