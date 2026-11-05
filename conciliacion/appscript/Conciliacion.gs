@@ -3971,6 +3971,127 @@ function cierrePendientes_(banco, fbs, oPend, empresas, sinCuentaO) {
   });
   // lo que quedó con un solo candidato después de netear (ej. dos recibos de $14.000.000 iguales: uno se anuló con su RM)
   pasada_(B(), F(), (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0, '3. Fecha escrita en el comprobante + importe', 60, true);
+  ultimaVueltaGrupos_(B, F, fbs);
+}
+
+/**
+ * Patrones de la conciliación manual (Macro TURIN septiembre), todos por suma exacta o importe único:
+ *  1. varias partidas del banco del mismo concepto que suman un registro de FBS: pases en partes ("Transf. MacrOnline"
+ *     56.000.000 + 40.000.000 contra "Pasefondo" 96.000.000), liquidaciones Payway del mes anterior (créditos menos un débito)
+ *     contra la "Confirmación de Valores Agrupados", dos "TEF DATANET BTOB" contra un RM
+ *  2. FBS ↔ FBS: corrección (RM o "correccion mal reg") que anula un recibo pendiente de meses anteriores por el mismo
+ *     importe (único, o con la fecha del recibo escrita: "correccion mal reg 2606" contra el recibo del 26/06)
+ *  3. FBS ↔ FBS: registros del mismo día que se anulan (NC y ND de gastos por el mismo importe y número; liquidación Naranja
+ *     en E contra los canjes de O que suman lo mismo)
+ *  4. recibo + RM chico a banco por la diferencia contra la transferencia (615.200 - 200 = 615.000), mismo CUIT/DNI
+ *  5. mismo CUIT o nombre, diferencia chica (hasta 0,02% y $ 500: CONSTRUCABLE 102.122.127,04 / 102.122.248,04): queda ajuste
+ *  6. pendiente anterior con centavos registrado meses después con la fecha sin año ("dólar mep ... 30-1")
+ */
+function ultimaVueltaGrupos_(B, F, fbs) {
+  const fam = t => normalizar_(t).replace(/[^a-z ]+/gi, ' ').replace(/\s+/g, ' ').trim().slice(0, 24);
+  const gasto = b => /^(GASTOS BANCARIOS|IMPUESTOS)/.test(b.cat || '');
+  const ajuste = (f, dif) => {
+    const a = partidaFbs_({ fecha: f.fecha, comentario: 'Diferencia de redondeo ' + f.texto.slice(0, 40) + ' - ajustar',
+      referencia: '', asiento: f.asiento, debe: Math.max(-dif, 0), haber: Math.max(dif, 0) }, 'Mes');
+    a.cuenta = 'E';
+    fbs.push(a);
+  };
+  // subconjuntos (2 a max) de items con signo que suman total; devuelve el único o null (0 o más de uno)
+  const unicaSuma = (items, total, max) => {
+    let hallado = null, n = 0;
+    const r = (desde, falta, el) => {
+      if (n > 1) return;
+      if (el.length >= 2 && Math.abs(falta) <= TOLERANCIA) { n++; hallado = el; return; }
+      if (el.length >= max) return;
+      for (let i = desde; i < items.length; i++) r(i + 1, redondear_(falta - items[i].importe), el.concat([items[i]]));
+    };
+    r(0, total, []);
+    return n === 1 ? hallado : null;
+  };
+  // 1. varias del banco (mismo concepto) = un registro de FBS
+  F().filter(f => Math.abs(f.importe) >= 10000 && f.cuenta !== 'O').sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(f => {
+    if (f.match !== null) return;
+    if (F().filter(x => x !== f && Math.abs(x.importe - f.importe) <= TOLERANCIA).length) return;
+    const cands = B().filter(b => !gasto(b) && (f.fecha - b.fecha) / 864e5 >= -5 && (f.fecha - b.fecha) / 864e5 <= 62);
+    const fams = new Map();
+    cands.forEach(b => { const k = fam(b.texto) + '|' + (b.cuit || ''); if (!fams.has(k)) fams.set(k, []); fams.get(k).push(b); });
+    const hallados = [];
+    fams.forEach((g, k) => {
+      if (g.length < 2 || g.length > 16 || k.split('|')[0].length < 6) return;
+      if (!g.some(b => (b.importe > 0) === (f.importe > 0))) return;
+      const c = unicaSuma(g, f.importe, 5);
+      if (c) hallados.push([k, c]);
+    });
+    if (hallados.length !== 1) return;
+    unir_(hallados[0][1], [f], 'Pendientes: ' + hallados[0][1].length + ' partidas del banco del mismo concepto suman el registro de FBS (revisar)');
+  });
+  // 2. corrección en FBS que anula un recibo pendiente de meses anteriores
+  const fechasDm = t => {
+    const out = [];
+    (String(t).match(/\b\d{1,2}[\/-]\d{1,2}\b|\b\d{4}\b/g) || []).forEach(x => {
+      const p = x.includes('/') || x.includes('-') ? x.split(/[\/-]/).map(Number) : [Number(x.slice(0, 2)), Number(x.slice(2))];
+      if (p[0] >= 1 && p[0] <= 31 && p[1] >= 1 && p[1] <= 12) out.push(p[0] + '/' + p[1]);
+    });
+    return out;
+  };
+  F().filter(r => r.importe < -10000 && /^(RM-|CORRECC)/i.test(r.texto)).forEach(r => {
+    if (r.match !== null) return;
+    const igual = F().filter(p => p.origen === 'Arrastre' && p.importe > 0 && Math.abs(p.importe + r.importe) <= TOLERANCIA);
+    if (!igual.length) return;
+    const dm = fechasDm(r.texto);
+    const conFecha = igual.filter(p => dm.includes(p.fecha.getDate() + '/' + (p.fecha.getMonth() + 1)));
+    const elegido = igual.length === 1 ? igual[0] : conFecha.length === 1 ? conFecha[0] : null;
+    if (!elegido) return;
+    if (F().filter(x => x !== r && Math.abs(x.importe - r.importe) <= TOLERANCIA && /^(RM-|CORRECC)/i.test(x.texto)).length) return;
+    compensar_([r, elegido], 'Neteo S3 ↔ S4: corrección en FBS que anula un recibo pendiente de meses anteriores (revisar)');
+  });
+  // 3. registros de FBS del mismo día que se anulan (mismo número o misma palabra, suma exacta)
+  const claves = t => {
+    const out = tokens_(t);
+    (String(t).match(/\d{4,}/g) || []).forEach(n => out.add(n.replace(/^0+/, '')));
+    ['CANJE', 'VALOR', 'BANCO', 'MACRO', 'GASTOS', 'ASTOS', 'LIQ'].forEach(x => out.delete(x));
+    return out;
+  };
+  F().filter(r => Math.abs(r.importe) >= 1000).sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(r => {
+    if (r.match !== null) return;
+    const kr = claves(r.texto);
+    if (!kr.size) return;
+    const g = F().filter(p => p !== r && (p.importe > 0) !== (r.importe > 0) && dias_(p.fecha, r.fecha) === 0 && comparten_(kr, claves(p.texto)));
+    if (!g.length || g.length > 10) return;
+    const uno = g.filter(p => Math.abs(p.importe + r.importe) <= TOLERANCIA);
+    const c = uno.length === 1 ? uno : uno.length ? null : unicaSuma(g, -r.importe, 3);
+    if (c) compensar_([r].concat(c), 'Neteo S3 ↔ S4: registros de FBS del mismo día que se anulan (revisar)');
+  });
+  // 4. recibo + RM chico por la diferencia contra la transferencia (mismo CUIT / DNI)
+  B().filter(b => b.importe > 0).forEach(b => {
+    if (b.match !== null) return;
+    const fs = F().filter(f => f.importe > b.importe && f.importe - b.importe <= 2000 && distancia_(b, f) <= 7 && MISMO_ID_(b, f));
+    if (fs.length !== 1) return;
+    const f = fs[0], dif = redondear_(f.importe - b.importe);
+    const rm = F().filter(x => x !== f && Math.abs(x.importe + dif) <= TOLERANCIA && /^RM-/i.test(x.texto) && dias_(x.fecha, f.fecha) <= 31);
+    if (!rm.length) return;
+    unir_([b], [f, rm[0]], 'Pendientes: recibo menos RM por la diferencia (' + formato_(dif) + '), mismo CUIT/DNI (revisar)');
+  });
+  // 5. mismo CUIT o nombre, diferencia chica
+  const pref = (a, b) => { for (const x of a) for (const y of b) if (x.length >= 6 && y.length >= 6 && x.slice(0, 8) === y.slice(0, 8)) return true; return false; };
+  B().forEach(b => {
+    if (b.match !== null) return;
+    const lim = Math.min(500, Math.abs(b.importe) * 0.0002);
+    const fs = F().filter(f => (f.importe > 0) === (b.importe > 0) && Math.abs(f.importe - b.importe) > TOLERANCIA &&
+      Math.abs(f.importe - b.importe) <= lim && distancia_(b, f) <= 3 &&
+      (MISMO_ID_(b, f) || POR_NOMBRE_(b, f) || pref(tokens_(b.texto), tokens_(f.texto))));
+    if (fs.length !== 1) return;
+    const dif = redondear_(b.importe - fs[0].importe);
+    unir_([b], fs, 'Mismo CUIT o nombre, diferencia chica (dif. ' + formato_(dif) + ') (revisar)');
+    ajuste(fs[0], dif);
+  });
+  // 6. pendiente anterior con centavos registrado con la fecha sin año ("30-1")
+  B().filter(b => b.origen === 'Arrastre' && especifico_(b.importe) && Math.abs(b.importe) >= 100000).forEach(b => {
+    if (b.match !== null) return;
+    const fs = F().filter(f => Math.abs(f.importe - b.importe) <= TOLERANCIA && fechasDm(f.texto).includes(b.fecha.getDate() + '/' + (b.fecha.getMonth() + 1)));
+    if (fs.length !== 1 || B().filter(x => Math.abs(x.importe - b.importe) <= TOLERANCIA).length !== 1) return;
+    unir_([b], fs, 'Pendiente anterior: registrado con su fecha (día-mes) escrita en el comentario (revisar)');
+  });
 }
 
 function netearPendientesFbs_(items) {
