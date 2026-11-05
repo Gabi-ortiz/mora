@@ -1856,17 +1856,24 @@ function cambiosPostCierre_(ctx, desde, cierreAnterior) {
 }
 
 /**
- * Qué cambios de "CAMBIOS POST CIERRE" entran en el mes que se concilia: los de meses anteriores; el mes inmediato anterior
- * siempre (se concilió con su foto fija), los más viejos solo si el cambio se detectó desde el último cierre de esta planilla
- * (los anteriores ya se usaron).
+ * Qué cambios de "CAMBIOS POST CIERRE" entran en el mes que se concilia: los del mismo mes (la base ya lo congeló porque se
+ * concilia después del 15 del mes siguiente: MOVIMIENTOS tiene la versión vieja y FBS la corregida) y los de meses
+ * anteriores; el mes inmediato anterior siempre (se concilió con su foto fija), los más viejos solo si el cambio se detectó
+ * desde el último cierre de esta planilla (los anteriores ya se usaron).
  */
 function cambioAplica_(mesCerrado, detectado, desde, cierreAnterior) {
   const mc = String(mesCerrado || '').match(/(\d{4})-(\d{1,2})/);
   if (!mc) return false;
   const mes = Number(mc[1]) * 12 + Number(mc[2]) - 1, mesM = desde.getFullYear() * 12 + desde.getMonth();
+  if (mes === mesM) return true;
   const det = parseFecha_(detectado);
   const diaCierre = cierreAnterior ? new Date(cierreAnterior.getFullYear(), cierreAnterior.getMonth(), cierreAnterior.getDate()) : null;
   return mes < mesM && (mes === mesM - 1 || !!(diaCierre && det && det >= diaCierre));
+}
+/** El cambio es de un mes anterior al que se concilia (movimiento tardío) o del mismo mes (movimiento normal del mes). */
+function cambioTardio_(mesCerrado, desde) {
+  const mc = String(mesCerrado || '').match(/(\d{4})-(\d{1,2})/);
+  return !mc || Number(mc[1]) * 12 + Number(mc[2]) - 1 < desde.getFullYear() * 12 + desde.getMonth();
 }
 
 /** Parte "pura" de cambiosPostCierre_ (sin acceso a la base): arma las filas tardías a partir de la hoja de cambios. */
@@ -1874,14 +1881,15 @@ function armarCambios_(cambios, cab, viejas, nombres, ctas, desde, cierreAnterio
   const hc = cambios[0].map(normalizar_), c = n => hc.indexOf(n);
   const h = cab.map(normalizar_), out = [cab.concat(['_TARDIO'])];
   const nuestras = [String(Number(ctas.E))].concat(ctas.O ? [String(Number(ctas.O))] : []);
-  let n = 0;
+  let n = 0, tardio = 'SI';
   const fila = (base, campos) => {
     const r = base ? base.slice(0, cab.length) : cab.map(() => '');
     Object.keys(campos).forEach(k => { const i = h.indexOf(k); if (i >= 0) r[i] = campos[k]; });
-    return r.concat(['SI']);
+    return r.concat([tardio]);
   };
   cambios.slice(1).forEach(r => {
     if (!cambioAplica_(r[c('mes cerrado')], r[c('detectado')], desde, cierreAnterior)) return;
+    tardio = cambioTardio_(r[c('mes cerrado')], desde) ? 'SI' : 'NO';
     const id = String(r[c('detmovid')] || '').replace(/\D/g, ''), tipo = String(r[c('tipo')] || '').toUpperCase();
     const cambiosCampo = {};
     String(r[c('detalle')] || '').split(/;\s*/).forEach(x => {
