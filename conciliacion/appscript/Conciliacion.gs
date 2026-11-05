@@ -731,7 +731,7 @@ function cerrarMes() {
   const dif = redondear_(res.ajustado - res.saldoBanco);
 
   const hist = hojaHistorial_(ss);
-  const previos = hist.getLastRow() > 1 ? hist.getRange(2, 1, hist.getLastRow() - 1, 2).getValues() : [];
+  const previos = hist.getLastRow() > 1 ? hist.getRange(2, 1, hist.getLastRow() - 1, 2).getDisplayValues() : [];   // display: Sheets convierte "2026-08" en fecha
   const yaCerrado = previos.some(r => String(r[0]) === periodo && String(r[1]) === empresa);
   let msg = 'Cerrar ' + periodo + (empresa ? ' — ' + empresa : '') + '\n\nDiferencia de control: ' + formato_(dif) +
     '\n\nSe va a guardar una foto de la conciliación en Drive y los pendientes pasan al mes siguiente.';
@@ -4154,7 +4154,7 @@ function revisarPendientes() {
   let cierre = parseFecha_(paramDe_(parametros, '^.ltimo cierre'));
   if (!cierre) {
     const hist = ss.getSheetByName(HOJA.historial);
-    const ult = hist && hist.getLastRow() > 1 ? String(hist.getRange(hist.getLastRow(), 1).getValue()) : '';
+    const ult = hist && hist.getLastRow() > 1 ? String(hist.getRange(hist.getLastRow(), 1).getDisplayValue()) : '';
     const m = ult.match(/^(\d{4})-(\d{2})$/);
     if (m) cierre = new Date(Number(m[1]), Number(m[2]), 0);
   }
