@@ -601,6 +601,7 @@ function armarResumen(ss, listas) {
     .find(esMesValido) || '';
   sh.getRange(1, 1, sh.getMaxRows(), sh.getMaxColumns()).breakApart();
   sh.clear();
+  sh.clearFormats(); // clear() dejaba formatos de número (% y $) del armado anterior
   sh.clearNotes(); // clear() no borra las notas ni las alturas de fila del armado anterior
   sh.setRowHeights(1, sh.getMaxRows(), 21);
   sh.clearConditionalFormatRules();
