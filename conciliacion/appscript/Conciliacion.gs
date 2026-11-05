@@ -564,9 +564,11 @@ function procesar_(ss) {
     const hasta = new Date(ult.getFullYear(), ult.getMonth() + 1, 0);
     const r = leerBaseExterna_(idBase, paramDe_(parametros, '^hoja de la base') || 'MOVIMIENTOS', cuentasDe_(parametros), desde, hasta);
     base = r.filas; saldosIniciales = r.saldos; ctxBase = r.ctx || null; hastaBase = hasta;
+    marca('base del mes');
     // las consultas siguientes a la base no dependen entre sí: se hacen todas a la vez
     if (r.ctx) precargarGviz_(r.ctx.id, r.ctx.hoja, [qPosteriores_(r.ctx, hasta), qFotoActual_(r.ctx, desde), qNombres_(r.ctx)]);
     if (r.ctx) posterioresO = ingresosOPosteriores_(r.ctx, hasta);
+    marca('ingresos posteriores');
     // movimientos de meses cerrados cargados o modificados después del cierre anterior
     const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
     const foto = leerFotoBase_(ss);
@@ -577,6 +579,7 @@ function procesar_(ss) {
         if (t.filas.length > 1) { base = unirFilas_(base, t.filas); tardios = t.total; }
       }
     }
+    marca('foto del cierre');
     if (r.ctx) {
       const cpc = cambiosPostCierre_(r.ctx, desde, fechaUltimoCierre_(ss));
       if (cpc.filas.length > 1) {
@@ -584,6 +587,7 @@ function procesar_(ss) {
         avisosBase.push('Se sumaron ' + cpc.n + ' cambios de la hoja "' + HOJA_CAMBIOS_BASE + '" de la base (movimientos de meses ya ' +
           'congelados que se cargaron, modificaron o borraron en FBS después): se cruzan contra los pendientes anteriores.');
       }
+      marca('cambios post cierre');
     }
     if (ss.getSheetByName(HOJA.base) && ss.getSheetByName(HOJA.base).getLastRow() > 1) {
       avisosBase.push('Se usó la base externa de "' + HOJA.parametros + '"; la hoja "' + HOJA.base + '" de esta planilla se ignoró (se puede borrar).');
