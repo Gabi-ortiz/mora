@@ -638,38 +638,59 @@ function armarResumen(ss, listas) {
   sh.setRowHeight(1, 34);
   sh.setRowHeight(3, 8);
 
-  // --- Bloques (filas 8-18), uno al lado del otro: ADJUDICADOS DEL ACTO (B:E), CIERRES DEL MES (F:I) e
+  // --- Bloques (desde la fila 8), uno al lado del otro: ADJUDICADOS DEL ACTO (B:E), CIERRES DEL MES (F:I) e
   // INCENTIVO PEDIDOS (J:M). Valores en E, I y M.
+  // Sorteo: Bajas + TP + ADM + Clientes = total (sin superponer). TP = "TP" en Responsable; ADM = "ADM" en
+  // RESPONSABLE; las bajas no se cuentan en las demás líneas.
+  const sorteo = `${acto},${r.Modalidad},"Por sorteo"`;
+  const noBaja = `${r.Pedido},"<>BAJA ADJ"`;
   const izq1 = [
     ['Total adjudicados', `=COUNTIFS(${acto})`],
     ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`],
     ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`, true],
     ['   Netos licitación', '=E10-E11-E12', true],
-    ['Por sorteo', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo")`],
-    ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Pedido},"BAJA ADJ")`, true],
-    ['   ADM', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.RESPONSABLE},"ADM")`, true],
-    ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por sorteo",${r.Responsable},"TP")`, true],
+    ['Por sorteo', `=COUNTIFS(${sorteo})`],
+    ['   Bajas (caídas)', `=COUNTIFS(${sorteo},${r.Pedido},"BAJA ADJ")`, true],
+    ['   TP', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"TP",${r.RESPONSABLE},"<>ADM")`, true],
+    ['   ADM', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM")`, true],
+    ['         Clientes', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"<>TP")`, true],
+    ['         TP ADM', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"TP")`, true],
+    ['   Clientes', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"<>TP",${r.RESPONSABLE},"<>ADM")`, true],
   ];
   // Cuadros por modelo (más abajo): clientes y TP. El VM netos del mes es la suma de los dos.
   const T = tablasResumen();
+  // Pedidos del mes (netos): clientes y TP, cada uno por licitación y por sorteo, con cuántos son del acto del
+  // mes y cuántos de actos anteriores. Los AJUSTES (sin responsable ni modalidad) suman en clientes.
+  const criterioCierre = `${r['Mes cierre']},${M},${aprob}`;
+  const netos = (extra) => `COUNTIFS(${criterioCierre}${extra})`;
+  const apertura = (resp, mod) => {
+    const filtro = `,${r.Responsable},"${resp}",${r.Modalidad},"${mod}"`;
+    const total = netos(filtro);
+    const delActo = netos(`${filtro},${r.Acto},${M}`);
+    return [`="         Por ${mod === 'Por sorteo' ? 'sorteo' : 'licitación'}   (del acto "&${delActo}&` +
+      `" · anteriores "&(${total}-${delActo})&")"`, `=${total}`, true];
+  };
   const izq2 = [
-    ['Netos del mes (todos los actos)',
-      `=COUNTIFS(${r['Mes cierre']},${M},${aprob})+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
-    ['   del acto del mes', `=COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`, true],
-    ['   de actos anteriores', '=I9-I10', true],
-    ['   TP', `=COUNTIFS(${r['Mes cierre']},${M},${aprob},${r.Responsable},"TP")`, true],
+    ['Pedidos del mes (todos los actos)',
+      `=${netos('')}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
+    ['   Clientes', `=${netos(`,${r.Responsable},"<>TP"`)}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
+    apertura('<>TP', 'Por licitación'),
+    apertura('<>TP', 'Por sorteo'),
+    ['   T.P.', `=${netos(`,${r.Responsable},"TP"`)}`],
+    apertura('TP', 'Por licitación'),
+    apertura('TP', 'Por sorteo'),
     ['Objetivo', `=IFERROR(VLOOKUP(${M},OBJETIVOS!$A:$B,2,FALSE),"")`],
-    ['Proyección (+15%)', '=IF(I13="","",ROUND(I13*1.15))'],
-    ['Faltan para el objetivo', '=IF(I13="","",MAX(0,I13-I9))'],
-    ['% cumplimiento', '=IF(N(I13)=0,"",I9/I13)'],
+    ['Proyección (+15%)', '=IF(I16="","",ROUND(I16*1.15))'],
+    ['Faltan para el objetivo', '=IF(I16="","",MAX(0,I16-I9))'],
+    ['% cumplimiento', '=IF(N(I16)=0,"",I9/I16)'],
     ['VM netos del mes', `=F${T.clientes.total}+F${T.tp.total}`],
   ];
   const der2 = [
     ['Categoría del mes', '=IFERROR(VLOOKUP(' + M + ',OBJETIVOS!$A:$C,3,FALSE),"")'],
-    ['% cumplimiento pedidos', '=I16'],
-    ['Bonus cumplimiento pedidos totales', `=${bonusSegunCategoria('CUMPLIMIENTO PEDIDOS', 'N(I16)<1')}`],
-    ['Pedidos adicionales al objetivo', '=IF(N(I13)=0,"",MAX(0,I9-I13))'],
+    ['% cumplimiento pedidos', '=I19'],
+    ['Bonus cumplimiento pedidos totales', `=${bonusSegunCategoria('CUMPLIMIENTO PEDIDOS', 'N(I19)<1')}`],
+    ['Pedidos adicionales al objetivo', '=IF(N(I16)=0,"",MAX(0,I9-I16))'],
     ['Bonus por pedido adicional', `=${bonusSegunCategoria('ADICIONALES', 'N(M12)=0')}`],
   ];
   bloqueResumen(sh, 8, 2, 'ADJUDICADOS DEL ACTO', izq1);
@@ -695,11 +716,17 @@ function armarResumen(ss, listas) {
     .setValue('El bonus de cumplimiento exige además el 100% del objetivo de suscripciones (no se mide en ' +
       'este archivo). Los % salen de la hoja INCENTIVOS según la categoría.')
     .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
-  ['I16', 'M10'].forEach((c) => sh.getRange(c).setNumberFormat('0%'));
+  // Sorteo: la cuenta que cierra con el total.
+  sh.getRange('B21:E21').merge()
+    .setFormula('="Bajas "&E15&" + TP "&E16&" + ADM "&E17&" + Clientes "&E20&" = "&(E15+E16+E17+E20)&' +
+      '"   ·   TP sorteo: "&E16&" + "&E19&" = "&(E16+E19)')
+    .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
+  ['I19', 'M10'].forEach((c) => sh.getRange(c).setNumberFormat('0%'));
   ['M11', 'M13'].forEach((c) => sh.getRange(c).setNumberFormat('0.00%'));
-  sh.getRange('I17').setNumberFormat('$ #,##0');
+  sh.getRange('I20').setNumberFormat('$ #,##0');
+  sh.getRange('F11:H12').setFontSize(9);
+  sh.getRange('F14:H15').setFontSize(9);
   sh.setRowHeight(7, 10);
-  sh.setRowHeight(19, 14);
 
   // --- Tarjetas (filas 4-6): lo más importante, a la vista. Las tres primeras (el acto: adjudicados, clientes y
   // T.P.) van en un gris azulado suave, separadas de los resultados (aprobados, netos y cumplimiento).
@@ -708,15 +735,15 @@ function armarResumen(ss, listas) {
   const aprobados = (filtro) => `COUNTIFS(${acto},${aprob},${filtro})`;
   const conAprobados = (filtro, total) =>
     `=IF(N(${total})=0,"","Aprobados "&${aprobados(filtro)}&"   ·   "&TEXT(${aprobados(filtro)}/${total},"0%"))`;
+  const netosDelActo = `COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`;
   const tarjetas = [
     ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E14', '0', true],
     ['D', 'E', 'Clientes del acto', `=COUNTIFS(${acto},${noTp})`, conAprobados(noTp, 'D5'), '0', true],
     ['F', 'G', 'T.P. del acto', `=COUNTIFS(${acto},${tp})`, conAprobados(tp, 'F5'), '0', true],
-    ['H', 'I', 'Aprobados del acto', `=COUNTIFS(${acto},${aprob})`,
-      '=IF(N(B5)=0,"","Conversión "&TEXT(H5/B5,"0%"))', '0'],
-    ['J', 'K', 'Netos del mes', '=I9', '="Del acto "&I10&"   ·   Anteriores "&I11', '0'],
-    ['L', 'M', 'Cumplimiento objetivo', '=I16',
-      '=IF(I13="","Sin objetivo cargado","Objetivo "&I13&"   ·   Categoría "&M9)', '0%'],
+    ['H', 'J', 'Pedidos del mes', '=I9',
+      `="Del acto "&${netosDelActo}&"   ·   Anteriores "&(I9-${netosDelActo})`, '0'],
+    ['K', 'M', 'Cumplimiento objetivo', '=I19',
+      '=IF(I16="","Sin objetivo cargado","Objetivo "&I16&"   ·   Categoría "&M9)', '0%'],
   ];
   tarjetas.forEach(([c1, c2, titulo, valor, detalle, formato, delActo]) => {
     sh.getRange(`${c1}4:${c2}6`).setBackground(delActo ? FONDO_TARJETA_ACTO : FONDO_TARJETA)
@@ -734,7 +761,7 @@ function armarResumen(ss, listas) {
   sh.setRowHeight(5, 40);
 
   // Semáforo del cumplimiento (tarjeta y bloques).
-  const semaforo = [sh.getRange('L5'), sh.getRange('I16'), sh.getRange('M10')];
+  const semaforo = [sh.getRange('K5'), sh.getRange('I19'), sh.getRange('M10')];
   sh.setConditionalFormatRules([
     SpreadsheetApp.newConditionalFormatRule().whenNumberGreaterThanOrEqualTo(1)
       .setFontColor('#38761d').setRanges(semaforo).build(),
@@ -921,10 +948,10 @@ function armarResumen(ss, listas) {
  * última fila de datos reservada. Las que quedan vacías se ocultan.
  */
 function tablasResumen() {
-  const familia = { titulo: 20, total: 22, ultima: 33 };
-  const clientes = { titulo: 35, total: 37, ultima: 76 };
-  const tp = { titulo: 78, total: 80, ultima: 109 };
-  return { familia, clientes, tp, control: 111 };
+  const familia = { titulo: 23, total: 25, ultima: 36 };
+  const clientes = { titulo: 38, total: 40, ultima: 79 };
+  const tp = { titulo: 81, total: 83, ultima: 112 };
+  return { familia, clientes, tp, control: 114 };
 }
 
 /** Oculta las filas vacías de los cuadros del RESUMEN y muestra las que tienen modelo (o familia). */

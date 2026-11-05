@@ -603,3 +603,15 @@ Fiat (OWBSO040 del 22/10):
   T.P. del acto (Responsable "TP"), con sus aprobados y el % de conversión,
   van en gris azulado (#eef2f8), separadas por una línea de Aprobados, Netos
   del mes y Cumplimiento objetivo. El semáforo de cumplimiento pasa a L5.
+- (05/11) RESUMEN:
+  - Tarjetas: sale "Aprobados del acto". Quedan Adjudicados, Clientes y T.P.
+    del acto (2 columnas cada una) y Pedidos del mes (con del acto /
+    anteriores) y Cumplimiento objetivo (3 columnas cada una).
+  - ADJUDICADOS · Por sorteo, sin superponer: Bajas, TP (no ADM), ADM (con
+    Clientes y TP ADM debajo) y Clientes. Una línea abajo muestra que suma el
+    total y el TP de sorteo (TP + TP ADM).
+  - CIERRES DEL MES: Pedidos del mes; Clientes y T.P., cada uno con por
+    licitación y por sorteo, y entre paréntesis del acto / anteriores.
+    Objetivo pasa a I16 y % cumplimiento a I19.
+  - Los cuadros bajan 3 filas: familia en 23, clientes en 38, TP en 81 y la
+    línea de control en 114.
