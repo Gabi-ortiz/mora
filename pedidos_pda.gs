@@ -587,6 +587,8 @@ const CELDA_CATEGORIA_RESUMEN = 'M9';
 const GRIS_TEXTO = '#666666';
 const GRIS_LINEA = '#e0e0e0';
 const FONDO_TARJETA = '#f8f4f4';
+const FONDO_SECCION = '#f5f0f0'; // encabezados de grupo dentro de los bloques (Por licitación, Clientes...)
+const FONDO_SUBDETALLE = '#fafafa'; // detalle del detalle (las ADM de clientes y de TP)
 // Tarjetas del acto (adjudicados, clientes y T.P.): gris azulado suave para separarlas de los resultados.
 const FONDO_TARJETA_ACTO = '#eef2f8';
 const TEXTO_TARJETA_ACTO = '#4a5a73';
@@ -647,16 +649,16 @@ function armarResumen(ss, listas) {
   const noBaja = `${r.Pedido},"<>BAJA ADJ"`;
   const izq1 = [
     ['Total adjudicados', `=COUNTIFS(${acto})`],
-    ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`],
+    ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`, 'seccion'],
     ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`, true],
     ['   Netos licitación', '=E10-E11-E12', true],
-    ['Por sorteo', `=COUNTIFS(${sorteo})`],
+    ['Por sorteo', `=COUNTIFS(${sorteo})`, 'seccion'],
     ['   Bajas (caídas)', `=COUNTIFS(${sorteo},${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"TP",${r.RESPONSABLE},"<>ADM")`, true],
     ['   ADM', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM")`, true],
-    ['         Clientes', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"<>TP")`, true],
-    ['         TP ADM', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"TP")`, true],
+    ['de clientes', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"<>TP")`, 2],
+    ['de TP', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"TP")`, 2],
     ['   Clientes', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"<>TP",${r.RESPONSABLE},"<>ADM")`, true],
   ];
   // Cuadros por modelo (más abajo): clientes y TP. El VM netos del mes es la suma de los dos.
@@ -669,16 +671,17 @@ function armarResumen(ss, listas) {
     const filtro = `,${r.Responsable},"${resp}",${r.Modalidad},"${mod}"`;
     const total = netos(filtro);
     const delActo = netos(`${filtro},${r.Acto},${M}`);
-    return [`="         Por ${mod === 'Por sorteo' ? 'sorteo' : 'licitación'}   (del acto "&${delActo}&` +
+    return [`="   Por ${mod === 'Por sorteo' ? 'sorteo' : 'licitación'}     (del acto "&${delActo}&` +
       `" · anteriores "&(${total}-${delActo})&")"`, `=${total}`, true];
   };
   const izq2 = [
     ['Pedidos del mes (todos los actos)',
       `=${netos('')}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
-    ['   Clientes', `=${netos(`,${r.Responsable},"<>TP"`)}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
+    ['Clientes', `=${netos(`,${r.Responsable},"<>TP"`)}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`,
+      'seccion'],
     apertura('<>TP', 'Por licitación'),
     apertura('<>TP', 'Por sorteo'),
-    ['   T.P.', `=${netos(`,${r.Responsable},"TP"`)}`],
+    ['T.P.', `=${netos(`,${r.Responsable},"TP"`)}`, 'seccion'],
     apertura('TP', 'Por licitación'),
     apertura('TP', 'Por sorteo'),
     ['Objetivo', `=IFERROR(VLOOKUP(${M},OBJETIVOS!$A:$B,2,FALSE),"")`],
@@ -939,6 +942,7 @@ function armarResumen(ss, listas) {
     .setFontSize(9).setFontColor(GRIS_TEXTO).setHorizontalAlignment('left');
   [fa.titulo - 1, c.titulo - 1, T.tp.titulo - 1, T.control - 1].forEach((f) => sh.setRowHeight(f, 14));
   alinearTodo(sh);
+  alinearEtiquetas(sh);
   sh.getRange(T.control, 2).setHorizontalAlignment('left');
   SpreadsheetApp.flush();
   ajustarFilasResumen(sh);
@@ -979,18 +983,44 @@ function alinearTodo(sh) {
 }
 
 /** Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. */
+/**
+ * Un bloque del RESUMEN: título en la fila f0, etiqueta en 3 columnas y valor en la 4ta. Nivel de cada fila
+ * (3er elemento): sin nivel = total (negrita); 'seccion' = encabezado de grupo (negrita con fondo suave);
+ * true / 1 = detalle (gris, con sangría); 2 = detalle del detalle (↳, itálica, más chico, fondo gris claro).
+ * Las etiquetas van a la izquierda para que se vea la sangría (ver alinearEtiquetas).
+ */
 function bloqueResumen(sh, f0, c0, titulo, filas) {
   sh.getRange(f0, c0, 1, 4).merge().setValue(titulo)
     .setFontWeight('bold').setBackground(COLOR_ENCABEZADO).setFontColor('white');
-  filas.forEach(([etiqueta, formula, secundaria], i) => {
+  filas.forEach(([etiqueta, formula, nivel], i) => {
     const f = f0 + 1 + i;
-    sh.getRange(f, c0, 1, 3).merge().setValue(etiqueta)
-      .setFontColor(secundaria ? GRIS_TEXTO : '#000000');
-    sh.getRange(f, c0 + 3).setFormula(formula).setHorizontalAlignment('center')
-      .setFontWeight(secundaria ? 'normal' : 'bold');
-    sh.getRange(f, c0, 1, 4)
-      .setBorder(null, null, true, null, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+    const n = nivel === true ? 1 : nivel;
+    const texto = n === 2 ? `        ↳ ${String(etiqueta).trim()}` : etiqueta;
+    const lbl = sh.getRange(f, c0, 1, 3).merge().setValue(texto);
+    const val = sh.getRange(f, c0 + 3).setFormula(formula).setHorizontalAlignment('center');
+    const fila = sh.getRange(f, c0, 1, 4);
+    if (n === 'seccion') {
+      lbl.setFontWeight('bold').setFontColor('#000000');
+      val.setFontWeight('bold');
+      fila.setBackground(FONDO_SECCION);
+    } else if (n === 1) {
+      lbl.setFontColor(GRIS_TEXTO);
+      val.setFontWeight('normal');
+    } else if (n === 2) {
+      lbl.setFontColor('#888888').setFontStyle('italic').setFontSize(9);
+      val.setFontColor('#777777').setFontStyle('italic').setFontSize(9).setFontWeight('normal');
+      fila.setBackground(FONDO_SUBDETALLE);
+    } else {
+      lbl.setFontWeight('bold').setFontColor('#000000');
+      val.setFontWeight('bold');
+    }
+    fila.setBorder(null, null, true, null, null, null, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
   });
+}
+
+/** Etiquetas de los bloques del RESUMEN a la izquierda (alinearTodo centra todo). */
+function alinearEtiquetas(sh) {
+  ['B9:D21', 'F9:H20', 'J9:L13', 'J14:K14'].forEach((a1) => sh.getRange(a1).setHorizontalAlignment('left'));
 }
 
 // ---------------------------------------------------------------------------

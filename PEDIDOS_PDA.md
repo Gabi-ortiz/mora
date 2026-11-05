@@ -615,3 +615,8 @@ Fiat (OWBSO040 del 22/10):
     Objetivo pasa a I16 y % cumplimiento a I19.
   - Los cuadros bajan 3 filas: familia en 23, clientes en 38, TP en 81 y la
     línea de control en 114.
+- (05/11) Bloques del RESUMEN con niveles: etiquetas a la izquierda, totales
+  en negrita, secciones (Por licitación, Por sorteo, Clientes, T.P.) con fondo
+  suave, detalle en gris con sangría y el detalle de ADM ("↳ de clientes",
+  "↳ de TP") en itálica sobre fondo gris claro. Al armar se borran los
+  formatos de número viejos (clearFormats).
