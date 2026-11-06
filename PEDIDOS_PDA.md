@@ -620,3 +620,16 @@ Fiat (OWBSO040 del 22/10):
   suave, detalle en gris con sangría y el detalle de ADM ("↳ de clientes",
   "↳ de TP") en itálica sobre fondo gris claro. Al armar se borran los
   formatos de número viejos (clearFormats).
+- (06/11) Remanente del acto anterior desde el reporte de SGA:
+  - Se pega el "Excel de Adjudicados" de SGA (con Estado Pedido) en PEGAR SGA
+    y se usa Pedidos > Calcular remanentes. Detecta el acto del filtro y la
+    fecha del reporte, pide confirmar y lo guarda en la hoja oculta
+    CALCULO REMANENTES (reemplaza lo anterior de ese acto). Los del acto que
+    están en BASE y ya no figuran en SGA quedan como "NO SGA". No toca BASE.
+  - "Agregar acto pegado a BASE" sigue igual, para cargar actos nuevos.
+  - Remanente = sigue en SGA, Estado Pedido distinto de A y en BASE no es
+    BAJA ADJ. Las bajas van aparte y no cuentan.
+  - En el RESUMEN, debajo de POR MODELO PEDIDO · TP: el cuadro del acto del
+    mes anterior (Z2) por estado en SGA (E / P / S), por licitación y sorteo,
+    TP y con CC aprobada, más las bajas; y debajo la lista de diferencias
+    SGA vs BASE para revisar a mano.

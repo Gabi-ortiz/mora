@@ -34,6 +34,9 @@ const HOJA_OBJETIVOS = 'OBJETIVOS';
 const HOJA_LISTAS = 'LISTAS';
 const HOJA_INCENTIVOS = 'INCENTIVOS';
 const HOJA_AJUSTES = 'AJUSTES';
+// Oculta: el último reporte de estado de SGA ("Excel de Adjudicados") de cada acto, cruzado con BASE. De acá
+// sale el remanente real del acto anterior y las diferencias SGA vs BASE del RESUMEN.
+const HOJA_REMANENTES = 'CALCULO REMANENTES';
 
 // Archivo "Objetivos y señales comerciales - PDA" (objetivos, categoría e incentivos).
 const ID_ARCHIVO_OBJETIVOS = '1TDMqgJkbkP11dSlUhvJpD5NhKtkj0vvuiu-pPPQ5kYo';
@@ -161,6 +164,7 @@ function onOpen() {
     .addItem('Agregar acto pegado a BASE', 'agregarActoPegado')
     .addItem('Actualizar informe', 'actualizarInforme')
     .addItem('Generar informe de incentivos', 'generarInforme')
+    .addItem('Calcular remanentes', 'actualizarRemanente')
     .addSeparator()
     .addItem('Armar / reparar estructura', 'armarEstructura')
     .addToUi();
@@ -245,6 +249,7 @@ function armarEstructura() {
   armarObjetivos(ss);
   armarIncentivos(ss);
   armarAjustes(ss);
+  armarCalculoRemanentes(ss);
   armarResumen(ss, listas);
   actualizarInforme();
 
@@ -449,7 +454,8 @@ function armarPegar(ss) {
   if (nueva) {
     sh.getRange('A1').setNote(
       'Pegar acá el reporte de SGA completo, tal cual se baja (Ctrl+A / Ctrl+C en ' +
-      'el Excel y Ctrl+V en A1). Después: menú Pedidos > Agregar acto pegado a BASE.');
+      'el Excel y Ctrl+V en A1). Reporte de carga de un acto: menú Pedidos > Agregar acto pegado a BASE. ' +
+      'Reporte "Excel de Adjudicados" (con Estado Pedido): menú Pedidos > Calcular remanentes.');
   }
   sh.setTabColor('#999999');
 }
@@ -582,6 +588,7 @@ const CELDA_MES_RESUMEN = 'H1';
 // Todas las fórmulas del RESUMEN usan esta celda, no H1.
 const CELDA_MES_CALC = 'Z1'; // oculta; B:M las usan los cuadros
 const CELDA_CATEGORIA_RESUMEN = 'M9';
+const CELDA_ACTO_ANTERIOR = 'Z2'; // oculta: mes anterior al elegido
 
 // Paleta: el bordó del reporte de SGA + grises suaves.
 const GRIS_TEXTO = '#666666';
@@ -616,6 +623,10 @@ function armarResumen(ss, listas) {
   if (sh.getMaxColumns() < 26) sh.insertColumnsAfter(sh.getMaxColumns(), 26 - sh.getMaxColumns());
   sh.showColumns(1, sh.getMaxColumns()); // la celda oculta antes estaba en K y después en M
   sh.getRange(CELDA_MES_CALC).setFormula(formulaMesNormalizado(`$${CELDA_MES_RESUMEN.replace(/(\d+)/, '$$$1')}`));
+  // Z2: el mes anterior al elegido (el acto cuyo remanente se trabaja en el mes elegido).
+  const listaMeses = `{${MESES.map((m) => `"${m}"`).join(',')}}`;
+  sh.getRange(CELDA_ACTO_ANTERIOR).setFormula(`=IFERROR(LET(m,$Z$1,i,MATCH(LEFT(m,LEN(m)-3),${listaMeses},0),` +
+    `a,VALUE(RIGHT(m,2)),INDEX(${listaMeses},IF(i=1,12,i-1))&" "&TEXT(IF(i=1,a-1,a),"00")),"")`);
   sh.hideColumns(sh.getRange(CELDA_MES_CALC).getColumn());
   const aprob = `${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA"`;
   const acto = `${r.Acto},${M}`;
@@ -941,8 +952,10 @@ function armarResumen(ss, listas) {
       `(D${c.total}+D${T.tp.total})&"   ·   Netos del mes: "&I9&IF(D${c.total}+D${T.tp.total}=I9,"   ✔","   ✖ revisar")`)
     .setFontSize(9).setFontColor(GRIS_TEXTO).setHorizontalAlignment('left');
   [fa.titulo - 1, c.titulo - 1, T.tp.titulo - 1, T.control - 1].forEach((f) => sh.setRowHeight(f, 14));
+  const alinearRemanente = seccionRemanente(sh, r, M, T.control + 2);
   alinearTodo(sh);
   alinearEtiquetas(sh);
+  alinearRemanente();
   sh.getRange(T.control, 2).setHorizontalAlignment('left');
   SpreadsheetApp.flush();
   ajustarFilasResumen(sh);
@@ -1021,6 +1034,236 @@ function bloqueResumen(sh, f0, c0, titulo, filas) {
 /** Etiquetas de los bloques del RESUMEN a la izquierda (alinearTodo centra todo). */
 function alinearEtiquetas(sh) {
   ['B9:D21', 'F9:H20', 'J9:L13', 'J14:K14'].forEach((a1) => sh.getRange(a1).setHorizontalAlignment('left'));
+}
+
+// ---------------------------------------------------------------------------
+// Remanente del acto anterior (reporte de estado de SGA)
+// ---------------------------------------------------------------------------
+//
+// Se pega en PEGAR SGA el reporte "Excel de Adjudicados" de SGA de un acto (con Estado Pedido y Estado
+// Carpeta) y el menú "Calcular remanentes" lo guarda en la hoja oculta CALCULO REMANENTES, reemplazando el
+// reporte anterior de ese acto. Ahí cada solicitud se cruza con BASE (fórmulas) y se marca si es remanente y si
+// hay alguna diferencia. La BASE no se modifica.
+// Remanente = sigue en el reporte de SGA, su Estado Pedido no es A (aprobado) y en BASE no es BAJA ADJ (las
+// bajas de sorteo siguen figurando en SGA). Las solicitudes del acto que están en BASE y ya no figuran en SGA se
+// guardan con estado "NO SGA" (las bajas de licitación salen del reporte).
+
+const ENC_REMANENTES = ['Acto', 'Fecha reporte', 'Solicitud', 'Grupo', 'Orden', 'Estado pedido SGA',
+  'Estado carpeta SGA', 'Modelo pedido SGA', 'Fecha pedido SGA', 'Cliente (BASE)', 'Modalidad (BASE)',
+  'Pedido (BASE)', 'Carpeta (BASE)', 'Responsable (BASE)', 'Modelo PEDIDO (BASE)', 'En BASE', 'Remanente',
+  'Diferencia'];
+const NO_SGA = 'NO SGA';
+
+/** Hoja oculta CALCULO REMANENTES: encabezado y fórmulas de cruce con BASE (filas 2 en adelante). */
+function armarCalculoRemanentes(ss) {
+  const { sh } = hoja(ss, HOJA_REMANENTES, 99);
+  sh.getRange(1, 1, 1, ENC_REMANENTES.length).setValues([ENC_REMANENTES]).setFontWeight('bold')
+    .setBackground(COLOR_ENCABEZADO).setFontColor('white');
+  sh.setFrozenRows(1);
+  sh.getRange('A:A').setNumberFormat('@');
+  const r = rangosBase();
+  const sol = 'C2:C';
+  // Clave solicitud + acto: una solicitud puede estar en BASE en un acto anterior (baja) y readjudicada después.
+  const clave = `${sol}&"|"&A2:A`;
+  const claveBase = `${r.Solicitud}&"|"&${r.Acto}`;
+  const buscar = (col) => `=ARRAYFORMULA(IF(${sol}="","",IFERROR(XLOOKUP(${clave},${claveBase},${col},""),"")))`;
+  sh.getRange('J2').setFormula(buscar(r['Apellido, Nombre']));
+  sh.getRange('K2').setFormula(buscar(r.Modalidad));
+  sh.getRange('L2').setFormula(buscar(r.Pedido));
+  sh.getRange('M2').setFormula(buscar(r.Carpeta));
+  sh.getRange('N2').setFormula(`=ARRAYFORMULA(IF(${sol}="","",UPPER(TRIM(IFERROR(XLOOKUP(${clave},` +
+    `${claveBase},${r.Responsable},""),"")))))`);
+  sh.getRange('O2').setFormula(buscar(r['Modelo PEDIDO']));
+  sh.getRange('P2').setFormula(`=ARRAYFORMULA(IF(${sol}="","",IF(ISNUMBER(XMATCH(${clave},${claveBase})),` +
+    '"SI","NO")))');
+  sh.getRange('Q2').setFormula('=ARRAYFORMULA(IF(C2:C="","",IF((F2:F<>"A")*(F2:F<>"' + NO_SGA +
+    '")*(L2:L<>"BAJA ADJ"),1,0)))');
+  // Diferencias SGA vs BASE (la primera que corresponda).
+  sh.getRange('R2').setFormula('=ARRAYFORMULA(IF(C2:C="","",' +
+    'IF(F2:F="' + NO_SGA + '",IF(L2:L<>"BAJA ADJ","Ya no está en SGA y en BASE no es baja (BASE: "&L2:L&")",""),' +
+    'IF(P2:P="NO","Está en SGA y no en BASE",' +
+    'IF((L2:L="BAJA ADJ")*((F2:F<>"E")+(I2:I<>"")>0),"Baja en BASE, sigue viva en SGA (SGA: "&F2:F&"/"&G2:G&' +
+    'IF(H2:H<>""," · pedido "&H2:H,"")&")",' +
+    'IF((F2:F="A")*(1-(L2:L="APROBADO")*(M2:M="APROBADA")),"Aprobado en SGA; en BASE: "&L2:L&" / "&M2:M,' +
+    'IF((F2:F="P")*(L2:L<>"PENDIENTE")*(L2:L<>"BAJA ADJ"),"Pendiente en SGA; en BASE: "&L2:L,' +
+    'IF((F2:F="S")*(L2:L<>"SUSPENDIDO")*(L2:L<>"BAJA ADJ"),"Suspendido en SGA; en BASE: "&L2:L,' +
+    'IF((H2:H<>"")*(O2:O=""),"Falta Modelo PEDIDO en BASE (SGA: "&H2:H&")","")))))))))');
+  sh.setColumnWidth(10, 220);
+  sh.setColumnWidth(18, 380);
+  sh.setTabColor('#999999');
+  if (!sh.isSheetHidden()) sh.hideSheet();
+  return sh;
+}
+
+/**
+ * Menú: toma el reporte de estado de SGA pegado en PEGAR SGA y lo guarda en CALCULO REMANENTES (reemplaza el
+ * reporte anterior del mismo acto). Después se ve en el RESUMEN eligiendo el mes siguiente al acto.
+ */
+function actualizarRemanente() {
+  const ss = SpreadsheetApp.getActive();
+  const ui = SpreadsheetApp.getUi();
+  const pegar = ss.getSheetByName(HOJA_PEGAR);
+  const datos = pegar && pegar.getLastRow() ? pegar.getDataRange().getValues() : [];
+  const iEnc = datos.findIndex((f) => {
+    const t = f.map((v) => String(v).trim());
+    return t.indexOf('Solicitud') >= 0 && t.indexOf('Estado Pedido') >= 0;
+  });
+  if (iEnc < 0) {
+    ui.alert(`Pegá en la hoja "${HOJA_PEGAR}" (en A1) el reporte "Excel de Adjudicados" de SGA del acto, con las ` +
+      'columnas Estado Pedido y Estado Carpeta, y volvé a usar este menú.');
+    return;
+  }
+  const enc = datos[iEnc].map((v) => String(v).trim());
+  const col = (n) => enc.indexOf(n);
+  const filas = datos.slice(iEnc + 1).filter((f) => /^\d+$/.test(String(f[col('Solicitud')]).trim()));
+
+  // Acto: la fecha de la fila de filtros ("Adjudicados; 13/10/2026 ..."); fecha del reporte: fila "Fecha:".
+  let acto = '';
+  let fecha = '';
+  datos.slice(0, iEnc).forEach((f) => f.forEach((v, j) => {
+    const t = String(v);
+    const m = t.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+    if (!acto && m && /adjudicad/i.test(t)) acto = etiquetaMes(Number(m[2]) - 1, Number(m[3]) % 100);
+    if (!fecha && /^Fecha:?$/i.test(t.trim())) fecha = f[j + 1];
+  }));
+  const resp = ui.prompt('Calcular remanentes',
+    `${filas.length} operaciones en el reporte` + (fecha ? ` (bajado el ${textoFecha(fecha)})` : '') + '.\n' +
+    (acto ? `Acto detectado: ${acto}. Aceptar para confirmar, ` : 'No pude detectar el acto: ') +
+    'o escribí el acto (ej. OCTUBRE 26).', ui.ButtonSet.OK_CANCEL);
+  if (resp.getSelectedButton() !== ui.Button.OK) return;
+  acto = resp.getResponseText().trim().toUpperCase() || acto;
+  if (!esMesValido(acto)) {
+    ui.alert(`"${acto}" no es un mes válido. Usá el formato MES AA, ej. OCTUBRE 26.`);
+    return;
+  }
+  const fechaRep = aFechaInforme(fecha) || aFechaCorta(fecha) || new Date();
+
+  const sh = armarCalculoRemanentes(ss);
+  const v = (f, n) => (col(n) >= 0 ? f[col(n)] : '');
+  const nuevas = filas.map((f) => [acto, fechaRep, String(v(f, 'Solicitud')).trim(), v(f, 'Grupo'), v(f, 'Orden'),
+    String(v(f, 'Estado Pedido')).trim().toUpperCase(), String(v(f, 'Estado Carpeta')).trim().toUpperCase(),
+    String(v(f, 'Modelo Pedido')).trim(), v(f, 'Pedido')]);
+  // Del acto, en BASE y no en el reporte.
+  const enReporte = new Set(nuevas.map((f) => String(Number(f[2]))));
+  const base = ss.getSheetByName(HOJA_BASE);
+  const ultima = ultimaFilaBase(base);
+  const bVals = ultima > 1 ? base.getRange(2, 1, ultima - 1, base.getLastColumn()).getValues() : [];
+  const c = (n) => colBase(n) - 1;
+  bVals.forEach((f) => {
+    const solicitud = String(f[c('Solicitud')]).trim();
+    if (textoMes(f[c('Acto')]) === acto && solicitud && !enReporte.has(String(Number(solicitud)))) {
+      nuevas.push([acto, fechaRep, solicitud, f[c('Grupo')], f[c('Orden')], NO_SGA, '', '', '']);
+    }
+  });
+
+  // Reemplaza las filas del mismo acto.
+  const n0 = sh.getLastRow() - 1;
+  const otras = n0 > 0 ? sh.getRange(2, 1, n0, 9).getValues().filter((f) => f[0] !== '' && textoMes(f[0]) !== acto) : [];
+  if (n0 > 0) sh.getRange(2, 1, n0, 9).clearContent();
+  const todas = otras.concat(nuevas);
+  if (todas.length) {
+    sh.getRange(2, 1, todas.length, 9).setValues(todas.map((f) => [textoMes(f[0])].concat(f.slice(1))));
+    sh.getRange(2, 2, todas.length, 1).setNumberFormat('dd/MM/yyyy');
+  }
+  pegar.clear();
+  SpreadsheetApp.flush();
+
+  const res = sh.getRange(2, 1, todas.length, ENC_REMANENTES.length).getValues().filter((f) => textoMes(f[0]) === acto);
+  const remanente = res.reduce((a, f) => a + (Number(f[16]) || 0), 0);
+  const diferencias = res.filter((f) => String(f[17]) !== '').length;
+  ui.alert(`Remanente del acto ${acto} actualizado: ${remanente} operaciones a trabajar` +
+    (diferencias ? `, ${diferencias} diferencia(s) SGA vs BASE.` : ', sin diferencias con BASE.') +
+    `\n\nSe ve en el RESUMEN eligiendo el mes siguiente al acto.`);
+}
+
+/** "06/11/26" -> Date (o null). */
+function aFechaCorta(v) {
+  const m = String(v || '').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{2})$/);
+  return m ? new Date(2000 + Number(m[3]), Number(m[2]) - 1, Number(m[1])) : null;
+}
+
+function textoFecha(v) {
+  const d = v instanceof Date ? v : aFechaCorta(v) || aFechaInforme(v);
+  return d ? Utilities.formatDate(d, Session.getScriptTimeZone(), 'dd/MM/yyyy') : String(v);
+}
+
+/**
+ * RESUMEN: cuadro REMANENTE DEL ACTO ANTERIOR (el mes antes del elegido, celda Z2) y, debajo, las DIFERENCIAS
+ * SGA vs BASE, desde CALCULO REMANENTES. Arranca en la fila f0. Devuelve una función que se llama después de
+ * alinearTodo para acomodar la alineación de esta sección.
+ */
+function seccionRemanente(sh, r, M, f0) {
+  const R = `'${HOJA_REMANENTES}'!`;
+  const A = `$${CELDA_ACTO_ANTERIOR.replace(/(\d+)/, '$$$1')}`; // $Z$2
+  const del = `${R}$A:$A,${A}`;
+  const rem = `${del},${R}$Q:$Q,1`;
+  const fechaRep = `MAXIFS(${R}$B:$B,${R}$A:$A,${A})`;
+  const hayReporte = `COUNTIFS(${del})>0`;
+  const naranja = '#b45f06';
+  const fondo = '#fdf3e1';
+
+  // Título y línea de resumen del acto.
+  sh.getRange(f0, 2, 1, 10).merge()
+    .setFormula(`="REMANENTE DEL ACTO ANTERIOR · "&${A}&IF(${hayReporte},"   (según SGA al "&TEXT(${fechaRep},"dd/mm/yyyy")&")",` +
+      '"   (sin reporte de SGA: pegarlo en PEGAR SGA y usar Pedidos > Calcular remanentes)")')
+    .setFontWeight('bold').setBackground(naranja).setFontColor('white');
+  const adj = `COUNTIFS(${r.Acto},${A})`;
+  const netosActo = `COUNTIFS(${r.Acto},${A},${r['Mes cierre']},${A},${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA")`;
+  const netosMes = `COUNTIFS(${r.Acto},${A},${r['Mes cierre']},${M},${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA")`;
+  const bajas = `COUNTIFS(${r.Acto},${A},${r.Pedido},"BAJA ADJ")`;
+  sh.getRange(f0 + 1, 2, 1, 10).merge()
+    .setFormula(`="Adjudicados "&${adj}&"     ·     Netos en "&LOWER(${A})&": "&${netosActo}&"     ·     Netos en "&` +
+      `LOWER(${M})&": "&${netosMes}&"     ·     Bajas: "&${bajas}&"     ➜     Quedan a trabajar: "&COUNTIFS(${rem})`)
+    .setBackground(fondo).setFontWeight('bold');
+
+  // Cuadro por estado en SGA.
+  const h = f0 + 2;
+  sh.getRange(h, 2, 1, 6).setValues([['Estado en SGA', 'Licitación', 'Sorteo', 'Total', 'de los cuales TP',
+    'con CC aprobada']]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true)
+    .setBorder(null, null, true, null, null, null, naranja, SpreadsheetApp.BorderStyle.SOLID);
+  const estados = [['Sin pedido (E)', 'E'], ['Pendiente (P)', 'P'], ['Suspendido (S)', 'S']];
+  const fila = (cond) => [`=COUNTIFS(${rem}${cond},${R}$K:$K,"Por licitación")`,
+    `=COUNTIFS(${rem}${cond},${R}$K:$K,"Por sorteo")`, `=COUNTIFS(${rem}${cond})`,
+    `=COUNTIFS(${rem}${cond},${R}$N:$N,"TP")`, `=COUNTIFS(${rem}${cond},${R}$G:$G,"A")`];
+  const filas = estados.map(([t, e]) => [t].concat(fila(`,${R}$F:$F,"${e}"`)));
+  filas.push(['TOTAL A TRABAJAR'].concat(fila('')));
+  // Bajas del acto (BASE), aparte: no se trabajan.
+  const bj = `${r.Acto},${A},${r.Pedido},"BAJA ADJ"`;
+  filas.push(['Bajas (no se trabajan)', `=COUNTIFS(${bj},${r.Modalidad},"Por licitación")`,
+    `=COUNTIFS(${bj},${r.Modalidad},"Por sorteo")`, `=COUNTIFS(${bj})`, `=COUNTIFS(${bj},${r.Responsable},"TP")`,
+    `=COUNTIFS(${bj},${r.Carpeta},"APROBADA")`]);
+  sh.getRange(h + 1, 2, filas.length, 6).setValues(filas);
+  const fTot = h + 1 + estados.length;
+  sh.getRange(h + 1, 2, filas.length, 6)
+    .setBorder(null, null, true, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange(h + 1, 5, estados.length, 1).setFontWeight('bold');
+  sh.getRange(fTot, 2, 1, 6).setFontWeight('bold').setBackground(FONDO_TOTAL);
+  sh.getRange(fTot + 1, 2, 1, 6).setFontStyle('italic').setFontColor('#888888');
+  const fNota = fTot + 2;
+  sh.getRange(fNota, 2, 1, 10).merge()
+    .setFormula(`="Remanente = sigue en el reporte de SGA, no está aprobado y en BASE no es BAJA ADJ. "&` +
+      `"De las bajas, "&(${bajas}-COUNTIFS(${del},${R}$L:$L,"BAJA ADJ",${R}$F:$F,"<>${NO_SGA}"))&` +
+      `" ya no figuran en SGA (las de licitación salen del acto)."`)
+    .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
+
+  // Diferencias SGA vs BASE.
+  const fd = fNota + 2;
+  sh.getRange(fd, 2, 1, 10).merge()
+    .setFormula(`="DIFERENCIAS SGA vs BASE · "&${A}&"   ("&COUNTIFS(${del},${R}$R:$R,"?*")&")"`)
+    .setFontWeight('bold').setBackground('#7f6000').setFontColor('white');
+  sh.getRange(fd + 1, 2, 1, 4).setValues([['Solicitud', 'Grupo-Orden', 'Cliente', 'Diferencia (revisar en BASE)']])
+    .setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+    .setBorder(null, null, true, null, null, null, '#7f6000', SpreadsheetApp.BorderStyle.SOLID);
+  sh.getRange(fd + 2, 2).setFormula(`=IFERROR(FILTER({${R}C2:C,${R}D2:D&"-"&${R}E2:E,${R}J2:J,${R}R2:R},` +
+    `${R}A2:A=${A},${R}R2:R<>""),"Sin diferencias")`);
+  sh.getRange(fd + 2, 2, 60, 4).setFontSize(9);
+
+  return () => {
+    sh.getRange(h + 1, 2, filas.length, 1).setHorizontalAlignment('left');
+    sh.getRange(fNota, 2).setHorizontalAlignment('left');
+    sh.getRange(fd + 2, 2, 60, 4).setHorizontalAlignment('left').setWrap(false);
+    sh.getRange(fd + 1, 2, 1, 4).setHorizontalAlignment('left');
+  };
 }
 
 // ---------------------------------------------------------------------------
