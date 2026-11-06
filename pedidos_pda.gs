@@ -1126,6 +1126,30 @@ function actualizarRemanente() {
     if (!acto && m && /adjudicad/i.test(t)) acto = etiquetaMes(Number(m[2]) - 1, Number(m[3]) % 100);
     if (!fecha && /^Fecha:?$/i.test(t.trim())) fecha = f[j + 1];
   }));
+  // Sin fila de filtros (se pegó solo la tabla): el mes más repetido en Fecha Adjudicación.
+  if (!acto && col('Fecha Adjudicación') >= 0) {
+    const cuenta = {};
+    filas.forEach((f) => {
+      const v = f[col('Fecha Adjudicación')];
+      let mes = -1;
+      let anio = 0;
+      if (v instanceof Date) {
+        mes = v.getMonth();
+        anio = v.getFullYear();
+      } else {
+        const m = String(v).match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+        if (m) {
+          mes = Number(m[2]) - 1;
+          anio = Number(m[3]);
+        }
+      }
+      if (mes >= 0) {
+        const e = etiquetaMes(mes, anio % 100);
+        cuenta[e] = (cuenta[e] || 0) + 1;
+      }
+    });
+    acto = Object.keys(cuenta).sort((a, b) => cuenta[b] - cuenta[a])[0] || '';
+  }
   const resp = ui.prompt('Calcular remanentes',
     `${filas.length} operaciones en el reporte` + (fecha ? ` (bajado el ${textoFecha(fecha)})` : '') + '.\n' +
     (acto ? `Acto detectado: ${acto}. Aceptar para confirmar, ` : 'No pude detectar el acto: ') +
