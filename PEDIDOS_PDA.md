@@ -633,3 +633,9 @@ Fiat (OWBSO040 del 22/10):
     mes anterior (Z2) por estado en SGA (E / P / S), por licitación y sorteo,
     TP y con CC aprobada, más las bajas; y debajo la lista de diferencias
     SGA vs BASE para revisar a mano.
+- (06/11) Remanente: las bajas de BASE que siguen en el reporte de SGA se
+  trabajan. Van en su propia fila ("Bajas que siguen en SGA") y se suman al
+  TOTAL A TRABAJAR; debajo hay una lista con cuáles son. Solo las bajas que ya
+  no figuran en SGA quedan aparte ("Bajas fuera del acto, no se trabajan").
+  Si el reporte se pega sin la fila de filtros, el acto sale del mes más
+  repetido en Fecha Adjudicación.

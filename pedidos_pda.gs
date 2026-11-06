@@ -952,7 +952,7 @@ function armarResumen(ss, listas) {
       `(D${c.total}+D${T.tp.total})&"   ·   Netos del mes: "&I9&IF(D${c.total}+D${T.tp.total}=I9,"   ✔","   ✖ revisar")`)
     .setFontSize(9).setFontColor(GRIS_TEXTO).setHorizontalAlignment('left');
   [fa.titulo - 1, c.titulo - 1, T.tp.titulo - 1, T.control - 1].forEach((f) => sh.setRowHeight(f, 14));
-  const alinearRemanente = seccionRemanente(sh, r, M, T.control + 2);
+  const alinearRemanente = seccionRemanente(sh, r, M, T);
   alinearTodo(sh);
   alinearEtiquetas(sh);
   alinearRemanente();
@@ -969,7 +969,12 @@ function tablasResumen() {
   const familia = { titulo: 23, total: 25, ultima: 36 };
   const clientes = { titulo: 38, total: 40, ultima: 79 };
   const tp = { titulo: 81, total: 83, ultima: 112 };
-  return { familia, clientes, tp, control: 114 };
+  const control = 114;
+  // Remanente del acto anterior: título en control + 2; la lista de bajas que siguen en SGA tiene 40 filas
+  // (las vacías se ocultan) y debajo van las diferencias.
+  const remanente = control + 2;
+  const bajasSga = { titulo: remanente + 11, total: remanente + 12, ultima: remanente + 52 };
+  return { familia, clientes, tp, control, remanente, bajasSga, diferencias: bajasSga.ultima + 2 };
 }
 
 /** Oculta las filas vacías de los cuadros del RESUMEN y muestra las que tienen modelo (o familia). */
@@ -977,7 +982,7 @@ function ajustarFilasResumen(sh) {
   sh = sh || SpreadsheetApp.getActive().getSheetByName(HOJA_RESUMEN);
   if (!sh) return;
   const T = tablasResumen();
-  [T.familia, T.clientes, T.tp].forEach((t) => {
+  [T.familia, T.clientes, T.tp, T.bajasSga].forEach((t) => {
     const f1 = t.total + 1;
     const n = t.ultima - f1 + 1;
     const vals = sh.getRange(f1, 2, n, 1).getDisplayValues();
@@ -1044,9 +1049,9 @@ function alinearEtiquetas(sh) {
 // Carpeta) y el menú "Calcular remanentes" lo guarda en la hoja oculta CALCULO REMANENTES, reemplazando el
 // reporte anterior de ese acto. Ahí cada solicitud se cruza con BASE (fórmulas) y se marca si es remanente y si
 // hay alguna diferencia. La BASE no se modifica.
-// Remanente = sigue en el reporte de SGA, su Estado Pedido no es A (aprobado) y en BASE no es BAJA ADJ (las
-// bajas de sorteo siguen figurando en SGA). Las solicitudes del acto que están en BASE y ya no figuran en SGA se
-// guardan con estado "NO SGA" (las bajas de licitación salen del reporte).
+// Remanente = sigue en el reporte de SGA y su Estado Pedido no es A (aprobado). Incluye las bajas de BASE que
+// siguen en SGA (se trabajan; van en una fila y una lista aparte). Las solicitudes del acto que están en BASE y
+// ya no figuran en SGA se guardan con estado "NO SGA": esas bajas ya no sirven y no se cuentan.
 
 const ENC_REMANENTES = ['Acto', 'Fecha reporte', 'Solicitud', 'Grupo', 'Orden', 'Estado pedido SGA',
   'Estado carpeta SGA', 'Modelo pedido SGA', 'Fecha pedido SGA', 'Cliente (BASE)', 'Modalidad (BASE)',
@@ -1077,7 +1082,7 @@ function armarCalculoRemanentes(ss) {
   sh.getRange('P2').setFormula(`=ARRAYFORMULA(IF(${sol}="","",IF(ISNUMBER(XMATCH(${clave},${claveBase})),` +
     '"SI","NO")))');
   sh.getRange('Q2').setFormula('=ARRAYFORMULA(IF(C2:C="","",IF((F2:F<>"A")*(F2:F<>"' + NO_SGA +
-    '")*(L2:L<>"BAJA ADJ"),1,0)))');
+    '"),1,0)))');
   // Diferencias SGA vs BASE (la primera que corresponda).
   sh.getRange('R2').setFormula('=ARRAYFORMULA(IF(C2:C="","",' +
     'IF(F2:F="' + NO_SGA + '",IF(L2:L<>"BAJA ADJ","Ya no está en SGA y en BASE no es baja (BASE: "&L2:L&")",""),' +
@@ -1198,6 +1203,7 @@ function actualizarRemanente() {
   ui.alert(`Remanente del acto ${acto} actualizado: ${remanente} operaciones a trabajar` +
     (diferencias ? `, ${diferencias} diferencia(s) SGA vs BASE.` : ', sin diferencias con BASE.') +
     `\n\nSe ve en el RESUMEN eligiendo el mes siguiente al acto.`);
+  try { ajustarFilasResumen(); } catch (err) { /* sin RESUMEN armado todavía */ }
 }
 
 /** "06/11/26" -> Date (o null). */
@@ -1216,7 +1222,8 @@ function textoFecha(v) {
  * SGA vs BASE, desde CALCULO REMANENTES. Arranca en la fila f0. Devuelve una función que se llama después de
  * alinearTodo para acomodar la alineación de esta sección.
  */
-function seccionRemanente(sh, r, M, f0) {
+function seccionRemanente(sh, r, M, T) {
+  const f0 = T.remanente;
   const R = `'${HOJA_REMANENTES}'!`;
   const A = `$${CELDA_ACTO_ANTERIOR.replace(/(\d+)/, '$$$1')}`; // $Z$2
   const del = `${R}$A:$A,${A}`;
@@ -1234,10 +1241,12 @@ function seccionRemanente(sh, r, M, f0) {
   const adj = `COUNTIFS(${r.Acto},${A})`;
   const netosActo = `COUNTIFS(${r.Acto},${A},${r['Mes cierre']},${A},${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA")`;
   const netosMes = `COUNTIFS(${r.Acto},${A},${r['Mes cierre']},${M},${r.Pedido},"APROBADO",${r.Carpeta},"APROBADA")`;
-  const bajas = `COUNTIFS(${r.Acto},${A},${r.Pedido},"BAJA ADJ")`;
+  // Bajas que ya no figuran en SGA (no se trabajan) y bajas de BASE que siguen en el reporte (se trabajan).
+  const fuera = `${del},${R}$L:$L,"BAJA ADJ",${R}$F:$F,"${NO_SGA}"`;
+  const enSga = `${rem},${R}$L:$L,"BAJA ADJ"`;
   sh.getRange(f0 + 1, 2, 1, 10).merge()
     .setFormula(`="Adjudicados "&${adj}&"     ·     Netos en "&LOWER(${A})&": "&${netosActo}&"     ·     Netos en "&` +
-      `LOWER(${M})&": "&${netosMes}&"     ·     Bajas: "&${bajas}&"     ➜     Quedan a trabajar: "&COUNTIFS(${rem})`)
+      `LOWER(${M})&": "&${netosMes}&"     ·     Bajas fuera del acto: "&COUNTIFS(${fuera})&"     ➜     Quedan a trabajar: "&COUNTIFS(${rem})`)
     .setBackground(fondo).setFontWeight('bold');
 
   // Cuadro por estado en SGA.
@@ -1246,32 +1255,46 @@ function seccionRemanente(sh, r, M, f0) {
     'con CC aprobada']]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO).setWrap(true)
     .setBorder(null, null, true, null, null, null, naranja, SpreadsheetApp.BorderStyle.SOLID);
   const estados = [['Sin pedido (E)', 'E'], ['Pendiente (P)', 'P'], ['Suspendido (S)', 'S']];
-  const fila = (cond) => [`=COUNTIFS(${rem}${cond},${R}$K:$K,"Por licitación")`,
-    `=COUNTIFS(${rem}${cond},${R}$K:$K,"Por sorteo")`, `=COUNTIFS(${rem}${cond})`,
-    `=COUNTIFS(${rem}${cond},${R}$N:$N,"TP")`, `=COUNTIFS(${rem}${cond},${R}$G:$G,"A")`];
-  const filas = estados.map(([t, e]) => [t].concat(fila(`,${R}$F:$F,"${e}"`)));
-  filas.push(['TOTAL A TRABAJAR'].concat(fila('')));
-  // Bajas del acto (BASE), aparte: no se trabajan.
-  const bj = `${r.Acto},${A},${r.Pedido},"BAJA ADJ"`;
-  filas.push(['Bajas (no se trabajan)', `=COUNTIFS(${bj},${r.Modalidad},"Por licitación")`,
-    `=COUNTIFS(${bj},${r.Modalidad},"Por sorteo")`, `=COUNTIFS(${bj})`, `=COUNTIFS(${bj},${r.Responsable},"TP")`,
-    `=COUNTIFS(${bj},${r.Carpeta},"APROBADA")`]);
+  const fila = (base, cond, cc) => [`=COUNTIFS(${base}${cond},${R}$K:$K,"Por licitación")`,
+    `=COUNTIFS(${base}${cond},${R}$K:$K,"Por sorteo")`, `=COUNTIFS(${base}${cond})`,
+    `=COUNTIFS(${base}${cond},${R}$N:$N,"TP")`, `=COUNTIFS(${base}${cond},${cc})`];
+  const ccSga = `${R}$G:$G,"A"`;
+  const filas = estados.map(([t, e]) => [t].concat(fila(rem, `,${R}$F:$F,"${e}",${R}$L:$L,"<>BAJA ADJ"`, ccSga)));
+  filas.push(['Bajas que siguen en SGA'].concat(fila(enSga, '', ccSga)));
+  filas.push(['TOTAL A TRABAJAR'].concat(fila(rem, '', ccSga)));
+  // Bajas que ya no figuran en el reporte: aparte, no se trabajan (CC según BASE).
+  filas.push(['Bajas fuera del acto (no se trabajan)'].concat(fila(fuera, '', `${R}$M:$M,"APROBADA"`)));
   sh.getRange(h + 1, 2, filas.length, 6).setValues(filas);
-  const fTot = h + 1 + estados.length;
+  const fBajasSga = h + 1 + estados.length;
+  const fTot = fBajasSga + 1;
   sh.getRange(h + 1, 2, filas.length, 6)
     .setBorder(null, null, true, null, null, true, GRIS_LINEA, SpreadsheetApp.BorderStyle.SOLID);
-  sh.getRange(h + 1, 5, estados.length, 1).setFontWeight('bold');
+  sh.getRange(h + 1, 5, estados.length + 1, 1).setFontWeight('bold');
+  sh.getRange(fBajasSga, 2, 1, 6).setBackground('#fbe9e7');
   sh.getRange(fTot, 2, 1, 6).setFontWeight('bold').setBackground(FONDO_TOTAL);
   sh.getRange(fTot + 1, 2, 1, 6).setFontStyle('italic').setFontColor('#888888');
   const fNota = fTot + 2;
   sh.getRange(fNota, 2, 1, 10).merge()
-    .setFormula(`="Remanente = sigue en el reporte de SGA, no está aprobado y en BASE no es BAJA ADJ. "&` +
-      `"De las bajas, "&(${bajas}-COUNTIFS(${del},${R}$L:$L,"BAJA ADJ",${R}$F:$F,"<>${NO_SGA}"))&` +
-      `" ya no figuran en SGA (las de licitación salen del acto)."`)
+    .setValue('Remanente = sigue en el reporte de SGA y no tiene el pedido aprobado (incluye las bajas de BASE ' +
+      'que siguen en SGA). Las bajas que ya no figuran en SGA no se trabajan.')
     .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
 
+  // Lista de las bajas que siguen en SGA (40 filas; las vacías se ocultan con ajustarFilasResumen).
+  const L = T.bajasSga;
+  sh.getRange(L.titulo, 2, 1, 10).merge()
+    .setFormula(`="BAJAS QUE SIGUEN EN SGA · "&${A}&"   ("&COUNTIFS(${enSga})&")"`)
+    .setFontWeight('bold').setBackground('#cc4125').setFontColor('white');
+  sh.getRange(L.total, 2, 1, 6).setValues([['Solicitud', 'Grupo-Orden', 'Cliente', 'Modalidad', 'Responsable',
+    'Estado en SGA (pedido/carpeta)']]).setFontWeight('bold').setFontSize(9).setFontColor(GRIS_TEXTO)
+    .setBorder(null, null, true, null, null, null, '#cc4125', SpreadsheetApp.BorderStyle.SOLID);
+  const nLista = L.ultima - L.total;
+  sh.getRange(L.total + 1, 2).setFormula(`=IFERROR(ARRAY_CONSTRAIN(SORT(FILTER({${R}C2:C,${R}D2:D&"-"&${R}E2:E,` +
+    `${R}J2:J,${R}K2:K,${R}N2:N,${R}F2:F&"/"&${R}G2:G&IF(${R}H2:H<>""," · "&${R}H2:H,"")},` +
+    `${R}A2:A=${A},${R}Q2:Q=1,${R}L2:L="BAJA ADJ"),4,TRUE,3,TRUE),${nLista},6),"Sin bajas en SGA")`);
+  sh.getRange(L.total + 1, 2, nLista, 6).setFontSize(9);
+
   // Diferencias SGA vs BASE.
-  const fd = fNota + 2;
+  const fd = T.diferencias;
   sh.getRange(fd, 2, 1, 10).merge()
     .setFormula(`="DIFERENCIAS SGA vs BASE · "&${A}&"   ("&COUNTIFS(${del},${R}$R:$R,"?*")&")"`)
     .setFontWeight('bold').setBackground('#7f6000').setFontColor('white');
@@ -1285,6 +1308,7 @@ function seccionRemanente(sh, r, M, f0) {
   return () => {
     sh.getRange(h + 1, 2, filas.length, 1).setHorizontalAlignment('left');
     sh.getRange(fNota, 2).setHorizontalAlignment('left');
+    sh.getRange(L.total, 2, nLista + 1, 6).setHorizontalAlignment('left').setWrap(false);
     sh.getRange(fd + 2, 2, 60, 4).setHorizontalAlignment('left').setWrap(false);
     sh.getRange(fd + 1, 2, 1, 4).setHorizontalAlignment('left');
   };
