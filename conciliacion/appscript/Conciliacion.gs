@@ -3805,6 +3805,18 @@ function netearPendientesBanco_(items) {
 }
 
 /** Subconjunto de 2 a "max" partidas que suma "total" (o null). */
+/** Subconjunto (1 o más) de partidas con signo que suma exactamente total; null si no hay. */
+function sumaExactaFirmada_(items, total) {
+  if (Math.abs(total) <= TOLERANCIA) return [];
+  const n = items.length;
+  for (let m = 1; m < (1 << n); m++) {
+    let t = 0; const el = [];
+    for (let i = 0; i < n; i++) if (m & (1 << i)) { t += items[i].importe; el.push(items[i]); }
+    if (Math.abs(redondear_(t) - total) <= TOLERANCIA) return el;
+  }
+  return null;
+}
+
 function sumaExacta_(items, total, max) {
   const r = (desde, falta, elegidos) => {
     if (elegidos.length >= 2 && Math.abs(falta) <= TOLERANCIA) return elegidos;
@@ -4337,6 +4349,32 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     if (bs.length !== 1) return;
     unir_(bs, fs, 'Pagos de FBS con la misma fecha escrita: ' + fs.length + ' registros = un débito del banco (revisar)');
   });
+  // ...y si alguna línea tiene la fecha mal escrita (Patagonia: RM-392007 "Nº 8/2026-04/09" era del 08/09) o no la tiene
+  // ("Nº 8/2026"), los grupos que quedan juntos, más los RM sin fecha del mismo día de registro, contra el débito del banco
+  // de cada una de esas fechas (el de importe más parecido): si la suma total es exacta se cruzan todos juntos
+  const quedan = Array.from(porFecha.entries()).filter(([k, fs]) => fs.length >= 3 && fs.every(f => f.match === null));
+  if (quedan.length >= 2) {
+    const fs = [].concat(...quedan.map(e => e[1]));
+    const reg = new Set(fs.map(f => dia(f.fecha)));
+    const sinFecha = F().filter(f => f.importe < 0 && !f.fechaRef && /^RM-\d+\s*\/\s*BANCO/i.test(f.texto) && reg.has(dia(f.fecha)) &&
+      fs.indexOf(f) < 0);
+    const bs = [];
+    for (const [k, g] of quedan) {
+      const tg = g.reduce((x, f) => x + f.importe, 0);
+      const c = B().filter(b => b.importe < 0 && dia(b.fecha) >= k && dia(b.fecha) - k <= 3 * 864e5 && bs.indexOf(b) < 0 &&
+        Math.abs(b.importe - tg) <= Math.abs(tg) * 0.1).sort((a, b) => Math.abs(a.importe - tg) - Math.abs(b.importe - tg));
+      if (!c.length) { bs.length = 0; break; }
+      bs.push(c[0]);
+    }
+    if (bs.length === quedan.length) {
+      const tb = bs.reduce((x, b) => x + b.importe, 0);
+      const tf = fs.reduce((x, f) => x + f.importe, 0);
+      const extra = sinFecha.length <= 6 ? sumaExactaFirmada_(sinFecha, redondear_(tb - tf)) : null;
+      if (Math.abs(tb - tf) <= TOLERANCIA || extra)
+        unir_(bs, fs.concat(extra || []), 'Pagos de FBS con fecha escrita de varios días (alguna mal escrita o sin fecha): ' +
+          (fs.length + (extra || []).length) + ' registros = ' + bs.length + ' débitos del banco (revisar)');
+    }
+  }
   // 10. recibo cruzado con la transferencia de otra persona mientras la del propio cliente (su CUIT aparece con su apellido
   // en otros movimientos del banco) sigue pendiente por el mismo importe: se cambia el cruce (Macro TURIN: recibo de
   // MARTINO 150.000 estaba con la transferencia de GERARDO CONSTANTINO del 11/08; la de MARTINO del 12/08 quedaba pendiente)
