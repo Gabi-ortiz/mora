@@ -790,7 +790,7 @@ function armarResumen(ss, listas) {
   // con su PROYECCION al lado. TP = "TP" en la columna Responsable de BASE. Solo aparecen los modelos con
   // pedidos (netos del mes o, en el mes en curso, en proyección): las filas sobrantes se ocultan
   // (ajustarFilasResumen).
-  const enc = ['Modelo', 'Familia', 'Netos del mes', 'V.M', 'VM netos', 'Bonus pedidos', 'Inc pedido',
+  const enc = ['Modelo', 'Familia', 'Netos del mes', 'V.M', 'VM netos', 'Inc pedido', 'Bonus pedidos',
     'Total incentivos', 'Descuentos', 'Total'];
   const titulo = (fila, texto, encabezados, color) => {
     const n = encabezados.length;
@@ -873,7 +873,7 @@ function armarResumen(ss, listas) {
     sh.getRange(h, 3).setNote('Familia del modelo en PRECIOS (columna Familia).');
     sh.getRange(h, 7).setNote('% de "Bonus cumplimiento pedidos totales" del bloque INCENTIVO PEDIDOS (M11): ' +
       'según la categoría, y 0 si no se llegó al objetivo de pedidos.');
-    sh.getRange(h, 8).setNote('Inc pedido del modelo en el mes (hoja PRECIOS).');
+    sh.getRange(h, 8).setNote('Bonus pedidos del modelo en el mes (columna Inc pedido de la hoja PRECIOS).');
     sh.getRange(h, 9).setNote('VM netos × (Bonus pedidos + Inc pedido).');
     sh.getRange(h, 10).setNote('Suma de "$ descuento" de BASE de los netos del mes de ese modelo.');
     sh.getRange(h, 11).setNote('Total incentivos - Descuentos.');
@@ -1891,15 +1891,18 @@ const CARPETA_INFORMES = 'Informes de incentivos';
 const MARGEN_COMISIONAL = 0.14;
 const ADELANTO_MARGEN = 0.6;
 // Cronos 90/10 (B90) sin 2C: grupos desde / hasta según la señal de cada mes (sin mes = valor por defecto).
-// Septiembre 2026 (señal 1599): desde 18002, sin tope. Octubre 2026 (señal 1606): 18002 a 18115 inclusive.
+// Septiembre 2026 (señal 1599): desde 18002, sin tope. Octubre 2026 (señal 1606) y noviembre 2026 (señal
+// 1616): 18002 a 18115 inclusive.
 const RANGO_B90 = {
   '': [18002, Infinity],
   'OCTUBRE 26': [18002, 18115],
+  'NOVIEMBRE 26': [18002, 18115],
 };
 const FAMILIAS_IVA_REDUCIDO = ['FIORINO', 'STRADA', 'TORO', 'TITANO'];
 // Meses en que Fiat liquida el 2C sobre el precio CE s/IVA del propio modelo pedido (no del modelo base
-// de la familia). Octubre 2026: señal 1606, "por el modelo solicitado en cada pedido aceptado".
-const MESES_2C_MODELO_PEDIDO = ['OCTUBRE 26'];
+// de la familia). Octubre 2026 (señal 1606) y noviembre 2026 (señal 1616): "por el modelo solicitado en cada
+// pedido aceptado".
+const MESES_2C_MODELO_PEDIDO = ['OCTUBRE 26', 'NOVIEMBRE 26'];
 // Modelo de ahorro de referencia de cada familia: el 2C se paga a su precio CE sin IVA.
 // Verificado con la liquidación de Fiat de septiembre 2026 (Cronos, Titano, Toro, Fiorino) y con el
 // archivo de agosto (Strada, Fastback, Pulse, Argo). Si la familia no está, se usa el modelo de ahorro.

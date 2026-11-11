@@ -639,3 +639,8 @@ Fiat (OWBSO040 del 22/10):
   no figuran en SGA quedan aparte ("Bajas fuera del acto, no se trabajan").
   Si el reporte se pega sin la fila de filtros, el acto sale del mes más
   repetido en Fecha Adjudicación.
+- (11/11) Señal 1616 (noviembre 2026): Inc pedido de cada modelo cargado en
+  PRECIOS (NOVIEMBRE 26, sin precios todavía). 2C sobre el modelo pedido y
+  B90 de 18002 a 18115, igual que octubre. En los cuadros POR MODELO PEDIDO
+  del RESUMEN se intercambian los títulos: G = "Inc pedido" (% por categoría)
+  y H = "Bonus pedidos" (% del modelo en PRECIOS).
