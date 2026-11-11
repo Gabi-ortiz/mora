@@ -4410,6 +4410,30 @@ function ultimaVueltaGrupos_(B, F, fbs) {
           (fs.length + (extra || []).length) + ' registros = ' + bs.length + ' débitos del banco (revisar)');
     }
   }
+  // 12. pagos del mes por Interbanking (tasa vial, AFIP...) uno por uno en el banco y agrupados en FBS en RM a banco con
+  // otros números: si la suma de todos los pagos pendientes del mes (proveedores e impuestos, no gastos ni tarjetas ni
+  // propias) es igual a la de los RM a banco pendientes del mes, se cruzan todos juntos (Santander TURIN septiembre: 154
+  // débitos de tasa vial y AFIP = 13 RM por 4.895.383,50). Si no da, se prueba sacando los RM con fecha escrita de un
+  // mes anterior (RM-391758 "Nº 28/07-1923")
+  const mesDe = x => x.getFullYear() * 12 + x.getMonth();
+  const pagoB = b => b.importe < 0 && b.origen === 'Mes' &&
+    (/^PAGO PROVEEDORES/.test(b.cat || '') || (/^IMPUESTOS/.test(b.cat || '') && /AFIP|VEP/i.test(b.texto)));
+  const rmF = f => f.importe < 0 && f.origen === 'Mes' && /^RM-\d+\s*\/\s*BANCO/i.test(f.texto);
+  const pbs = B().filter(pagoB);
+  if (pbs.length >= 5) {
+    const m0 = mesDe(pbs[0].fecha);
+    const bsM = pbs.filter(b => mesDe(b.fecha) === m0);
+    const fsM = F().filter(f => rmF(f) && mesDe(f.fecha) === m0);
+    const suma = l => redondear_(l.reduce((x, y) => x + y.importe, 0));
+    const tb = suma(bsM);
+    let fs = Math.abs(suma(fsM) - tb) <= TOLERANCIA ? fsM : null;
+    if (!fs) {
+      const sinViejos = fsM.filter(f => !(f.fechaRef && mesDe(f.fechaRef) < m0));
+      if (Math.abs(suma(sinViejos) - tb) <= TOLERANCIA) fs = sinViejos;
+    }
+    if (fs && fs.length >= 2 && bsM.length >= 5)
+      unir_(bsM, fs, 'Pagos del mes por Interbanking (' + bsM.length + ') = RM a banco del mes (' + fs.length + ') por la suma (revisar)');
+  }
   // 10. recibo cruzado con la transferencia de otra persona mientras la del propio cliente (su CUIT aparece con su apellido
   // en otros movimientos del banco) sigue pendiente por el mismo importe: se cambia el cruce (Macro TURIN: recibo de
   // MARTINO 150.000 estaba con la transferencia de GERARDO CONSTANTINO del 11/08; la de MARTINO del 12/08 quedaba pendiente)
