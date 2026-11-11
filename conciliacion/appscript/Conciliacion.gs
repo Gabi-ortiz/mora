@@ -272,6 +272,7 @@ const REGLAS_PATAGONIA = [
   // anulaciones del banco (crédito con la misma descripción que el débito): restan en el asiento de gastos
   ["*", "Crédito", "^IMP\\.DB/CR BANCARIOS", "GASTOS BANCARIOS", "Devolución / anulación de impuesto Ley 25.413"],
   ["*", "Crédito", "^RET\\.IIBB SIRCREB", "GASTOS BANCARIOS", "Devolución de retención SIRCREB"],
+  ["*", "Crédito", "^DEV\\.IIBB SIRCREB", "GASTOS BANCARIOS", "Devolución de retención SIRCREB"],
   ["*", "Crédito", "^COM", "GASTOS BANCARIOS", "Devolución de comisiones"],
 ];
 
@@ -4321,6 +4322,20 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     if (bs.length !== 1) return;
     if (F().filter(x => x !== f && igual(x) && clavesRc(x).some(k => clavesRc(f).includes(k))).length) return;
     unir_(bs, [f], 'Pendientes: recibo de un cliente ya identificado por su CUIT en otro cruce, mismo importe (revisar)');
+  });
+  // 11. muchos pagos de FBS con la misma fecha escrita en el comprobante (sueldos cargados de a uno: "RM-392083 / BANCO
+  // PATAGONIA Nº 8/2026-04/09." ×100) = un débito del banco de ese día por la suma exacta (Patagonia TURIN septiembre)
+  const porFecha = new Map();
+  F().filter(f => f.importe < 0 && f.fechaRef && /^RM-\d+\s*\/\s*BANCO/i.test(f.texto)).forEach(f => {
+    const k = dia(f.fechaRef);
+    porFecha.set(k, (porFecha.get(k) || []).concat([f]));
+  });
+  porFecha.forEach((fs, k) => {
+    if (fs.length < 3 || fs.some(f => f.match !== null)) return;
+    const tot = redondear_(fs.reduce((x, f) => x + f.importe, 0));
+    const bs = B().filter(b => b.importe < 0 && Math.abs(b.importe - tot) <= TOLERANCIA && dia(b.fecha) >= k && dia(b.fecha) - k <= 3 * 864e5);
+    if (bs.length !== 1) return;
+    unir_(bs, fs, 'Pagos de FBS con la misma fecha escrita: ' + fs.length + ' registros = un débito del banco (revisar)');
   });
   // 10. recibo cruzado con la transferencia de otra persona mientras la del propio cliente (su CUIT aparece con su apellido
   // en otros movimientos del banco) sigue pendiente por el mismo importe: se cambia el cruce (Macro TURIN: recibo de
