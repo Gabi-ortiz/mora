@@ -4085,11 +4085,14 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     fbs.push(a);
   };
   // subconjuntos (2 a max) de items con signo que suman total; devuelve el único o null (0 o más de uno)
-  const unicaSuma = (items, total, max) => {
+  const unicaSuma = (items, total, max, min) => {
     let hallado = null, n = 0;
+    const mismoSigno = items.every(x => Math.sign(x.importe) === Math.sign(total));
     const r = (desde, falta, el) => {
       if (n > 1) return;
-      if (el.length >= 2 && Math.abs(falta) <= TOLERANCIA) { n++; hallado = el; return; }
+      if (el.length >= (min || 2) && Math.abs(falta) <= TOLERANCIA) { n++; hallado = el; return; }
+      // todos del mismo signo que el total: si ya se pasó, no hay forma de volver
+      if (mismoSigno && Math.abs(falta) > TOLERANCIA && Math.sign(falta) !== Math.sign(total)) return;
       if (el.length >= max) return;
       for (let i = desde; i < items.length; i++) r(i + 1, redondear_(falta - items[i].importe), el.concat([items[i]]));
     };
@@ -4172,6 +4175,62 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     const dif = redondear_(b.importe - fs[0].importe);
     unir_([b], fs, 'Mismo CUIT o nombre, diferencia chica (dif. ' + formato_(dif) + ') (revisar)');
     ajuste(fs[0], dif);
+  });
+  // 7. varios débitos del banco del mismo CUIT o concepto (en el día, en días seguidos o todos) contra uno a cuatro pagos de
+  // FBS por la suma exacta (Galicia TURIN: 39 "PAGO DE SERVICIOS FCA PLAN" del 10/09 = tres RM con el Nº del 10/09; "PAGO
+  // VISA EMPRESA" = "Gastos Visa corp" + "VISA CORP VENC" de FBS). El pago de FBS tiene que mostrar el vínculo: la fecha
+  // escrita en el Nº cerca de los débitos, una palabra en común, el mismo CUIT, o un importe con centavos en un solo pago
+  const claveB = b => b.cuit ? 'c' + b.cuit : 'f' + fam(b.texto);
+  const gruposB = new Map();
+  B().filter(b => b.importe < 0 && !gasto(b)).forEach(b => {
+    // por CUIT y también por concepto (SMATA: dos CUIT del mismo gremio pagados juntos en un RM)
+    [claveB(b), 'f' + fam(b.texto)].forEach((k, i) => {
+      if (k.length < 7 || (i === 1 && k === claveB(b))) return;
+      if (!gruposB.has(k)) gruposB.set(k, []);
+      gruposB.get(k).push(b);
+    });
+  });
+  const conjuntos = [];
+  gruposB.forEach((g, k) => {
+    g.sort((a, b) => a.fecha - b.fecha);
+    const dias = Array.from(new Set(g.map(b => b.fecha.getTime())));
+    if (g.length <= 80) conjuntos.push({ k, s: g });
+    dias.forEach((d, i) => {
+      const del = g.filter(b => b.fecha.getTime() === d);
+      conjuntos.push({ k, s: del });
+      const sig = dias[i + 1];
+      if (sig && (sig - d) / 864e5 <= 3) conjuntos.push({ k, s: g.filter(b => b.fecha.getTime() === d || b.fecha.getTime() === sig) });
+    });
+  });
+  conjuntos.sort((a, b) => b.s.length - a.s.length);
+  const vistos = new Set();
+  conjuntos.forEach(({ k, s }) => {
+    if (s.some(b => b.match !== null)) return;
+    const firma = s.map(b => b.id || b.texto + b.fecha.getTime() + b.importe).join('|');
+    if (vistos.has(firma)) return;
+    vistos.add(firma);
+    const T = redondear_(s.reduce((x, b) => x + b.importe, 0));
+    if (Math.abs(T) < 10000) return;
+    const dmin = s[0].fecha, dmax = s[s.length - 1].fecha;
+    const tok = new Set(); s.forEach(b => tokens_(b.texto).forEach(t => tok.add(t)));
+    const conFecha = f => !!f.fechaRef && (f.fechaRef - dmin) / 864e5 >= -3 && (f.fechaRef - dmax) / 864e5 <= 3;
+    // en la ventana de fechas, o registrado meses después con la fecha de los débitos escrita ("VISA CORP VENC 08/06")
+    const cerca = f => ((f.fecha - dmin) / 864e5 >= -5 && (f.fecha - dmax) / 864e5 <= 45) || (conFecha(f) && (f.fecha - dmax) / 864e5 <= 120);
+    const vinculo = f => conFecha(f) || comparten_(tok, tokens_(f.texto)) || (k.startsWith('c') && f.cuit === k.slice(1));
+    const fc = F().filter(f => f.importe < 0 && f.cuenta !== 'O' && cerca(f) && -f.importe <= -T + TOLERANCIA &&
+      !/^Diferencia (de redondeo|asiento gastos)/.test(f.texto))
+      .sort((a, b) => Math.abs(a.fecha - dmax) - Math.abs(b.fecha - dmax));
+    // los que muestran el vínculo primero (hasta 20) y los más cercanos en fecha (hasta 14)
+    const fcV = fc.filter(vinculo).slice(0, 20), fcO = fc.filter(f => !vinculo(f)).slice(0, 24);
+    fc.length = 0; fcV.concat(fcO).forEach(f => fc.push(f));
+    const c = unicaSuma(fc, T, 4, s.length === 1 ? 2 : 1);
+    if (!c) return;
+    const conV = c.filter(vinculo).length;
+    const ok = conV === c.length || (c.length >= 2 && conV >= c.length - 1) || (k.startsWith('c') && s.length >= 2) ||
+      (c.length === 1 && especifico_(T) && s.length >= 2);
+    if (!ok) return;
+    unir_(s, c, 'Pendientes: ' + s.length + ' débitos del banco del mismo ' + (k.startsWith('c') ? 'CUIT' : 'concepto') + ' suman ' +
+      c.length + (c.length === 1 ? ' pago' : ' pagos') + ' de FBS (revisar)');
   });
   // 6. pendiente anterior con centavos registrado con la fecha sin año ("30-1")
   B().filter(b => b.origen === 'Arrastre' && especifico_(b.importe) && Math.abs(b.importe) >= 100000).forEach(b => {
