@@ -2743,6 +2743,19 @@ function fechaEnTexto_(texto, base) {
         const f = new Date(a, mes - 1, d);
         if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12 && a === base.getFullYear() && dias_(f, base) <= 62) { ult = f; break busca; }
       }
+      // FBS no deja repetir el Nº dentro de un RM: se escribe la misma fecha alterada ("1709206", "17902026", "170920261"
+      // para el 17/09/2026). Si lo que sigue al día y mes es el año con un dígito de menos o de más, vale el año en curso.
+      // Solo en los RM (pagos), que es donde se registran varias transferencias juntas
+      if (!ult && /\bRM-\d/.test(String(texto))) {
+        const y = String(base.getFullYear());
+        const sub = (a, b) => { let i = 0; for (const ch of b) if (ch === a[i]) i++; return i === a.length; };
+        busca2: for (const [ld, lm] of [[2, 2], [2, 1], [1, 2], [1, 1]]) {
+          const d = Number(t.slice(0, ld)), mes = Number(t.slice(ld, ld + lm)), resto = t.slice(ld + lm);
+          if (resto.length < 3 || !(sub(resto, y) || sub(y, resto))) continue;
+          const f = new Date(base.getFullYear(), mes - 1, d);
+          if (d >= 1 && d <= 31 && mes >= 1 && mes <= 12 && dias_(f, base) <= 62) { ult = f; break busca2; }
+        }
+      }
     }
   }
   return ult;
