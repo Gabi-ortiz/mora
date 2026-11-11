@@ -554,7 +554,7 @@ function procesar_(ss) {
   const reglas = reglasHoja.concat(reglasDelBanco_(paramDe_(parametros, '^cuenta bancaria$')).filter(r => !enHoja.has(claveRegla(r))));
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null, posterioresO = null;
-  let fotoSaldos = null;
+  let fotoSaldos = null, fotoBase = null;
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
     const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas),
@@ -574,6 +574,7 @@ function procesar_(ss) {
     const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
     const foto = leerFotoBase_(ss);
     // saldos de la base tal como estaba al cerrar (la foto): si hoy da lo mismo, no cambió nada desde el cierre
+    fotoBase = foto;
     if (foto) {
       const cE = String(Number(cuentasDe_(parametros).E)), cO = String(Number(cuentasDe_(parametros).O || ''));
       fotoSaldos = { E: 0, O: 0 };
@@ -614,7 +615,7 @@ function procesar_(ss) {
   let pasarDifOk = [];
   try { pasarDifOk = JSON.parse(props.getProperty('PASAR_DIF_OK') || '[]'); } catch (e) { pasarDifOk = []; }
   const entrada = {
-    extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO, fotoSaldos,
+    extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO, fotoSaldos, fotoBase,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: delCierre || trabajo, trabajo,
@@ -2582,6 +2583,39 @@ function escribirAnalisisO_(ss, res) {
 }
 
 /** Hoja "Pendientes anteriores": Sector (S1..S4), Fecha, Concepto, Importe (positivo). */
+/**
+ * Pendientes anteriores de FBS (S3/S4) cargados sin centavos (copiados de una conciliación manual: "668.781.501" en vez de
+ * 668.781.501,10): si la foto de la base del cierre tiene un único movimiento de esa fecha que difiere en menos de $ 1, y
+ * ninguno por el importe exacto, se usa el importe de FBS. El ID del pendiente no cambia (se conservan Estado y Comentario);
+ * al cerrar pasa con el importe corregido.
+ */
+function corregirCentavosAnteriores_(anteriores, foto, avisos) {
+  if (!foto || !foto.size) return;
+  const porFecha = new Map();
+  foto.forEach(v => {
+    const f = parseFecha_(v.fecha);
+    if (!f) return;
+    const k = fechaTexto_(f);
+    if (!porFecha.has(k)) porFecha.set(k, []);
+    porFecha.get(k).push(Math.abs(Number(v.importe) || 0));
+  });
+  const hechos = [];
+  anteriores.filter(p => p.lado === 'FBS').forEach(p => {
+    const imp = Math.abs(p.importe);
+    if (imp < 1000 || Math.abs(imp - Math.round(imp)) > 0.005) return;   // solo importes enteros (los que perdieron los centavos)
+    const vs = porFecha.get(fechaTexto_(p.fecha)) || [];
+    if (vs.some(v => Math.abs(v - imp) <= 0.005)) return;
+    const c = vs.filter(v => Math.abs(v - imp) < 1);
+    if (c.length !== 1) return;
+    const nuevo = redondear_(Math.sign(p.importe) * c[0]);
+    hechos.push(sector_(p) + ' ' + fechaTexto_(p.fecha) + ' ' + String(p.texto).slice(0, 35) + ' ' + formato_(Math.abs(p.importe)) + ' → ' + formato_(c[0]));
+    p.importe = nuevo;
+    if (p.debe !== undefined) { p.debe = Math.max(nuevo, 0); p.haber = Math.max(-nuevo, 0); }
+  });
+  if (hechos.length) avisos.push(hechos.length + ' pendientes anteriores de FBS estaban sin centavos y se tomó el importe exacto de FBS (' +
+    hechos.join('; ') + '): la diferencia de apertura cambia en esos centavos.');
+}
+
 function leerAnteriores_(filas, desde) {
   const out = [];
   // "Pendientes en trabajo": la columna Estado la pone el usuario (Resuelto en FBS / Error de la lista se respetan al procesar).
@@ -4572,6 +4606,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   CORTE_ = corte;
   const bancoMes = movs.map(m => partidaBanco_(m, 'Mes'));
   const anteriores = leerAnteriores_(entrada.anteriores || [], desde);
+  corregirCentavosAnteriores_(anteriores, entrada.fotoBase, avisos);
   const anterioresBanco = anteriores.filter(p => p.lado === 'BANCO');
   const anterioresFbs = anteriores.filter(p => p.lado === 'FBS');
   // PASO 1: cuenta O sola, neteando por comprobante / liquidación junto con los pendientes anteriores
