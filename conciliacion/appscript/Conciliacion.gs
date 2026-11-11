@@ -554,6 +554,7 @@ function procesar_(ss) {
   const reglas = reglasHoja.concat(reglasDelBanco_(paramDe_(parametros, '^cuenta bancaria$')).filter(r => !enHoja.has(claveRegla(r))));
   const idBase = idDeLink_(paramDe_(parametros, '^base fbs'));
   let base = null, saldosIniciales = null, avisosBase = [], tardios = null, ctxBase = null, hastaBase = null, posterioresO = null;
+  let fotoSaldos = null;
   if (idBase) {
     // base de la empresa en otra planilla: se trae solo lo de las cuentas E y O del mes del extracto
     const movs = leerExtracto_(extracto, leerReglas_(reglas), leerEmpresas_(empresas),
@@ -572,6 +573,13 @@ function procesar_(ss) {
     // movimientos de meses cerrados cargados o modificados después del cierre anterior
     const cierre = { E: parseNum_(paramDe_(parametros, '^saldo inicial cuenta e')), O: parseNum_(paramDe_(parametros, '^saldo inicial cuenta o')) };
     const foto = leerFotoBase_(ss);
+    // saldos de la base tal como estaba al cerrar (la foto): si hoy da lo mismo, no cambió nada desde el cierre
+    if (foto) {
+      const cE = String(Number(cuentasDe_(parametros).E)), cO = String(Number(cuentasDe_(parametros).O || ''));
+      fotoSaldos = { E: 0, O: 0 };
+      foto.forEach(v => { if (v.cuenta === cE) fotoSaldos.E += v.importe; else if (v.cuenta === cO) fotoSaldos.O += v.importe; });
+      fotoSaldos.E = redondear_(fotoSaldos.E); fotoSaldos.O = redondear_(fotoSaldos.O);
+    }
     if (r.ctx && (foto || cierre.E !== null || cierre.O !== null)) {
       const dif = { E: cierre.E === null ? 0 : r.saldos.E - cierre.E, O: cierre.O === null ? 0 : r.saldos.O - cierre.O };
       if (foto || Math.abs(dif.E) > 1 || Math.abs(dif.O) > 1) {
@@ -606,7 +614,7 @@ function procesar_(ss) {
   let pasarDifOk = [];
   try { pasarDifOk = JSON.parse(props.getProperty('PASAR_DIF_OK') || '[]'); } catch (e) { pasarDifOk = []; }
   const entrada = {
-    extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO,
+    extracto, extractoCierre, base, saldosIniciales, avisosBase, tardios, posterioresO, fotoSaldos,
     mayorE: base ? null : leer(HOJA.mayorE),
     mayorO: base ? null : leer(HOJA.mayorO),
     anteriores: delCierre || trabajo, trabajo,
@@ -4489,6 +4497,10 @@ function conciliarTodo_(entrada, redondoUnico) {
       const comparar = (n, cargado, calculado) => {
         if (cargado === null) return;
         const resto = redondear_(calculado - cargado - tard[n]);
+        // la base hoy es igual a la del cierre (foto): la diferencia ya estaba al cerrar (ajustes de meses anteriores que el
+        // cierre tomó de "CAMBIOS POST CIERRE"), no es un cambio nuevo
+        const fs = entrada.fotoSaldos;
+        if (fs && Math.abs(redondear_(calculado - fs[n] - tard[n])) <= 1) return;
         if (Math.abs(resto) > 1) avisoSaldo.push('cuenta ' + n + ': cierre anterior ' + formato_(cargado) + ', base hoy ' + formato_(calculado) +
           (tard[n] ? ', registros tardíos ' + formato_(tard[n]) : '') + ' (sin explicar ' + formato_(resto) + ')');
       };
