@@ -4232,6 +4232,29 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     unir_(s, c, 'Pendientes: ' + s.length + ' débitos del banco del mismo ' + (k.startsWith('c') ? 'CUIT' : 'concepto') + ' suman ' +
       c.length + (c.length === 1 ? ' pago' : ' pagos') + ' de FBS (revisar)');
   });
+  // 8. cheques depositados, vendidos o descontados de unos días: la suma de los créditos del banco (gestión de cheques /
+  // echeqs, descuento de documentos) es igual a la suma de los registros de cheques de FBS de esos días (Galicia TURIN
+  // 21 al 24/09: dos cheques de 1.000.000, dos echeqs y tres "CREDITO DESCUENTO DOCUMENTO" = "DP CHEQUES" + "G. de Echeq"
+  // + siete "vta ch."). Ventanas de 1 a 5 días, la más corta primero; FBS con la fecha de los créditos o hasta 3 días antes
+  const esCheqB = b => b.importe > 0 && /^(CHEQUES|FINANCIACION)/.test(b.cat || '') && /CHEQ|DESCUENTO|DOCUMENTO/i.test(b.texto);
+  const esCheqF = f => f.importe > 0 && /\b(CH|CHEQ\w*|ECHEQ\w*|DP CHEQUES)\b|VTA\.? ?CH/i.test(f.texto) && !/^Diferencia/.test(f.texto);
+  const dia = x => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const diasB = Array.from(new Set(B().filter(esCheqB).map(b => dia(b.fecha)))).sort((a, b) => a - b);
+  for (let k = 0; k <= 4; k++) {
+    diasB.forEach(d => {
+      const h = d + k * 864e5;
+      const bs = B().filter(b => esCheqB(b) && dia(b.fecha) >= d && dia(b.fecha) <= h);
+      if (!bs.length || bs.length > 25) return;
+      const tb = redondear_(bs.reduce((x, b) => x + b.importe, 0));
+      for (const [a, z] of [[1, 1], [3, 0]]) {
+        const fs = F().filter(f => esCheqF(f) && dia(f.fecha) >= d - a * 864e5 && dia(f.fecha) <= h + z * 864e5);
+        if (!fs.length || fs.length > 40 || bs.length + fs.length < 3) continue;
+        if (Math.abs(redondear_(fs.reduce((x, f) => x + f.importe, 0)) - tb) > TOLERANCIA) continue;
+        unir_(bs, fs, 'Cheques de varios días: ' + bs.length + ' créditos del banco = ' + fs.length + ' registros de cheques de FBS (revisar)');
+        break;
+      }
+    });
+  }
   // 6. pendiente anterior con centavos registrado con la fecha sin año ("30-1")
   B().filter(b => b.origen === 'Arrastre' && especifico_(b.importe) && Math.abs(b.importe) >= 100000).forEach(b => {
     if (b.match !== null) return;
