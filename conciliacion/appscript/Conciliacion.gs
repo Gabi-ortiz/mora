@@ -4262,6 +4262,36 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     if (fs.length !== 1 || B().filter(x => Math.abs(x.importe - b.importe) <= TOLERANCIA).length !== 1) return;
     unir_([b], fs, 'Pendiente anterior: registrado con su fecha (día-mes) escrita en el comentario (revisar)');
   });
+  // 9. cliente ya identificado: un recibo (o el mismo nombre en otro recibo) ya se cruzó con una transferencia de un CUIT;
+  // otro valor de ese recibo que quedó pendiente se cruza con la transferencia pendiente de ese mismo CUIT y mismo importe
+  // (Nación TURIN: RC-378227 ROMANO = 128.200 del 01/09 del CUIT 20328182344 + 487.000 del 28/08 del mismo CUIT)
+  const nroRc = t => { const m = String(t).match(/^(RC-[\w-]+)\s*\//); return m ? m[1] : ''; };
+  const nombreRc = t => {
+    const m = String(t).match(/^RC-[\w-]+\s*\/.*\/\s*([^/]+)$/);
+    return m ? normalizar_(m[1]).replace(/[^a-z ]+/g, ' ').replace(/\s+/g, ' ').trim() : '';
+  };
+  const cuitDe = new Map();
+  CRUCES_.forEach(c => c.banco.forEach(b => {
+    if (!b.cuit || b.importe <= 0) return;
+    c.fbs.forEach(f => [nroRc(f.texto), nombreRc(f.texto)].forEach(k => {
+      if (!k) return;
+      if (!cuitDe.has(k)) cuitDe.set(k, new Set());
+      cuitDe.get(k).add(b.cuit);
+    }));
+  }));
+  const clavesRc = f => [nroRc(f.texto), nombreRc(f.texto)].filter(k => k);
+  F().filter(f => f.importe > 0 && f.cuenta !== 'O' && nroRc(f.texto)).forEach(f => {
+    if (f.match !== null) return;
+    const cs = new Set();
+    clavesRc(f).forEach(k => (cuitDe.get(k) || []).forEach(c => cs.add(c)));
+    if (cs.size !== 1) return;
+    const cuit = Array.from(cs)[0];
+    const igual = x => Math.abs(x.importe - f.importe) <= TOLERANCIA;
+    const bs = B().filter(b => b.cuit === cuit && igual(b) && dias_(b.fecha, f.fecha) <= 62);
+    if (bs.length !== 1) return;
+    if (F().filter(x => x !== f && igual(x) && clavesRc(x).some(k => clavesRc(f).includes(k))).length) return;
+    unir_(bs, [f], 'Pendientes: recibo de un cliente ya identificado por su CUIT en otro cruce, mismo importe (revisar)');
+  });
 }
 
 function netearPendientesFbs_(items) {
