@@ -209,6 +209,8 @@ const REGLAS_NACION = [
   ["*", "Crédito", "^DEP\\.? ?EFVO", "DEPOSITOS EN EFECTIVO", "Depósito en efectivo"],
   ["*", "Débito", "^DEB\\.TRAN\\.INTERB ?MISMO TIT", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Transferencia a cuenta propia de otro banco"],
   ["*", "Débito", "^DB CREDIN", "PAGO PROVEEDORES", "Transferencia enviada (CREDIN)"],
+  ["*", "Débito", "^DB TRANSFERENCIA ENVIADA", "PAGO PROVEEDORES", "Transferencia enviada"],
+  ["*", "Débito", "^INTERES", "GASTOS BANCARIOS", "Intereses"],
   ["*", "Débito", "^PAGO FCA PLAN", "PAGO PROVEEDORES", "Pago fábrica plan de ahorro"],
   ["*", "Débito", "^DEB\\.PAGO SERV", "DEBITOS AUTOMATICOS", "Pago de servicios"],
   ["*", "Débito", "^GRAVAMEN LEY 25413", "GASTOS BANCARIOS", "Impuesto Ley 25.413 (débitos y créditos)"],
