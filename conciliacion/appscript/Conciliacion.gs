@@ -1005,7 +1005,14 @@ function actualizarPendTrabajo_(ss, res, nombre) {
     .concat(res.pendMes.map(p => ({ p, f: fila(p, ORIGEN_MES, p.situacion === 'Sigue pendiente' ? observacion_(p) : p.situacion) })));
   // primero lo que hay que trabajar; al final lo que sale por el Estado
   const sale = x => ESTADO_SALE.test(x.p.estado || '') && !x.p.compFalla && !x.p.sinConfirmar;
-  escribirPendTrabajo_(sh, filas.filter(x => !sale(x)).concat(filas.filter(sale)).map(x => x.f));
+  // orden: sector, origen (meses anteriores primero), lo que sale por el Estado al final del grupo, fecha
+  const orden = x => [x.f[0], x.f[1] === ORIGEN_ANT ? 0 : 1, sale(x) ? 1 : 0, x.p.fecha ? x.p.fecha.getTime() : 0];
+  filas.sort((a, b) => {
+    const A = orden(a), B = orden(b);
+    for (let i = 0; i < A.length; i++) if (A[i] !== B[i]) return A[i] < B[i] ? -1 : 1;
+    return 0;
+  });
+  escribirPendTrabajo_(sh, filas.map(x => x.f));
 }
 
 function escribirPendTrabajo_(sh, filas) {
