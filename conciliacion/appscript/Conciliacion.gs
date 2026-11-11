@@ -3997,7 +3997,9 @@ function cierrePendientes_(banco, fbs, oPend, empresas, sinCuentaO) {
   });
   // crédito anterior registrado después en FBS solo con el nombre del banco ("BANCO PCIA DE CORDOBA" 370.000 del 01/09 =
   // la transferencia de ZAMBRANO del 26/06): importe único en todos los pendientes de los dos lados
-  F().filter(f => f.importe > 0 && f.origen === 'Mes' && /^BANCO\b[^/]*$/i.test(f.texto.trim())).forEach(f => {
+  // (solo cuenta E: un "BANCO MACRO" de la cuenta O es la mitad de un pase, no un cliente. Macro TURIN: ACQUAVITA 11.000.000
+  // del 20/08 no es el "BANCO MACRO" de O del 29/09, que es el pase de TURIN de ese día)
+  F().filter(f => f.importe > 0 && f.origen === 'Mes' && f.cuenta !== 'O' && /^BANCO\b[^/]*$/i.test(f.texto.trim())).forEach(f => {
     if (f.match !== null) return;
     const igual = x => Math.abs(x.importe - f.importe) <= TOLERANCIA;
     const bs = B().filter(igual);
@@ -4319,6 +4321,33 @@ function ultimaVueltaGrupos_(B, F, fbs) {
     if (bs.length !== 1) return;
     if (F().filter(x => x !== f && igual(x) && clavesRc(x).some(k => clavesRc(f).includes(k))).length) return;
     unir_(bs, [f], 'Pendientes: recibo de un cliente ya identificado por su CUIT en otro cruce, mismo importe (revisar)');
+  });
+  // 10. recibo cruzado con la transferencia de otra persona mientras la del propio cliente (su CUIT aparece con su apellido
+  // en otros movimientos del banco) sigue pendiente por el mismo importe: se cambia el cruce (Macro TURIN: recibo de
+  // MARTINO 150.000 estaba con la transferencia de GERARDO CONSTANTINO del 11/08; la de MARTINO del 12/08 quedaba pendiente)
+  const todosB = B().concat(...CRUCES_.map(c => c.banco));
+  const palabrasCuit = new Map();
+  todosB.forEach(b => {
+    if (!b.cuit) return;
+    if (!palabrasCuit.has(b.cuit)) palabrasCuit.set(b.cuit, new Set());
+    tokens_(normalizar_(b.texto).toUpperCase()).forEach(t => palabrasCuit.get(b.cuit).add(t));
+  });
+  const deCuit = (c, ap) => !!(c && palabrasCuit.has(c) && palabrasCuit.get(c).has(ap));
+  CRUCES_.slice().forEach(c => {
+    if (c.banco.length !== 1 || c.fbs.length !== 1) return;
+    const b = c.banco[0], f = c.fbs[0];
+    const n = nombreRc(f.texto).toUpperCase().split(' ').filter(t => t.length >= 3);
+    if (!n.length || !b.cuit || b.importe <= 0) return;
+    const ap = n[0];
+    if (deCuit(b.cuit, ap) || tokens_(normalizar_(b.texto).toUpperCase()).has(ap)) return;
+    const cand = B().filter(p => p.importe > 0 && deCuit(p.cuit, ap) && Math.abs(p.importe - f.importe) <= TOLERANCIA &&
+      dias_(p.fecha, f.fecha) <= 62);
+    const antes = cand.filter(p => p.fecha <= f.fecha);
+    const p = antes.length === 1 ? antes[0] : cand.length === 1 ? cand[0] : null;
+    if (!p) return;
+    CRUCES_.splice(CRUCES_.indexOf(c), 1);
+    b.match = null; b.metodo = '';
+    unir_([p], [f], 'Pendientes: recibo cruzado con la transferencia de su propio CUIT (revisar)');
   });
 }
 
