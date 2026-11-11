@@ -549,6 +549,16 @@ function procesar_(ss) {
   const hojaExtracto = (hojaDe_(ss, nombresExtracto_()) || { getName: () => HOJA.extracto }).getName();
   const hojaAnteriores = (hojaDe_(ss, nombresAnteriores_()) || { getName: () => HOJA.anteriores }).getName();
   const parametros = ss.getSheetByName(HOJA.parametros) ? leer(HOJA.parametros) : null;
+  // planillas cerradas antes de que el cierre guardara "Saldo del extracto al último cierre": se toma del Historial, para
+  // que se avise la diferencia con el extracto nuevo y se tomen los movimientos del mes anterior que faltaban
+  if (parametros && paramDe_(parametros, '^saldo del extracto') === null) {
+    const hi = ss.getSheetByName(HOJA.historial);
+    if (hi && hi.getLastRow() > 1) {
+      const hv = hi.getDataRange().getValues(), col = hv[0].map(normalizar_).indexOf('saldo extracto');
+      const sal = col >= 0 ? parseNum_(hv[hv.length - 1][col]) : null;
+      if (sal !== null) parametros.push(['Saldo del extracto al último cierre', sal]);
+    }
+  }
   const extracto = leer(hojaExtracto), empresas = leer(HOJA.empresas);
   const shExt = ss.getSheetByName(HOJA.extCierre);
   const extractoCierre = shExt && shExt.getLastRow() > 1 ? shExt.getRange(2, 1, shExt.getLastRow() - 1, 3).getValues() : null;
@@ -1687,7 +1697,11 @@ function leerExtracto_(filas, reglas, empresas, cierre) {
     } else if (cierre && cierre.saldo !== null && cierre.saldo !== undefined) {
       let corte = -1;
       movs.forEach((m, i) => { if (!delMes(m) && m.saldo !== null && Math.abs(m.saldo - cierre.saldo) < 0.005) corte = i; });
-      if (corte < 0) info.saldoCierreNoEncontrado = cierre.saldo;
+      // el extracto empieza justo después del cierre (el saldo anterior al primer movimiento es el del cierre): todos los
+      // movimientos del mes anterior que trae son nuevos (Santander TURIN: SIRCREB y Tucumán del 31/07 cargados después)
+      if (corte < 0 && movs[0].saldo !== null && Math.abs(redondear_(movs[0].saldo - movs[0].importe) - cierre.saldo) < 0.005) {
+        movs.forEach((m, i) => { if (mes(m) === mesPrevio) tomar.add(i); });
+      } else if (corte < 0) info.saldoCierreNoEncontrado = cierre.saldo;
       else movs.forEach((m, i) => { if (i > corte && mes(m) === mesPrevio) tomar.add(i); });
     }
     info.conCierre = !!(cierre && cierre.movs && cierre.movs.length) || (cierre && cierre.saldo != null && info.saldoCierreNoEncontrado === undefined);
