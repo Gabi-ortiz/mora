@@ -824,8 +824,21 @@ function cerrarMes() {
   if (ui.alert('Mes cerrado', 'Foto guardada en la carpeta "' + carpeta.getName() + '" y registrada en "Historial".\n' + n +
       ' partidas pasadas a "' + HOJA.anterioresAlt[0] + '".\n\n¿Vaciar la hoja del extracto para cargar el mes siguiente? (FBS se lee de la base, no hay que borrar nada más)',
       ui.ButtonSet.YES_NO) === ui.Button.YES) {
+    // se dejan los títulos (fila 1) para que el mes siguiente se pegue con las mismas columnas
     [HOJA.extracto].concat(HOJA.extractoAlt).concat(res.baseCtx ? [] : [HOJA.mayorE, HOJA.mayorO, HOJA.base])
-      .forEach(h => { const sh = ss.getSheetByName(h); if (sh) sh.clearContents(); });
+      .forEach(h => {
+        const sh = ss.getSheetByName(h);
+        if (!sh || sh.getLastRow() < 1) return;
+        // fila de títulos: la primera (de las 20 primeras) con una celda "Fecha"; si no hay, la 1
+        const n = Math.min(20, sh.getLastRow());
+        const top = sh.getRange(1, 1, n, sh.getLastColumn()).getValues();
+        let fila = top.findIndex(r => r.some(x => /^fecha$/i.test(String(x).trim()))) + 1;
+        if (fila < 1) fila = 1;
+        if (sh.getLastRow() > fila) sh.getRange(fila + 1, 1, sh.getLastRow() - fila, sh.getMaxColumns()).clearContent();
+        if (fila > 1) sh.getRange(1, 1, fila - 1, sh.getMaxColumns()).clearContent();
+        sh.getRange(fila, 1).setNote('Títulos del extracto del mes anterior: pegá el extracto nuevo con las mismas columnas ' +
+          '(podés pegarlo encima con sus títulos o debajo de esta fila).');
+      });
   }
   hist.activate();
 }
@@ -1586,6 +1599,13 @@ function leerExtracto_(filas, reglas, empresas, cierre) {
     throw new Error('Extracto: no encuentro los encabezados (Fecha, Concepto o Descripción, Saldo).');
   }
   const c = h.col, info = {}, movs = [];
+  // reglas por código (Santander, Macro, Galicia...) y un extracto sin la columna del código: se clasificaría todo mal
+  // (Santander TURIN agosto: pegado con Fecha / Concepto / Importe / Saldo, sin "Cod. Operativo")
+  const conCodigo = (reglas || []).filter(r => r.cod && r.cod !== '*').length;
+  if (c.causal === undefined && c.descripcion === undefined && conCodigo > (reglas || []).length / 2) {
+    throw new Error('Extracto: falta la columna del código del movimiento (ej. "Cod. Operativo" o "Causal") y las reglas de ' +
+      'este banco son por código. Bajá el extracto con el mismo formato del mes anterior (con todas las columnas) y pegalo de nuevo.');
+  }
   // Santander: el Excel trae primero "Movimientos del Día" (sin saldo, todavía no contabilizados) y después
   // "Últimos Movimientos"; solo se toma el segundo bloque
   let delDia = false;
