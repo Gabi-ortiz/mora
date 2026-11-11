@@ -2904,6 +2904,22 @@ function combinacionesFechaEscrita_(banco, fbs) {
       for (let n = 5; n <= Math.min(8, g.length) && !combo; n++) combo = primeraCombinacion_(g, n, f.importe);
       if (combo) { unir_(combo, [f], 'Suma de movimientos del día escrito en el comprobante (revisar)'); return; }
     }
+    // muchos movimientos del día: el comprobante es la suma de todos menos unos pocos (Nación TURIN 29/10: "RM-394384"
+    // 26.236.185,95 = 18 de los 21 débitos del día; quedan afuera 13.275.000, 8.850.000 y 20.984,06). Solo si los que
+    // quedan afuera (hasta 4) son una única combinación
+    if (cands.length < 9) return;
+    const resto = redondear_(cands.reduce((x, b) => x + b.importe, 0) - f.importe);
+    let fuera = null, n = 0;
+    const r = (desde, falta, el) => {
+      if (n > 1) return;
+      if (el.length && Math.abs(falta) <= TOLERANCIA) { n++; fuera = el; return; }
+      if (el.length >= 4) return;
+      for (let i = desde; i < cands.length; i++) r(i + 1, redondear_(falta - cands[i].importe), el.concat([cands[i]]));
+    };
+    if (Math.abs(resto) <= TOLERANCIA) { n = 1; fuera = []; } else r(0, resto, []);
+    if (n !== 1) return;
+    const usa = cands.filter(b => fuera.indexOf(b) < 0);
+    if (usa.length >= 5) unir_(usa, [f], 'Suma de movimientos del día escrito en el comprobante: ' + usa.length + ' de ' + cands.length + ' (revisar)');
   });
   // depósito de echeq (Chexa Santander "02092026-DEP ECHEQ"): el banco acredita cada cheque en su línea, desde 3 días antes
   // hasta 5 después de la fecha escrita; tiene que entrar al menos un cheque
@@ -3820,6 +3836,9 @@ function cierrePendientes_(banco, fbs, oPend, empresas, sinCuentaO) {
     if (fs.length !== 1 || !cond(b, fs[0])) return;
     if (B().filter(x => igual(x, fs[0]) && distancia_(x, fs[0]) <= ventana).length !== 1) return;
     const dif = redondear_(b.importe - fs[0].importe);
+    // un pase entre cuentas propias de FBS solo contra una transferencia propia del banco (Nación TURIN: un "PAGO FCA
+    // PLAN" de 1.999.999,98 del 29/10 no es el "Pasefondo" de 2.000.000 del 06/10)
+    if (/^Pase/i.test(fs[0].texto) && !propia(b)) return;
     unir_([b], fs, metodo + (Math.abs(dif) > 0.005 ? ' (dif. ' + formato_(dif) + ')' : ''));
     if (Math.abs(dif) > 0.005) {
       const a = partidaFbs_({ fecha: fs[0].fecha, comentario: 'Diferencia de redondeo ' + fs[0].texto.slice(0, 40) + ' - ajustar',
