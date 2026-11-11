@@ -98,6 +98,8 @@ const REGLAS_GALICIA = [
   ["907282", "Débito", "", "CHEQUES", "Compra / cesión de cheques"],
   ["907364", "Débito", "", "CHEQUES", "Echeq propio debitado (Galicia)"],
   ["907365", "Débito", "", "CHEQUES", "Echeq propio debitado (48 hs)"],
+  ["907319", "Débito", "", "CHEQUES", "Cheque propio pagado (48 hs)"],
+  ["907251", "Débito", "", "PAGO PROVEEDORES", "Transferencia B to B"],
   ["917133", "Crédito", "", "FINANCIACION / PRESTAMOS", "Crédito por descuento de documentos"],
   ["907751", "Débito", "", "GASTOS BANCARIOS", "Interés nominal (descuento de documentos)"],
   ["917138", "Crédito", "", "INVERSIONES (FCI)", "Rescate FIMA"],
@@ -578,8 +580,12 @@ function procesar_(ss) {
     if (foto) {
       const cE = String(Number(cuentasDe_(parametros).E)), cO = String(Number(cuentasDe_(parametros).O || ''));
       fotoSaldos = { E: 0, O: 0 };
-      foto.forEach(v => { if (v.cuenta === cE) fotoSaldos.E += v.importe; else if (v.cuenta === cO) fotoSaldos.O += v.importe; });
-      fotoSaldos.E = redondear_(fotoSaldos.E); fotoSaldos.O = redondear_(fotoSaldos.O);
+      if (foto.saldos) {
+        fotoSaldos = { E: Number(foto.saldos[cE] || 0), O: Number(foto.saldos[cO] || 0) };
+      } else {
+        foto.forEach(v => { if (v.cuenta === cE) fotoSaldos.E += v.importe; else if (v.cuenta === cO) fotoSaldos.O += v.importe; });
+        fotoSaldos.E = redondear_(fotoSaldos.E); fotoSaldos.O = redondear_(fotoSaldos.O);
+      }
     }
     if (r.ctx && (foto || cierre.E !== null || cierre.O !== null)) {
       const dif = { E: cierre.E === null ? 0 : r.saldos.E - cierre.E, O: cierre.O === null ? 0 : r.saldos.O - cierre.O };
@@ -2079,11 +2085,21 @@ function guardarFotoBase_(ss, ctx, hasta) {
   const desdeFoto = inicioFoto_(new Date(hasta.getFullYear(), hasta.getMonth() + 1, 1));
   const r = consultaGviz_(ctx.id, ctx.hoja, 'select ' + [L.id, L.plan, L.debe, L.haber, L.fecha].join(', ') + ' where ' + ctx.enCuentas +
     ' and ' + L.fecha + ' >= ' + fechaGviz_(desdeFoto) + ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + ctx.vigente);
-  const filas = [['DETMOVID', 'Cuenta', 'Importe', 'Fecha', 'Cierre al ' + fechaTexto_(hasta)]].concat(r.slice(1).map(x =>
-    [String(x[0]), String(Number(x[1])), redondear_(Number(x[2] || 0) - Number(x[3] || 0)), x[4], '']));
+  // saldo de cada cuenta en la base al cierre (toda la historia, no solo los meses de la foto): el mes siguiente se compara
+  // contra este para saber si en FBS cambió algo después del cierre
+  let saldos = '';
+  try {
+    const sum = consultaGviz_(ctx.id, ctx.hoja, 'select ' + L.plan + ', sum(' + L.debe + '), sum(' + L.haber + ') where ' + ctx.enCuentas +
+      ' and ' + L.fecha + ' <= ' + fechaGviz_(hasta) + ctx.vigente + ' group by ' + L.plan);
+    const o = {};
+    sum.slice(1).forEach(x => { o[String(Number(x[0]))] = redondear_(Number(x[1] || 0) - Number(x[2] || 0)); });
+    saldos = JSON.stringify(o);
+  } catch (e) { saldos = ''; }
+  const filas = [['DETMOVID', 'Cuenta', 'Importe', 'Fecha', 'Cierre al ' + fechaTexto_(hasta), saldos]].concat(r.slice(1).map(x =>
+    [String(x[0]), String(Number(x[1])), redondear_(Number(x[2] || 0) - Number(x[3] || 0)), x[4], '', '']));
   let sh = ss.getSheetByName(HOJA_FOTO_FBS);
   if (sh) sh.clear(); else sh = ss.insertSheet(HOJA_FOTO_FBS);
-  sh.getRange(1, 1, filas.length, 5).setValues(filas);
+  sh.getRange(1, 1, filas.length, 6).setValues(filas);
   sh.getRange(2, 1, Math.max(filas.length - 1, 1), 2).setNumberFormat('@');
   sh.hideSheet();
   return filas.length - 1;
@@ -2094,6 +2110,8 @@ function leerFotoBase_(ss) {
   if (!sh || sh.getLastRow() < 2) return null;
   const m = new Map();
   sh.getRange(2, 1, sh.getLastRow() - 1, 4).getValues().forEach(r => m.set(String(r[0]), { cuenta: String(r[1]), importe: Number(r[2]), fecha: r[3] }));
+  // saldos de la base al cierre (las fotos nuevas los guardan en F1; las viejas tenían toda la historia y se suman)
+  try { const t = String(sh.getRange(1, 6).getValue() || ''); m.saldos = t ? JSON.parse(t) : null; } catch (e) { m.saldos = null; }
   return m;
 }
 
