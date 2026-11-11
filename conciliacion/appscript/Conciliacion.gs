@@ -1902,7 +1902,12 @@ function cambioAplica_(mesCerrado, detectado, desde, cierreAnterior) {
   if (mes === mesM) return true;
   const det = parseFecha_(detectado);
   const diaCierre = cierreAnterior ? new Date(cierreAnterior.getFullYear(), cierreAnterior.getMonth(), cierreAnterior.getDate()) : null;
-  return mes < mesM && (mes === mesM - 1 || !!(diaCierre && det && det >= diaCierre));
+  if (mes >= mesM) return false;
+  // del mes anterior: si ya se cerró con el motor, los cambios detectados hasta el día del cierre ya entraron en ese
+  // proceso (como cambios del mismo mes) y no se vuelven a sumar (Nación TURIN octubre: el 653.067,85 y el RM-393657 de
+  // septiembre aparecían otra vez como pendientes)
+  if (mes === mesM - 1) return !diaCierre || !det || det > diaCierre;
+  return !!(diaCierre && det && det >= diaCierre);
 }
 /** El cambio es de un mes anterior al que se concilia (movimiento tardío) o del mismo mes (movimiento normal del mes). */
 function cambioTardio_(mesCerrado, desde) {
