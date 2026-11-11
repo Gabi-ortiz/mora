@@ -294,6 +294,7 @@ const REGLAS_SANTANDER = [
   ["2574", "Débito", "", "COBRANZA TARJETAS", "Débito comercio Payway (Prisma)"],
   ["3372", "Débito", "", "COBRANZA TARJETAS", "Débito comercio Getnet"],
   ["1397", "Crédito", "", "FINANCIACION / PRESTAMOS", "Liquidación de préstamo"],
+  ["1556", "Débito", "", "FINANCIACION / PRESTAMOS", "Pago / cancelación de préstamo prendario"],
   ["2327", "Débito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Pago a cuentas propias (Interbanking)"],
   ["2393", "Crédito", "", "TRANSFERENCIA ENTRE CUENTAS PROPIAS / GRUPO", "Cobro desde cuentas propias (Interbanking)"],
   ["4713", "Débito", "", "PAGO PROVEEDORES", "Pago Interbanking B2B"],
