@@ -2433,8 +2433,14 @@ function claveO_(texto) {
   return t;
 }
 
+/** Nº del valor en DETComentaAux ("Nº 3006-BANCO SANTAN(1103027)-18/08/2026" -> "3006"); '' si no tiene. */
+function nroValorO_(aux) {
+  const m = String(aux || '').match(/^N[º°o]?\s*(.+?)\s*-\s*[A-Z][A-Z .]*\(\d+\)/i);
+  return m ? m[1].replace(/\s+/g, '') : '';
+}
+
 /** Busca dentro de "lista" combinaciones que se anulan (1 contra 1..4 del signo contrario). Devuelve las que quedan. */
-function netear_(lista) {
+function netear_(lista, soloExacto) {
   const libres = lista.slice();
   const usar = x => { x.match = []; x.metodo = 'Confirmado en O'; };
   libres.slice().sort((a, b) => Math.abs(b.importe) - Math.abs(a.importe)).forEach(u => {
@@ -2446,6 +2452,7 @@ function netear_(lista) {
     }
   });
   let resto = libres.filter(x => x.match === null);
+  if (soloExacto) return resto;
   if (resto.length > 1 && Math.abs(resto.reduce((x, p) => x + p.importe, 0)) <= TOLERANCIA) { resto.forEach(usar); resto = []; }
   // un ingreso pasado a E en parte (Galicia JEA: depósito "75534" de 18.343.494,66 en O y 21 cheques pasados a E por
   // 16.804.812,66): los pases quedan confirmados y del ingreso queda sin confirmar solo la diferencia
@@ -2488,7 +2495,16 @@ function analisisO_(asientosO, anterioresFbs) {
   anterioresFbs.forEach(p => { if (/^(RC-|RM-|LIQ )/.test(claveO_(p.texto)) && grupos.has(claveO_(p.texto))) { p.cuenta = 'O'; agregar(p); usadosAnteriores.push(p); } });
   const pendientes = [], resumen = [];
   grupos.forEach((g, clave) => {
-    const resto = netear_(g);
+    // sin comprobante (RC / RM / liquidación) el grupo es el texto: "Canje de Valor - BANCO SANTANDER RIO" junta cientos
+    // de valores de Dome Taller con importes redondos repetidos. Primero se netea cada Nº del valor por separado (ingreso
+    // en O del 18/08 y pase a E con fecha 01/08, los dos "Nº 3006-BANCO SANTAN(1103027)-18/08/2026"); lo que queda,
+    // todo junto como siempre.
+    if (!/^(RC-|RM-|LIQ )/.test(clave) && g.length > 2) {
+      const porNro = new Map();
+      g.forEach(p => { const n = nroValorO_(p.aux); if (!n) return; if (!porNro.has(n)) porNro.set(n, []); porNro.get(n).push(p); });
+      porNro.forEach(sub => { if (sub.length > 1 && sub.length < g.length) netear_(sub, true); });
+    }
+    const resto = netear_(g.filter(p => p.match === null));
     resto.forEach(p => pendientes.push(p));
     const debe = g.filter(p => p.importe > 0).reduce((x, p) => x + p.importe, 0);
     const haber = -g.filter(p => p.importe < 0).reduce((x, p) => x + p.importe, 0);
