@@ -286,6 +286,7 @@ const REGLAS_SANTANDER = [
   ["1253", "Crédito", "", "COBRANZA CLIENTES", "Crédito transferencia online banking empresas"],
   ["1257", "Crédito", "", "COBRANZA CLIENTES", "Crédito transferencia online banking"],
   ["2377", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago a proveedores recibido (cobro de empresas)"],
+  ["2376", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Pago proveedores Interbanking recibido (cobro de empresas)"],
   ["3002", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Transferencia pagos a terceros (cobro de empresas)"],
   ["1970", "Crédito", "", "COBRANZA EMPRESAS / ASEGURADORAS", "Servicios de pago (aseguradoras)"],
   ["2602", "Crédito", "", "COBRANZA TARJETAS", "Acreditación comercio Payway (Prisma)"],
@@ -3794,10 +3795,17 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   // importe con centavos, un solo candidato en +-15 días (ej. descuento de documento del 25/06 y "01072026-G. de Echeq")
   pasada_(antBanco, eItems, b => Math.round(Math.abs(b.importe) * 100) % 100 !== 0,
     'Pendiente anterior: importe con centavos, único en +-15 días (revisar)', 15, true);
+  // gasto del banco de meses atrás pagado ahora con un RM a ese banco (Santander: "Servicio interbanking" del 04/08 por
+  // 850.091,55 y "RM-393666 / BANCO SANTANDER RIO Nº 20102026" del 21/10): importe con centavos, único de los dos lados
+  const centavos = x => Math.round(Math.abs(x.importe) * 100) % 100 !== 0;
+  const unicoEn = (l, x) => l.filter(y => y.match === null && Math.abs(y.importe - x.importe) <= TOLERANCIA).length === 1;
+  pasada_(antBanco, eItems, (b, f) => b.importe < 0 && centavos(b) && Math.abs(b.importe - f.importe) < 0.005 && /^RM-\d+\s*\/\s*BANCO/i.test(f.texto) &&
+    unicoEn(antBanco, b) && unicoEn(eItems, f),
+    'Pendiente anterior: gasto del banco pagado con un RM a banco, importe con centavos único (revisar)', 150, true);
   antFbs.forEach(a => {
     if (a.match !== null) return;
     const f = eItems.find(x => x.match === null && Math.abs(x.importe + a.importe) <= TOLERANCIA &&
-      (claveO_(x.texto) === claveO_(a.texto) || comparten_(x.nombre, a.nombre) || /ANULA|REVERS/i.test(x.texto)));
+      (claveO_(x.texto) === claveO_(a.texto) || comparten_(x.nombre, a.nombre) || /ANULA|REVERS|ARREGLO/i.test(x.texto)));
     if (f) compensar_([a, f], 'Pendiente anterior: revertido en E');
   });
 }
