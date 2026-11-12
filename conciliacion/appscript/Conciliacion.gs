@@ -3339,6 +3339,25 @@ function liquidacionesTarjeta_(banco, fbs) {
         for (let n = 2; n <= Math.min(6, cands.length) && !combo; n++) combo = primeraCombinacion_(cands, n, f.importe, 1);
         if (combo) break;
       }
+      if (!combo) {
+        // el crédito y el débito de la misma tarjeta tienen otro texto (Santander: "Acreditacion a comercio payway" y "Debito
+        // comercio payway" del 07/10, liq 33389 = 98.982 - 84.700): se juntan por tarjeta y día, solo si suman justo
+        const marca = b => { const m = String(b.texto).toUpperCase().match(/PAYWAY|PRISMA|FISERV|FIRST DATA|GETNET|NARANJA|CABAL/);
+          return m ? ({ PRISMA: 'PAYWAY', 'FIRST DATA': 'FISERV' }[m[0]] || m[0]) : null; };
+        const porMarca = new Map();
+        banco.forEach(b => {
+          if (b.match !== null || b.origen !== 'Mes' || !esTarjeta(b) || !diaOk(b) || !marca(b)) return;
+          const k = b.fecha.getTime() + '|' + marca(b);
+          porMarca.set(k, (porMarca.get(k) || []).concat([b]));
+        });
+        const dias2 = Array.from(porMarca.keys()).sort((x, y) => dias_(porMarca.get(x)[0].fecha, f.fecha) - dias_(porMarca.get(y)[0].fecha, f.fecha));
+        for (const k of dias2) {
+          const cands = porMarca.get(k).slice(0, 15);
+          if (cands.length < 2 || new Set(cands.map(b => normalizar_(b.texto))).size === 1) continue;   // ya probado arriba
+          for (let n = 2; n <= Math.min(6, cands.length) && !combo; n++) combo = primeraCombinacion_(cands, n, f.importe, 0.005);
+          if (combo) break;
+        }
+      }
       if (!combo) return;
       mejor = { importe: redondear_(combo.reduce((x, b) => x + b.importe, 0)), grupo: combo };
     }
@@ -3860,6 +3879,22 @@ function marcarCruces_(oPend, anteriores, eItems, bancoMes) {
     const o2 = oPend.find(x => (x.importe > 0) === (b.importe > 0) && distancia_(b, x) <= 31 && parecido(b, x));
     if (o2) b.cruces = 'Recibo de O sin confirmar del mismo cliente con otro importe: ' + desc(o2) + ' (dif. ' +
       formato_(redondear_(b.importe - o2.importe)) + ')';
+  });
+  // posible error de importe en el registro: banco y FBS con los mismos centavos y una diferencia redonda chica (Santander
+  // octubre: transferencia de PESSIO del 30/10 por 568.799,49 y RC-381068 de JEA S.A. por 569.799,49). Solo se marca.
+  const centavos = x => Math.round(Math.abs(x.importe) * 100) % 100;
+  const casi = (b, f) => (b.importe > 0) === (f.importe > 0) && distancia_(b, f) <= 5 && centavos(b) === centavos(f) && centavos(b) !== 0 && (() => {
+    const d = Math.abs(redondear_(Math.abs(b.importe) - Math.abs(f.importe)));
+    return d >= 100 && Math.round(d * 100) % 10000 === 0 && d <= Math.abs(b.importe) * 0.02;
+  })();
+  const fbsLibres = eItems.filter(f => f.match === null && f.origen === 'Mes').concat(oPend.filter(o => o.origen === 'Mes'));
+  bancoMes.forEach(b => {
+    if (b.match !== null) return;
+    const fs = fbsLibres.filter(f => casi(b, f));
+    if (fs.length !== 1 || bancoMes.filter(x => x.match === null && casi(x, fs[0])).length !== 1) return;
+    const f = fs[0], dif = formato_(Math.abs(redondear_(Math.abs(b.importe) - Math.abs(f.importe))));
+    b.cruces = (b.cruces ? b.cruces + ' | ' : '') + 'Posible error de importe (dif. ' + dif + ', mismos centavos): ' + desc(f);
+    f.cruces = (f.cruces ? f.cruces + ' | ' : '') + 'Posible error de importe (dif. ' + dif + ', mismos centavos): banco ' + desc(b);
   });
   // sugerencias que NO se cruzan (regla: importe redondo o sin dato que lo identifique): misma fecha e importe
   bancoMes.forEach(b => {
