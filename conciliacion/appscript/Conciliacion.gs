@@ -2640,6 +2640,44 @@ function partidasE_(asientosE, asientosO) {
   return sueltas;
 }
 
+/**
+ * Al final del cruce, una liquidación de tarjeta que quedó sin cruzar vuelve a sus líneas, para trabajarlas por separado en
+ * "Pendientes en trabajo" (Santander septiembre: "Confirmación + 341277-LIQ + ..." por 1.248.250,67, la liquidación
+ * registrada dos veces). La línea cambiada o borrada después del cierre y su reversión se anulan entre sí, y el crédito
+ * del banco con ese número de liquidación se cruza con la primera registración que suma justo; lo demás queda pendiente
+ * (la Confirmación del 18/09 por 700.000, cargada dos veces).
+ */
+function separarLiquidaciones_(banco, fbs) {
+  const lineasLiq = new Map();
+  for (let i = fbs.length - 1; i >= 0; i--) {
+    const p = fbs[i], k = String(p.liq || '');
+    if (p.match !== null || !p.lineas || p.lineas.length < 2 || !k.startsWith('LIQ ')) continue;
+    const qs = p.lineas.map(l => {
+      const q = partidaFbs_({ fecha: l.fecha, comentario: l.texto, referencia: '', asiento: l.asiento,
+        debe: Math.max(l.importe, 0), haber: Math.max(-l.importe, 0) }, 'Mes');
+      q.cuenta = 'E'; q.liq = k;
+      return q;
+    });
+    fbs.splice(i, 1, ...qs);
+    lineasLiq.set(k, (lineasLiq.get(k) || []).concat(qs));
+  }
+  lineasLiq.forEach(L => L.forEach(a => {
+    if (a.match !== null || !/^cambio /.test(String(a.asiento))) return;
+    const b = L.find(x => x !== a && x.match === null && x.texto === a.texto && Math.abs(x.importe + a.importe) <= TOLERANCIA);
+    if (b) compensar_([a, b], 'Compensa dentro de FBS: registro cambiado o borrado después del cierre');
+  }));
+  if (!lineasLiq.size) return;
+  const nroBanco = b => { const m = b.texto.match(/nro\.?\s*liq\.?\s*0*(\d{4,})/i); return m ? m[1] : null; };
+  banco.filter(b => b.match === null && b.importe > 0).forEach(b => {
+    const n = nroBanco(b);
+    const L = n && lineasLiq.has('LIQ ' + n) ? lineasLiq.get('LIQ ' + n).filter(x => x.match === null).sort((x, y) => x.fecha - y.fecha) : [];
+    for (let m = 1; m <= Math.min(4, L.length); m++) {
+      const combo = primeraCombinacion_(L, m, b.importe);
+      if (combo) { unir_([b], combo, 'Liquidación de tarjeta: mismo número, una de sus registraciones (lo demás queda pendiente: posible duplicado, revisar)'); return; }
+    }
+  });
+}
+
 function escribirAnalisisO_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.analisisO);
   const cab = ['Estado', 'Comprobante / liquidación', 'Desde', 'Líneas', 'De meses anteriores', 'Debe', 'Haber', 'Neto',
@@ -5022,6 +5060,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
     (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), 'Pendiente anterior: fecha del comentario + importe', 400, true);
+  separarLiquidaciones_(banco, fbs);
   bloqueadas.forEach(p => { p.match = null; p.metodo = ''; });
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
