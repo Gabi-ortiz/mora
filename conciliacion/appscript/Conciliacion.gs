@@ -2647,11 +2647,19 @@ function partidasE_(asientosE, asientosO) {
  * del banco con ese número de liquidación se cruza con la primera registración que suma justo; lo demás queda pendiente
  * (la Confirmación del 18/09 por 700.000, cargada dos veces).
  */
-function separarLiquidaciones_(banco, fbs) {
+function separarLiquidaciones_(banco, fbs, marcas) {
+  // la que ya se trabaja en "Pendientes en trabajo" (Estado, Responsable o Comentario) queda como está: separada cambiaría
+  // de ID y perdería la marca (Santander septiembre: las Confirmaciones del 10/09 compensadas con los créditos de Payway)
+  const trabajadas = new Set();
+  Object.keys(marcas || {}).forEach(id => {
+    const m = marcas[id];
+    if ((m.estado && !/^Pendiente$/i.test(m.estado)) || String(m.resp || '').trim() || String(m.com || '').trim()) trabajadas.add(id.replace(/#\d+$/, ''));
+  });
   const lineasLiq = new Map();
   for (let i = fbs.length - 1; i >= 0; i--) {
     const p = fbs[i], k = String(p.liq || '');
     if (p.match !== null || !p.lineas || p.lineas.length < 2 || !k.startsWith('LIQ ')) continue;
+    if (trabajadas.has(clavePend_(sector_(p), p.fecha, p.texto, valorSector_(p)))) continue;
     const qs = p.lineas.map(l => {
       const q = partidaFbs_({ fecha: l.fecha, comentario: l.texto, referencia: '', asiento: l.asiento,
         debe: Math.max(l.importe, 0), haber: Math.max(-l.importe, 0) }, 'Mes');
@@ -5060,7 +5068,7 @@ function conciliarTodo_(entrada, redondoUnico) {
   // vuelta a cargar con la fecha del crédito escrita: "04050405-CREDITO X TARJETA 04/05")
   pasada_(banco.filter(p => p.match === null && p.origen === 'Arrastre'), fbs.filter(p => p.match === null && p.origen === 'Mes'),
     (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe), 'Pendiente anterior: fecha del comentario + importe', 400, true);
-  separarLiquidaciones_(banco, fbs);
+  separarLiquidaciones_(banco, fbs, marcasTrabajo_(entrada.trabajo || entrada.anteriores || []));
   bloqueadas.forEach(p => { p.match = null; p.metodo = ''; });
   ao.pendientes = ao.pendientes.filter(p => p.match === null);
   marcarCruces_(ao.pendientes, anteriores, eItems, bancoMes);
