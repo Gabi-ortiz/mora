@@ -3860,6 +3860,38 @@ const POR_REF_ = (b, f) => b.ref.length >= 5 && ((f.valor && f.valor === b.ref) 
 const POR_NOMBRE_ = (b, f) => comparten_(b.nombre, f.nombre);
 
 /**
+ * Pendientes anteriores del banco contra recibos de E por nombre. Una sola palabra en común no alcanza si no es el
+ * apellido del recibo (Macro TURIN agosto: "TPUSH OSVALDO NESTOR RICHETT" de 2025 se cruzaba con el recibo de "GALLIANO,
+ * BENITO OSVALDO" por OSVALDO, y quedaba pendiente "BENITO OSVALDO GALLIAN" del 28/07). Entre varias transferencias
+ * posibles gana la más parecida (apellido, palabras en común, inicial del nombre) y después la más cercana en fecha, no la
+ * más vieja ("PEREYRA/S" del 28/08 para "PEREYRA, SOFIA", no "PEREYRA,J" de junio).
+ */
+function nombreAnteriores_(antBanco, eItems, criterio, ventana) {
+  const igual = (a, b) => a === b || (a.length >= 5 && b.length >= 5 && (a.startsWith(b) || b.startsWith(a)));   // "GALLIAN" = "GALLIANO"
+  const persona = f => { const t = String(f.texto).split(' / '); return t.length > 1 ? t[t.length - 1].toUpperCase() : ''; };
+  const pares = [];
+  eItems.forEach(f => {
+    if (f.match !== null) return;
+    const per = persona(f), partes = per.split(',');
+    const ape = Array.from(tokens_(partes[0] || ''));
+    const nom = (String(partes[1] || '').trim().match(/[A-ZÑ]/) || [''])[0];
+    antBanco.forEach(b => {
+      if (b.match !== null || redondear_(Math.abs(f.importe - b.importe)) > TOLERANCIA || distancia_(b, f) > ventana || !criterio(b, f)) return;
+      const tb = Array.from(b.nombre);
+      const comunes = Array.from(f.nombre).filter(x => tb.some(y => igual(x, y))).length;
+      const conApellido = ape.length > 0 && ape.some(a => tb.some(y => igual(a, y)));
+      if (!conApellido && comunes < 2) return;
+      // inicial del nombre pegada al apellido en el banco ("PEREYRA/S", "PEREYRA,J")
+      const inicial = nom && new RegExp('(' + ape.join('|') + ')[\\s,/]+' + nom + '(?![A-ZÑ])', 'i').test(b.texto) ? 1 : 0;
+      pares.push({ b, f, score: (conApellido ? 20 : 0) + comunes * 10 + inicial * 5 - distancia_(b, f) / 1000 });
+    });
+  });
+  pares.sort((x, y) => y.score - x.score).forEach(({ b, f }) => {
+    if (b.match === null && f.match === null) unir_([b], [f], 'Pendiente anterior: nombre');
+  });
+}
+
+/**
  * Un recibo y un RM de la cuenta E con el mismo Nº del valor y el mismo importe al revés (Galicia TURIN: "RC-...377205 /
  * TRONCONI" +5.000.000 y "RM-390198 / BANCO GALICIA Nº 23/07/-1453" -5.000.000): el RM revierte el recibo, se compensan en
  * FBS. Solo si el par es único para ese Nº e importe.
@@ -3892,8 +3924,8 @@ function cruzarAnteriores_(eItems, antBanco, antFbs) {
   // por nombre, no si el recibo trae escrita otra fecha (Macro JEA: "ALI, NATALIA BELEN" con Nº 24082026 es la
   // transferencia de NATALIA B del 24/08, no el pendiente de NATALIA CORREA de febrero)
   // (la fecha escrita cuenta solo si no es la misma del registro: "Nº 14/0/-8...-29/09/2026" no dice nada)
-  pasada_(antBanco, eItems, (b, f) => POR_NOMBRE_(b, f) &&
-    !(f.fechaRef && dias_(f.fechaRef, f.fecha) !== 0 && fechaEscritaContradice_(b, f, 5)), 'Pendiente anterior: nombre', v, false);
+  nombreAnteriores_(antBanco, eItems, (b, f) => POR_NOMBRE_(b, f) &&
+    !(f.fechaRef && dias_(f.fechaRef, f.fecha) !== 0 && fechaEscritaContradice_(b, f, 5)), v);
   pasada_(antBanco, eItems, (b, f) => !!f.fechaRef && dias_(f.fechaRef, b.fecha) === 0 && especifico_(b.importe),
     'Pendiente anterior: fecha del comentario + importe', v, true);
   // registros tardíos de meses cerrados: suelen regularizar un pendiente; mismo importe específico, hasta 5 días
