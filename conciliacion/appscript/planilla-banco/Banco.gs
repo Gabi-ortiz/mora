@@ -5,6 +5,8 @@
  * Lo que cambia de un banco a otro va en la hoja "Parámetros" de cada planilla (cuentas E y O, link de la base, etc.).
  */
 function onOpen() { Motor.crearMenu(); }
+// tildar una partida en "Conciliación" la marca Compensado en "Pendientes en trabajo"
+function onEdit(e) { Motor.alEditar(e); }
 function procesarConciliacion() { Motor.procesarConciliacion(); }
 function cerrarMes() { Motor.cerrarMes(); }
 function revisarPendientes() { Motor.revisarPendientes(); }

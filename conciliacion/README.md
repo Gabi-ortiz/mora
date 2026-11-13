@@ -102,6 +102,9 @@ Los extractos y planillas generadas no se versionan (contienen datos de la empre
   En `Parámetros`: cuentas E y O, link de la base FBS de la empresa, carpeta de cierres.
 - Los usuarios de las planillas necesitan acceso de edición al proyecto Motor para usar el modo desarrollo (siempre la
   última versión).
+- En "Conciliación" cada partida tiene una casilla: tildada = "Compensado" en "Pendientes en trabajo". La fila 3 suma lo
+  tildado (tiene que dar cero). Con `onEdit` en el script de la planilla (ver `Banco.gs`) el Estado cambia al tildar; sin
+  él, cambia al procesar.
 
 ## Ciclo mensual
 

@@ -631,6 +631,7 @@ function procesar_(ss) {
   }
   marca('leer la base');
   const desc = leerDesconciliados_(ss);
+  try { sincronizarCasillas_(ss, true); } catch (e) { console.log('Casillas de "' + HOJA.cuatro + '": ' + e); }
   const trabajo = leer(hojaAnteriores);
   const shCierre = ss.getSheetByName(HOJA.cierrePend);
   const delCierre = shCierre && shCierre.getLastRow() > 0 ? shCierre.getDataRange().getValues() : null;
@@ -1103,13 +1104,23 @@ function hojaLimpia_(ss, nombre) {
  * Devuelve { filas, estilos, notas } con estilos 'titulo' | 'cuadro' | 'cab' | 'item' | 'total' | 'saldo' | 'dif' | ''.
  */
 function armarCuatroPuntas_(res) {
-  const filas = [], estilos = [], notas = [];
-  const add = (f, e, n) => { while (f.length < 7) f.push(''); filas.push(f); estilos.push(e || ''); notas.push(n || ['', '']); };
+  const filas = [], estilos = [], notas = [], casillas = [];
+  // columnas: casilla | Fecha | Concepto | Importe | (separador) | casilla | Fecha | Concepto | Importe
+  const add = (f, e, n, cs) => {
+    while (f.length < 7) f.push('');
+    filas.push([''].concat(f.slice(0, 4), [''], f.slice(4)));
+    estilos.push(e || ''); notas.push(n || ['', '']); casillas.push(cs || [null, null]);
+  };
+  // casilla de cada partida (una por partida: una agrupada la tiene en su primera línea). valor = con el signo con que
+  // entra en el neto de "Compensado" (banco - FBS): S1 y S4 suman, S2 y S3 restan
+  const signo = { S1: 1, S2: -1, S3: -1, S4: 1 };
+  const casilla = x => (x && x.p && x.p.idPend ? { id: x.p.idPend, valor: redondear_(signo[sector_(x.p)] * valorSector_(x.p)),
+    tildada: /^Compensado/i.test(x.p.estado || '') } : null);
   const orden = l => l.slice().sort((a, b) => a.fecha - b.fecha || Math.abs(b.importe) - Math.abs(a.importe));
   const nota = p => (p ? observacion_(p) + (p.cruces ? '\n' + p.cruces : '') : '');
   add(['Saldo Contabilidad al', '', res.corte, '', '', 'E', res.saldoE], 'titulo');
   add(['', res.cuentaBanco || 'Banco Macro', res.saldoE + res.saldoO, '', '', 'O', res.saldoO], 'titulo');
-  add([]);
+  add([], 'tildado');
   [['S1', 'Depósitos No Registrados en Contabilidad', 'S2', 'Cheques No Registrados en Contabilidad'],
     ['S3', 'Depósitos No Acreditados en BANCO', 'S4', 'Cheques No Debitados en BANCO']].forEach(([si, ni, sd, nd]) => {
     // una partida agrupada (liquidación + comisiones, operación) se muestra con sus líneas originales
@@ -1122,7 +1133,7 @@ function armarCuatroPuntas_(res) {
     for (let i = 0; i < Math.max(iz.length, de.length); i++) {
       const a = iz[i], b = de[i];
       add([a ? a.fecha : '', a ? a.texto : '', a ? a.valor : '', '', b ? b.fecha : '', b ? b.texto : '', b ? b.valor : ''],
-        'item', [nota(a && a.p), nota(b && b.p)]);
+        'item', [nota(a && a.p), nota(b && b.p)], [casilla(a), casilla(b)]);
     }
     add(['', res.pend[si].length + ' partidas', res.tot[si], '', '', res.pend[sd].length + ' partidas', res.tot[sd]], 'total');
     add([]);
@@ -1130,33 +1141,116 @@ function armarCuatroPuntas_(res) {
   add(['Saldo Contabilidad AJUSTADO al', res.corte, res.ajustado], 'saldo');
   add(['Saldo Extracto al', res.corte, res.saldoBanco], 'saldo');
   add(['Diferencia', '', redondear_(res.ajustado - res.saldoBanco)], 'dif');
-  return { filas, estilos, notas };
+  return { filas, estilos, notas, casillas };
 }
+
+// columnas ocultas de "Conciliación" con lo que necesitan las casillas: ID del pendiente, valor con signo y si estaba tildada
+const COL_CASILLA = { izq: 1, der: 6, id: [10, 11], valor: [12, 13], escrita: [14, 15] };
 
 function escribirCuatroPuntas_(ss, res) {
   const sh = hojaLimpia_(ss, HOJA.cuatro);
-  const { filas, estilos, notas } = armarCuatroPuntas_(res);
-  sh.getRange(1, 1, filas.length, 7).setValues(filas);
-  sh.getRange(1, 1, filas.length, 7).setFontFamily('Arial').setFontSize(10);
-  [3, 7].forEach(c => sh.getRange(1, c, filas.length, 1).setNumberFormat('#,##0.00;(#,##0.00)'));
-  [1, 5].forEach(c => sh.getRange(4, c, filas.length - 3, 1).setNumberFormat('dd/mm/yyyy'));
-  sh.getRange(1, 3).setNumberFormat('dd/mm/yyyy');
+  const { filas, estilos, notas, casillas } = armarCuatroPuntas_(res);
+  const n = filas.length;
+  // las casillas van como TRUE / FALSE en sus celdas; las columnas ocultas, con el ID, el valor y el estado escrito
+  const vals = filas.map((f, i) => {
+    const r = f.slice();
+    casillas[i].forEach((c, lado) => { if (c) r[lado ? COL_CASILLA.der - 1 : COL_CASILLA.izq - 1] = c.tildada; });
+    return r.concat(casillas[i].map(c => (c ? c.id : '')), casillas[i].map(c => (c ? c.valor : '')), casillas[i].map(c => (c ? c.tildada : '')));
+  });
+  if (sh.getMaxColumns() < 15) sh.insertColumnsAfter(sh.getMaxColumns(), 15 - sh.getMaxColumns());
+  sh.getRange(1, 1, n, 15).setValues(vals);
+  sh.getRange(1, 1, n, 9).setFontFamily('Arial').setFontSize(10);
+  [4, 9].forEach(c => sh.getRange(1, c, n, 1).setNumberFormat('#,##0.00;(#,##0.00)'));
+  [2, 7].forEach(c => sh.getRange(4, c, n - 3, 1).setNumberFormat('dd/mm/yyyy'));
+  sh.getRange(1, 4).setNumberFormat('dd/mm/yyyy');
+  const conCasilla = [];
+  casillas.forEach((cs, i) => cs.forEach((c, lado) => { if (c) conCasilla.push(sh.getRange(i + 1, lado ? COL_CASILLA.der : COL_CASILLA.izq).getA1Notation()); }));
+  for (let i = 0; i < conCasilla.length; i += 500) sh.getRangeList(conCasilla.slice(i, i + 500)).insertCheckboxes();
+  let filaTildado = 0;
   estilos.forEach((e, i) => {
     const f = i + 1;
-    if (e === 'titulo') sh.getRange(f, 1, 1, 7).setFontWeight('bold');
-    if (e === 'cuadro') [1, 5].forEach(c => sh.getRange(f, c, 1, 3).merge().setFontWeight('bold').setHorizontalAlignment('center')
+    if (e === 'titulo') sh.getRange(f, 1, 1, 9).setFontWeight('bold');
+    if (e === 'cuadro') [2, 7].forEach(c => sh.getRange(f, c, 1, 3).merge().setFontWeight('bold').setHorizontalAlignment('center')
       .setBorder(true, true, true, true, null, null, '#000000', SpreadsheetApp.BorderStyle.SOLID_MEDIUM));
-    if (e === 'cab') [1, 5].forEach(c => sh.getRange(f, c, 1, 3).setFontWeight('bold').setBackground('#D9E1F2'));
-    if (e === 'total') [3, 7].forEach(c => sh.getRange(f, c).setFontWeight('bold').setBorder(true, true, true, true, null, null));
-    if (e === 'saldo') { sh.getRange(f, 1, 1, 3).setFontWeight('bold'); sh.getRange(f, 2).setNumberFormat('dd/mm/yyyy').setBorder(true, true, true, true, null, null); }
-    if (e === 'dif') sh.getRange(f, 1, 1, 3).setFontWeight('bold').setBackground(Math.abs(filas[i][2]) < 1000 ? '#C6EFCE' : '#FFC7CE');
+    if (e === 'cab') [1, 6].forEach(c => { sh.getRange(f, c, 1, 4).setFontWeight('bold').setBackground('#D9E1F2'); sh.getRange(f, c).setValue('✓').setHorizontalAlignment('center'); });
+    if (e === 'total') [4, 9].forEach(c => sh.getRange(f, c).setFontWeight('bold').setBorder(true, true, true, true, null, null));
+    if (e === 'saldo') { sh.getRange(f, 2, 1, 3).setFontWeight('bold'); sh.getRange(f, 3).setNumberFormat('dd/mm/yyyy').setBorder(true, true, true, true, null, null); }
+    if (e === 'dif') sh.getRange(f, 2, 1, 3).setFontWeight('bold').setBackground(Math.abs(filas[i][3]) < 1000 ? '#C6EFCE' : '#FFC7CE');
+    if (e === 'tildado') filaTildado = f;
   });
+  // resumen de lo tildado (fórmulas: se actualiza al tildar, sin script): cuántas partidas y cuánto suman
+  const reglas = [];
+  if (filaTildado) {
+    const f = filaTildado, cuenta = '(COUNTIF(A5:A' + n + ',TRUE)+COUNTIF(F5:F' + n + ',TRUE))';
+    sh.getRange(f, 2, 1, 2).merge().setFormula('=IF(' + cuenta + '=0,"Tildá las partidas que se compensan entre sí","Marcado para compensar: "&' + cuenta + '&" partidas. Suma:")');
+    sh.getRange(f, 4).setFormula('=IF(' + cuenta + '=0,"",SUMIF(A5:A' + n + ',TRUE,L5:L' + n + ')+SUMIF(F5:F' + n + ',TRUE,M5:M' + n + '))')
+      .setNumberFormat('#,##0.00;(#,##0.00)').setFontWeight('bold');
+    sh.getRange(f, 7, 1, 3).merge().setFormula('=IF(' + cuenta + '=0,"",IF(ABS(D' + f + ')<=0.02,"Suma cero: se compensa al procesar",' +
+      '"No suma cero: al procesar no se compensa"))');
+    const fila = sh.getRange(f, 2, 1, 8);
+    reglas.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND($D$' + f + '<>"",ABS($D$' + f + ')<=0.02)')
+      .setBackground('#C6EFCE').setFontColor('#0B5D1E').setRanges([fila]).build());
+    reglas.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=AND($D$' + f + '<>"",ABS($D$' + f + ')>0.02)')
+      .setBackground('#FFC7CE').setFontColor('#9C0006').setRanges([fila]).build());
+  }
+  // la partida tildada se pinta de verde
+  reglas.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$A5=TRUE').setBackground('#E2EFDA')
+    .setRanges([sh.getRange(5, 2, n - 4, 3)]).build());
+  reglas.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied('=$F5=TRUE').setBackground('#E2EFDA')
+    .setRanges([sh.getRange(5, 7, n - 4, 3)]).build());
+  sh.setConditionalFormatRules(reglas);
   // el motivo y la pista de cada partida quedan como nota del concepto (pasar el mouse)
-  const n = notas.map(x => [x[0]]), m = notas.map(x => [x[1]]);
-  sh.getRange(1, 2, filas.length, 1).setNotes(n);
-  sh.getRange(1, 6, filas.length, 1).setNotes(m);
-  [85, 380, 130, 30, 85, 380, 130].forEach((w, i) => sh.setColumnWidth(i + 1, w));
-  sh.setFrozenRows(2);
+  sh.getRange(1, 3, n, 1).setNotes(notas.map(x => [x[0]]));
+  sh.getRange(1, 8, n, 1).setNotes(notas.map(x => [x[1]]));
+  [30, 85, 380, 130, 30, 30, 85, 380, 130].forEach((w, i) => sh.setColumnWidth(i + 1, w));
+  sh.hideColumns(10, 6);
+  sh.setFrozenRows(3);
+}
+
+/**
+ * Casillas de "Conciliación" -> Estado en "Pendientes en trabajo". soloCambios: true al procesar (solo lo que el usuario
+ * cambió desde que se escribió la hoja: tildado -> Compensado; destildado algo que estaba tildado -> Pendiente);
+ * false al editar (el estado sigue a la casilla). filas: rango de filas a mirar (todas si no se pasa).
+ */
+function sincronizarCasillas_(ss, soloCambios, filas) {
+  const sh = ss.getSheetByName(HOJA.cuatro), dest = hojaDe_(ss, nombresAnteriores_());
+  if (!sh || !dest || sh.getLastColumn() < 15 || sh.getLastRow() < 5) return 0;
+  const r0 = filas ? filas[0] : 1, n = filas ? filas[1] : sh.getLastRow();
+  const v = sh.getRange(r0, 1, n, 15).getValues();
+  const datos = dest.getDataRange().getValues();
+  const c = colsPend_(datos[0]);
+  if (c.Estado < 0) return 0;
+  const val = (r, k) => (c[k] >= 0 && c[k] < r.length ? r[c[k]] : '');
+  const rows = datos.slice(1);
+  const ids = idsPend_(rows.map(r => [val(r, 'Sector'), val(r, 'Fecha'), val(r, 'Concepto'), val(r, 'Importe')]));
+  const filaDe = {};
+  rows.forEach((r, i) => { filaDe[String(val(r, 'ID') || '').trim() || ids[i]] = i + 2; });
+  let cambios = 0;
+  v.forEach(r => [0, 1].forEach(lado => {
+    const tild = r[lado ? COL_CASILLA.der - 1 : COL_CASILLA.izq - 1], id = String(r[COL_CASILLA.id[lado] - 1] || '').trim();
+    if (!id || typeof tild !== 'boolean' || !filaDe[id]) return;
+    const fila = filaDe[id], actual = String(datos[fila - 1][c.Estado] || '').trim(), comp = /^Compensado/i.test(actual);
+    const escrita = r[COL_CASILLA.escrita[lado] - 1] === true;
+    let nuevo = null;
+    if (tild && !comp) nuevo = 'Compensado';
+    else if (!tild && comp && (!soloCambios || escrita)) nuevo = 'Pendiente';
+    if (nuevo) { dest.getRange(fila, c.Estado + 1).setValue(nuevo); datos[fila - 1][c.Estado] = nuevo; cambios++; }
+  }));
+  return cambios;
+}
+
+/**
+ * Al tildar o destildar una casilla en "Conciliación", el Estado de esa partida en "Pendientes en trabajo" pasa a
+ * Compensado o vuelve a Pendiente. La planilla lo llama desde su onEdit: function onEdit(e) { Motor.alEditar(e); }
+ */
+function alEditar(e) {
+  try {
+    const r = e && e.range;
+    if (!r || r.getSheet().getName() !== HOJA.cuatro) return;
+    const toca = col => r.getColumn() <= col && r.getLastColumn() >= col;
+    if (!toca(COL_CASILLA.izq) && !toca(COL_CASILLA.der)) return;
+    sincronizarCasillas_(r.getSheet().getParent(), false, [r.getRow(), r.getNumRows()]);
+  } catch (err) { console.log('alEditar: ' + err); }
 }
 
 function escribirTablero_(ss, res) {
