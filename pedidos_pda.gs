@@ -686,23 +686,27 @@ function armarResumen(ss, listas) {
   // mes y cuántos de actos anteriores. Los AJUSTES (sin responsable ni modalidad) suman en clientes.
   const criterioCierre = `${r['Mes cierre']},${M},${aprob}`;
   const netos = (extra) => `COUNTIFS(${criterioCierre}${extra})`;
-  const apertura = (resp, mod) => {
-    const filtro = `,${r.Responsable},"${resp}",${r.Modalidad},"${mod}"`;
-    const total = netos(filtro);
-    const delActo = netos(`${filtro},${r.Acto},${M}`);
+  // T.P. incluye los "TP CON COLA"; clientes, ninguno de los dos.
+  const respClientes = [`,${r.Responsable},"<>TP",${r.Responsable},"<>${TP_CON_COLA}"`];
+  const respTP = [`,${r.Responsable},"TP"`, `,${r.Responsable},"${TP_CON_COLA}"`];
+  const netosDe = (resps, extra) => resps.map((x) => netos(`${x}${extra || ''}`)).join('+');
+  const apertura = (resps, mod) => {
+    const filtro = `,${r.Modalidad},"${mod}"`;
+    const total = `(${netosDe(resps, filtro)})`;
+    const delActo = `(${netosDe(resps, `${filtro},${r.Acto},${M}`)})`;
     return [`="   Por ${mod === 'Por sorteo' ? 'sorteo' : 'licitación'}     (del acto "&${delActo}&` +
       `" · anteriores "&(${total}-${delActo})&")"`, `=${total}`, true];
   };
   const izq2 = [
     ['Pedidos del mes (todos los actos)',
       `=${netos('')}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`],
-    ['Clientes', `=${netos(`,${r.Responsable},"<>TP"`)}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`,
+    ['Clientes', `=${netosDe(respClientes)}+SUMIFS(${HOJA_AJUSTES}!$C:$C,${HOJA_AJUSTES}!$A:$A,${M})`,
       'seccion'],
-    apertura('<>TP', 'Por licitación'),
-    apertura('<>TP', 'Por sorteo'),
-    ['T.P.', `=${netos(`,${r.Responsable},"TP"`)}`, 'seccion'],
-    apertura('TP', 'Por licitación'),
-    apertura('TP', 'Por sorteo'),
+    apertura(respClientes, 'Por licitación'),
+    apertura(respClientes, 'Por sorteo'),
+    ['T.P. (incluye con cola)', `=${netosDe(respTP)}`, 'seccion'],
+    apertura(respTP, 'Por licitación'),
+    apertura(respTP, 'Por sorteo'),
     ['Objetivo', `=IFERROR(VLOOKUP(${M},OBJETIVOS!$A:$B,2,FALSE),"")`],
     ['Proyección (+15%)', '=IF(I16="","",ROUND(I16*1.15))'],
     ['Faltan para el objetivo', '=IF(I16="","",MAX(0,I16-I9))'],
@@ -719,6 +723,7 @@ function armarResumen(ss, listas) {
   bloqueResumen(sh, 8, 2, 'ADJUDICADOS DEL ACTO', izq1);
   bloqueResumen(sh, 8, 6, 'CIERRES DEL MES', izq2);
   bloqueResumen(sh, 8, 10, 'INCENTIVO PEDIDOS', der2);
+  sh.getRange('E9:E22').setNumberFormat('0'); // cantidades (a veces Sheets les ponía formato $)
   // Objetivos de pedidos por modelo dentro del total: "Cronos 20/27 · Titano 1/4" (netos del mes
   // cuyo modelo contiene CRONOS / TITANO, contra su objetivo). El modelo es la Version de PRECIOS
   // del Modelo PEDIDO en el mes; si no hay, la descripción de producto de la fila.
@@ -753,16 +758,18 @@ function armarResumen(ss, listas) {
 
   // --- Tarjetas (filas 4-6): lo más importante, a la vista. Las tres primeras (el acto: adjudicados, clientes y
   // T.P.) van en un gris azulado suave, separadas de los resultados (aprobados, netos y cumplimiento).
-  const tp = `${r.Responsable},"TP"`;
-  const noTp = `${r.Responsable},"<>TP"`;
-  const aprobados = (filtro) => `COUNTIFS(${acto},${aprob},${filtro})`;
-  const conAprobados = (filtro, total) =>
-    `=IF(N(${total})=0,"","Aprobados "&${aprobados(filtro)}&"   ·   "&TEXT(${aprobados(filtro)}/${total},"0%"))`;
+  // T.P. del acto incluye los "TP CON COLA" (igual que el cuadro POR MODELO PEDIDO · TP).
+  const tps = [`${r.Responsable},"TP"`, `${r.Responsable},"${TP_CON_COLA}"`];
+  const noTp = `${r.Responsable},"<>TP",${r.Responsable},"<>${TP_CON_COLA}"`;
+  const contar = (filtros, extra) => `(${filtros.map((x) => `COUNTIFS(${acto},${extra ? `${extra},` : ''}${x})`)
+    .join('+')})`;
+  const conAprobados = (filtros, total) => `=IF(N(${total})=0,"","Aprobados "&${contar(filtros, aprob)}&` +
+    `"   ·   "&TEXT(${contar(filtros, aprob)}/${total},"0%"))`;
   const netosDelActo = `COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`;
   const tarjetas = [
     ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E15', '0', true],
-    ['D', 'E', 'Clientes del acto', `=COUNTIFS(${acto},${noTp})`, conAprobados(noTp, 'D5'), '0', true],
-    ['F', 'G', 'T.P. del acto', `=COUNTIFS(${acto},${tp})`, conAprobados(tp, 'F5'), '0', true],
+    ['D', 'E', 'Clientes del acto', `=${contar([noTp])}`, conAprobados([noTp], 'D5'), '0', true],
+    ['F', 'G', 'T.P. del acto', `=${contar(tps)}`, conAprobados(tps, 'F5'), '0', true],
     ['H', 'J', 'Pedidos del mes', '=I9',
       `="Del acto "&${netosDelActo}&"   ·   Anteriores "&(I9-${netosDelActo})`, '0'],
     ['K', 'M', 'Cumplimiento objetivo', '=I19',
@@ -827,7 +834,9 @@ function armarResumen(ss, listas) {
   const cierreMes = `(${r['Mes cierre']}=${M})*(${r.Pedido}="APROBADO")*(${r.Carpeta}="APROBADA")`;
   const aj = `${HOJA_AJUSTES}!`;
   const pr = `${HOJA_PRECIOS}!`;
-  const esTP = `(UPPER(TRIM(${r.Responsable}))="TP")`;
+  const respU = `UPPER(TRIM(${r.Responsable}))`;
+  const esCola = `(${respU}="${TP_CON_COLA}")`;
+  const esTP = `((${respU}="TP")+${esCola}>0)`; // TP incluye los TP con cola
   // PROYECCION: operaciones con Modelo PEDIDO cargado que todavía no son neto (de cualquier acto). Solo se
   // muestra cuando el mes elegido es el mes en curso; esos modelos se suman a la lista.
   const nombresMes = MESES.map((x) => `"${x}"`).join(',');
@@ -890,9 +899,19 @@ function armarResumen(ss, listas) {
       `=IFERROR(LET(mp,${mp},u,UNIQUE({IFERROR(FILTER(mp,mp<>"",${cierreMes}*${cond}>0),"");${ajustes}` +
       `IF(${mesEnCurso},IFERROR(FILTER(${mped},${pendiente}*${cond}>0),""),"")}),SORT(FILTER(u,u<>""))),"")`);
     // Familia: la del modelo en el mes; si ese mes no la tiene, la de cualquier otro mes.
-    sh.getRange(f1, 3).setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",IFERROR(INDEX(FILTER(${fam},` +
+    // En el cuadro TP se agrega cuántos son TP con cola (netos y, en el mes en curso, en proyección).
+    const marcaCola = tp ? `&IF(nc>0,"  ·  "&nc&" con cola","")&IF(pc>0,"  ·  "&pc&" con cola en proy.","")` : '';
+    const letCola = tp ? `LET(mp,${mp},nc,SUMPRODUCT(${cierreMes}*${esCola}*(mp=m)),` +
+      `pc,IF(${mesEnCurso},SUMPRODUCT((${mped}=m)*${pendiente}*${esCola}),0),` : '';
+    sh.getRange(f1, 3).setFormula(`=MAP(${lista},LAMBDA(m,IF(m="","",${letCola}IFERROR(INDEX(FILTER(${fam},` +
       `${pr}$B$2:$B=m,${fam}<>"",${pr}$A$2:$A=${M}),1),IFERROR(INDEX(FILTER(${fam},${pr}$B$2:$B=m,${fam}<>""),1),` +
-      `"Sin familia")))))`);
+      `"Sin familia"))${marcaCola}${tp ? ')' : ''})))`);
+    if (tp) {
+      sh.getRange(t.total, 3).setFormula(`=LET(n,SUMPRODUCT(${cierreMes}*${esCola}),` +
+        `IF(n>0,"incluye "&n&" con cola",""))`);
+      sh.getRange(h, 3).setNote('Familia del modelo en PRECIOS. Si hay TP con cola (Responsable "TP CON COLA" en ' +
+        'BASE), se indica cuántos de ese modelo son netos y cuántos están en la proyección.');
+    }
     const ajNetos = tp ? '' : `+SUMIFS(${aj}$C:$C,${aj}$A:$A,${M},${aj}$B:$B,m)`;
     sh.getRange(f1, 4).setFormula(mapa(`SUMPRODUCT(${cierreMes}*${cond}*(mp=m))${ajNetos}`));
     sh.getRange(f1, 5).setFormula(mapa(`SUMIFS(${pr}$${COL_PRECIO_VM}:$${COL_PRECIO_VM},${pr}$A:$A,${M},${pr}$B:$B,m)`));
@@ -951,7 +970,7 @@ function armarResumen(ss, listas) {
 
   cuadroModelo(c, false, 'POR MODELO PEDIDO · CLIENTES (sin TP)   (V.M. = Precio CC sin iva)',
     'PROYECCION CLIENTES (sin carpeta aprobada)');
-  cuadroModelo(T.tp, true, 'POR MODELO PEDIDO · TP   (V.M. = Precio CC sin iva)',
+  cuadroModelo(T.tp, true, 'POR MODELO PEDIDO · TP, incluye TP con cola   (V.M. = Precio CC sin iva)',
     'PROYECCION TP (sin carpeta aprobada)', COLOR_TP);
 
   // Control: clientes + TP = netos del mes.
@@ -1265,7 +1284,8 @@ function seccionRemanente(sh, r, M, T) {
   const estados = [['Sin pedido (E)', 'E'], ['Pendiente (P)', 'P'], ['Suspendido (S)', 'S']];
   const fila = (base, cond, cc) => [`=COUNTIFS(${base}${cond},${R}$K:$K,"Por licitación")`,
     `=COUNTIFS(${base}${cond},${R}$K:$K,"Por sorteo")`, `=COUNTIFS(${base}${cond})`,
-    `=COUNTIFS(${base}${cond},${R}$N:$N,"TP")`, `=COUNTIFS(${base}${cond},${cc})`];
+    `=COUNTIFS(${base}${cond},${R}$N:$N,"TP")+COUNTIFS(${base}${cond},${R}$N:$N,"${TP_CON_COLA}")`,
+    `=COUNTIFS(${base}${cond},${cc})`];
   const ccSga = `${R}$G:$G,"A"`;
   const filas = estados.map(([t, e]) => [t].concat(fila(rem, `,${R}$F:$F,"${e}",${R}$L:$L,"<>BAJA ADJ"`, ccSga)));
   filas.push(['Bajas que siguen en SGA'].concat(fila(enSga, '', ccSga)));

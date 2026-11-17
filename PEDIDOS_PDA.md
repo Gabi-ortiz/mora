@@ -649,3 +649,9 @@ Fiat (OWBSO040 del 22/10):
   de Clientes); en ADM cuentan en "de TP". El bloque crece 2 filas y los
   cuadros bajan 2 (familia en 25, clientes en 40, TP en 83, control en 116).
   En cierres, cuadros por modelo y tarjetas siguen contando como clientes.
+- (17/11) TP con cola dentro de T.P.: suman en el cuadro POR MODELO PEDIDO · TP
+  (y su proyección), en CIERRES "T.P. (incluye con cola)", en la tarjeta
+  T.P. del acto y en "de los cuales TP" del remanente. En el cuadro TP la
+  columna Familia indica cuántos son con cola ("600 · 1 con cola", "· 1 con
+  cola en proy.") y el TOTAL dice "incluye N con cola". Cantidades de
+  ADJUDICADOS con formato 0 (Clientes aparecía como "$ 19").
