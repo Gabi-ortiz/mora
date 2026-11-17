@@ -601,7 +601,8 @@ const FONDO_TARJETA_ACTO = '#eef2f8';
 const TEXTO_TARJETA_ACTO = '#4a5a73';
 const LINEA_TARJETA_ACTO = '#c9d3e3';
 const FONDO_TOTAL = '#efe7e7';
-const COLOR_TP = '#6d9eeb'; // títulos del cuadro TP en el RESUMEN (azul, para distinguirlo del de clientes)
+const COLOR_TP = '#6d9eeb';
+const TP_CON_COLA = 'TP CON COLA'; // Responsable de BASE: se muestra aparte en ADJUDICADOS DEL ACTO // títulos del cuadro TP en el RESUMEN (azul, para distinguirlo del de clientes)
 
 function armarResumen(ss, listas) {
   const { sh } = hoja(ss, HOJA_RESUMEN, 2);
@@ -613,6 +614,7 @@ function armarResumen(ss, listas) {
   sh.clearFormats(); // clear() dejaba formatos de número (% y $) del armado anterior
   sh.clearNotes(); // clear() no borra las notas ni las alturas de fila del armado anterior
   sh.setRowHeights(1, sh.getMaxRows(), 21);
+  sh.showRows(1, sh.getMaxRows()); // las filas ocultas del armado anterior pueden quedar en otro lugar
   sh.clearConditionalFormatRules();
   sh.setFrozenRows(0);
   if (sh.getMaxColumns() < 10) sh.insertColumnsAfter(sh.getMaxColumns(), 10 - sh.getMaxColumns());
@@ -654,23 +656,29 @@ function armarResumen(ss, listas) {
 
   // --- Bloques (desde la fila 8), uno al lado del otro: ADJUDICADOS DEL ACTO (B:E), CIERRES DEL MES (F:I) e
   // INCENTIVO PEDIDOS (J:M). Valores en E, I y M.
-  // Sorteo: Bajas + TP + ADM + Clientes = total (sin superponer). TP = "TP" en Responsable; ADM = "ADM" en
-  // RESPONSABLE; las bajas no se cuentan en las demás líneas.
+  // Sorteo: Bajas + TP + TP con cola + ADM + Clientes = total (sin superponer). TP = "TP" en Responsable;
+  // TP con cola = "TP CON COLA" en Responsable; ADM = "ADM" en RESPONSABLE; las bajas no se cuentan en las demás
+  // líneas.
   const sorteo = `${acto},${r.Modalidad},"Por sorteo"`;
   const noBaja = `${r.Pedido},"<>BAJA ADJ"`;
+  const sinTp = `${r.Responsable},"<>TP",${r.Responsable},"<>${TP_CON_COLA}"`;
+  const admTp = (resp) => `COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"${resp}")`;
   const izq1 = [
     ['Total adjudicados', `=COUNTIFS(${acto})`],
     ['Por licitación', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación")`, 'seccion'],
     ['   Bajas (caídas)', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"TP")`, true],
-    ['   Netos licitación', '=E10-E11-E12', true],
+    ['   TP con cola', `=COUNTIFS(${acto},${r.Modalidad},"Por licitación",${r.Responsable},"${TP_CON_COLA}")`, true],
+    ['   Netos licitación', '=E10-E11-E12-E13', true],
     ['Por sorteo', `=COUNTIFS(${sorteo})`, 'seccion'],
     ['   Bajas (caídas)', `=COUNTIFS(${sorteo},${r.Pedido},"BAJA ADJ")`, true],
     ['   TP', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"TP",${r.RESPONSABLE},"<>ADM")`, true],
+    ['   TP con cola', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"${TP_CON_COLA}",${r.RESPONSABLE},"<>ADM")`,
+      true],
     ['   ADM', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM")`, true],
-    ['de clientes', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"<>TP")`, 2],
-    ['de TP', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${r.Responsable},"TP")`, 2],
-    ['   Clientes', `=COUNTIFS(${sorteo},${noBaja},${r.Responsable},"<>TP",${r.RESPONSABLE},"<>ADM")`, true],
+    ['de clientes', `=COUNTIFS(${sorteo},${noBaja},${r.RESPONSABLE},"ADM",${sinTp})`, 2],
+    ['de TP (incluye con cola)', `=${admTp('TP')}+${admTp(TP_CON_COLA)}`, 2],
+    ['   Clientes', `=COUNTIFS(${sorteo},${noBaja},${sinTp},${r.RESPONSABLE},"<>ADM")`, true],
   ];
   // Cuadros por modelo (más abajo): clientes y TP. El VM netos del mes es la suma de los dos.
   const T = tablasResumen();
@@ -732,9 +740,9 @@ function armarResumen(ss, listas) {
       'este archivo). Los % salen de la hoja INCENTIVOS según la categoría.')
     .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
   // Sorteo: la cuenta que cierra con el total.
-  sh.getRange('B21:E21').merge()
-    .setFormula('="Bajas "&E15&" + TP "&E16&" + ADM "&E17&" + Clientes "&E20&" = "&(E15+E16+E17+E20)&' +
-      '"   ·   TP sorteo: "&E16&" + "&E19&" = "&(E16+E19)')
+  sh.getRange('B23:E23').merge()
+    .setFormula('="Bajas "&E16&" + TP "&E17&" + TP con cola "&E18&" + ADM "&E19&" + Clientes "&E22&" = "&' +
+      '(E16+E17+E18+E19+E22)&"   ·   TP sorteo: "&E17&" + "&E18&" + "&E21&" = "&(E17+E18+E21)')
     .setFontSize(9).setFontStyle('italic').setFontColor(GRIS_TEXTO);
   ['I19', 'M10'].forEach((c) => sh.getRange(c).setNumberFormat('0%'));
   ['M11', 'M13'].forEach((c) => sh.getRange(c).setNumberFormat('0.00%'));
@@ -752,7 +760,7 @@ function armarResumen(ss, listas) {
     `=IF(N(${total})=0,"","Aprobados "&${aprobados(filtro)}&"   ·   "&TEXT(${aprobados(filtro)}/${total},"0%"))`;
   const netosDelActo = `COUNTIFS(${acto},${r['Mes cierre']},${M},${aprob})`;
   const tarjetas = [
-    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E14', '0', true],
+    ['B', 'C', 'Adjudicados del acto', '=E9', '="Licitación "&E10&"   ·   Sorteo "&E15', '0', true],
     ['D', 'E', 'Clientes del acto', `=COUNTIFS(${acto},${noTp})`, conAprobados(noTp, 'D5'), '0', true],
     ['F', 'G', 'T.P. del acto', `=COUNTIFS(${acto},${tp})`, conAprobados(tp, 'F5'), '0', true],
     ['H', 'J', 'Pedidos del mes', '=I9',
@@ -966,10 +974,10 @@ function armarResumen(ss, listas) {
  * última fila de datos reservada. Las que quedan vacías se ocultan.
  */
 function tablasResumen() {
-  const familia = { titulo: 23, total: 25, ultima: 36 };
-  const clientes = { titulo: 38, total: 40, ultima: 79 };
-  const tp = { titulo: 81, total: 83, ultima: 112 };
-  const control = 114;
+  const familia = { titulo: 25, total: 27, ultima: 38 };
+  const clientes = { titulo: 40, total: 42, ultima: 81 };
+  const tp = { titulo: 83, total: 85, ultima: 114 };
+  const control = 116;
   // Remanente del acto anterior: título en control + 2; la lista de bajas que siguen en SGA tiene 40 filas
   // (las vacías se ocultan) y debajo van las diferencias.
   const remanente = control + 2;
@@ -1038,7 +1046,7 @@ function bloqueResumen(sh, f0, c0, titulo, filas) {
 
 /** Etiquetas de los bloques del RESUMEN a la izquierda (alinearTodo centra todo). */
 function alinearEtiquetas(sh) {
-  ['B9:D21', 'F9:H20', 'J9:L13', 'J14:K14'].forEach((a1) => sh.getRange(a1).setHorizontalAlignment('left'));
+  ['B9:D22', 'F9:H20', 'J9:L13', 'J14:K14'].forEach((a1) => sh.getRange(a1).setHorizontalAlignment('left'));
 }
 
 // ---------------------------------------------------------------------------

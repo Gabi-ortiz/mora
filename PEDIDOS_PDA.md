@@ -644,3 +644,8 @@ Fiat (OWBSO040 del 22/10):
   B90 de 18002 a 18115, igual que octubre. En los cuadros POR MODELO PEDIDO
   del RESUMEN se intercambian los títulos: G = "Inc pedido" (% por categoría)
   y H = "Bonus pedidos" (% del modelo en PRECIOS).
+- (17/11) "TP CON COLA" (Responsable de BASE) aparte en ADJUDICADOS DEL ACTO:
+  una línea en licitación (sale de Netos licitación) y otra en sorteo (sale
+  de Clientes); en ADM cuentan en "de TP". El bloque crece 2 filas y los
+  cuadros bajan 2 (familia en 25, clientes en 40, TP en 83, control en 116).
+  En cierres, cuadros por modelo y tarjetas siguen contando como clientes.
