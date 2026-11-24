@@ -76,6 +76,7 @@ function onOpen() {
     .addSeparator()
     .addItem('CRM: inicializar hojas y usuarios', 'crmInicializar') // ver crm_mora.gs
     .addItem('CRM: traer notas nuevas de BASE', 'crmImportarNotasBase')
+    .addItem('CRM: crear campaña desde la hoja Campañas', 'crmCrearCampana')
     .addToUi();
 }
 

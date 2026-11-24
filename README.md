@@ -266,6 +266,18 @@ que tiene en mora (el excedente pasa a los demás). Los tramos se leen de la "Ta
 mora (editable)" (hoja `PARAMETROS`, se busca por el encabezado CUOTA |
 TRAMO A…); si no está, se usan `CRM_TRAMOS_DEFECTO`.
 
+### Campañas (desde la planilla)
+
+Hoja **Campañas** del tablero: el supervisor pega filas de BASE (con o sin
+encabezados; se toma la columna SOLICITUD, o la B) y usa el botón o
+"Mora" > "CRM: crear campaña desde la hoja Campañas". Un formulario muestra
+cuántos planes entran por responsable (deja afuera rescindidos, bajas y
+solicitudes que no están en BASE) y pide nombre, desde, hasta y meta. Se
+guarda en CRM_Objetivos como un objetivo para todos con la lista fija de
+solicitudes (columna Solicitudes): en el CRM funciona igual que un objetivo
+(tarjeta, marca ◎, avance por responsable, baja). El formulario solo guarda
+con un código de un solo uso que genera la planilla, y solo para supervisores.
+
 ### Velocidad
 - BASE se lee solo en las columnas A..AG y se guarda procesada y comprimida
   en la memoria del script (`CacheService`) por `CRM_CACHE_BASE_SEG` (10

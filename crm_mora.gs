@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-11-24.1';
+const CRM_VERSION = '2026-11-24.2';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -62,6 +62,8 @@ const CRM_COLS_LICITACION = [41, 42]; // AO, AP
 // | TRAMO B DESDE | TRAMO B HASTA). Se busca primero en CRM_HOJA_TRAMOS y
 // después en el resto de las hojas; si no aparece, se usan estos valores.
 const CRM_HOJA_TRAMOS = 'PARAMETROS';
+// Hoja del tablero donde el supervisor pega filas de BASE para armar una campaña.
+const CRM_HOJA_CAMPANAS = 'Campañas';
 const CRM_TRAMOS_DEFECTO = { 3: { a: 0.35, b: 0.41 }, 5: { a: 0.30, b: 0.36 }, 7: { a: 0.32, b: 0.38 }, 9: { a: 0.45, b: 0.51 }, 12: { a: 0.48, b: 0.54 } };
 
 // Marcado por Zoiper: prefijo + característica + número, sin 15 (ej.:
@@ -152,8 +154,9 @@ const CRM_ENC_GESTIONES = ['FechaHora', 'UsuarioEmail', 'UsuarioNombre', 'Solici
 const CRM_ENC_AUDITORIA = ['FechaHora', 'UsuarioEmail', 'Accion', 'Detalle'];
 // Objetivos que el supervisor le pone a un responsable (o a todos, '*'):
 // un grupo de casos (por avance y prioridad) a gestionar entre dos fechas.
+// Una campaña es un objetivo con una lista fija de solicitudes (Solicitudes).
 const CRM_ENC_OBJETIVOS = ['Id', 'Titulo', 'ResponsableEmail', 'Avances', 'Situaciones', 'Meta',
-  'Desde', 'Hasta', 'CreadoPor', 'Activo'];
+  'Desde', 'Hasta', 'CreadoPor', 'Activo', 'Solicitudes'];
 // Correcciones de datos de contacto hechas desde el CRM (BASE no se toca: se
 // pisaría con el IMPORTRANGE). Vacío = se usa el dato de BASE.
 const CRM_ENC_DATOS_CLIENTE = ['Solicitud', 'Telefono', 'TelefonoAlt', 'Email', 'Nota', 'ActualizadoPor', 'Actualizado'];
@@ -304,7 +307,7 @@ function crmTramos_() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
   const hojas = [ss.getSheetByName(CRM_HOJA_TRAMOS)].concat(ss.getSheets().filter(function (h) {
     const n = h.getName();
-    return n !== CRM_HOJA_TRAMOS && n !== HOJA_BASE && n.indexOf('CRM_') !== 0;
+    return n !== CRM_HOJA_TRAMOS && n !== HOJA_BASE && n !== CRM_HOJA_CAMPANAS && n.indexOf('CRM_') !== 0;
   }));
   for (let i = 0; i < hojas.length; i++) {
     if (!hojas[i] || hojas[i].getLastRow() < 2) continue;
@@ -814,6 +817,7 @@ function crmListarObjetivos(token) {
     .map(function (o) {
       return {
         id: String(o.Id), titulo: String(o.Titulo), responsableEmail: String(o.ResponsableEmail).toLowerCase(),
+        solicitudes: String(o.Solicitudes || '').split(',').filter(String),
         avances: String(o.Avances || '').split(',').filter(String).map(Number),
         situaciones: String(o.Situaciones || '').split(',').filter(String),
         meta: Number(o.Meta) || 100, desde: crmFmt(o.Desde), hasta: crmFmt(o.Hasta),
@@ -846,6 +850,128 @@ function crmGuardarObjetivo(token, datos) {
   crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS).appendRow(fila);
   crmAuditar_(ss, u.email, 'Alta objetivo', titulo + ' → ' + resp);
   return crmListarObjetivos(token);
+}
+
+// ---------------------------------------------------------------------------
+// Campañas: el supervisor pega filas de BASE en la hoja "Campañas" y, con el
+// botón o el menú, las convierte en un objetivo del CRM con esos planes.
+// ---------------------------------------------------------------------------
+
+/** Botón / menú "Crear campaña": lee la hoja Campañas y abre el formulario. */
+function crmCrearCampana() {
+  const ui = SpreadsheetApp.getUi();
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss.getSheetByName(CRM_HOJA_CAMPANAS)) {
+    ss.insertSheet(CRM_HOJA_CAMPANAS).getRange(1, 1).setValue('Pegá acá las filas de BASE (con la fila de encabezados) y volvé a tocar "Crear campaña".');
+    ui.alert('Creé la hoja "' + CRM_HOJA_CAMPANAS + '". Pegá ahí las filas de BASE de la campaña (con encabezados) y volvé a tocar "Crear campaña".');
+    return;
+  }
+  crmExigirSupervisorHoja_();
+  const r = crmLeerCampanaHoja_();
+  if (!r.planes.length) {
+    ui.alert('No encontré solicitudes de la cartera en la hoja "' + CRM_HOJA_CAMPANAS + '".' +
+      (r.noEncontradas.length ? '\n\nNo están en BASE: ' + r.noEncontradas.slice(0, 15).join(', ') + (r.noEncontradas.length > 15 ? '…' : '') : '') +
+      '\n\nPegá las filas de BASE con la columna SOLICITUD (columna B si no hay encabezados).');
+    return;
+  }
+  // El formulario sólo puede guardar con este código, que vence en 30 minutos.
+  const codigo = Utilities.getUuid();
+  CacheService.getUserCache().put('campana_' + codigo, '1', 1800);
+  const hoy = new Date(), fin = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0);
+  const html = HtmlService.createHtmlOutput(crmFormularioCampana_(r, codigo, crmFmt(hoy), crmFmt(fin)))
+    .setWidth(460).setHeight(560);
+  ui.showModalDialog(html, 'Crear campaña en el CRM');
+}
+
+/** Lo llama el formulario de la hoja (no la web app: exige el código que abrió el formulario). */
+function crmGuardarCampanaHoja(codigo, datos) {
+  const cache = CacheService.getUserCache();
+  if (!codigo || !cache.get('campana_' + codigo)) throw new Error('El formulario venció. Cerralo y volvé a tocar "Crear campaña".');
+  const email = crmExigirSupervisorHoja_();
+  const titulo = String(datos.titulo || '').trim();
+  if (!titulo) throw new Error('Poné un nombre para la campaña.');
+  if (!datos.desde || !datos.hasta || datos.hasta < datos.desde) throw new Error('Revisá las fechas: "hasta" tiene que ser igual o posterior a "desde".');
+  const meta = Math.min(100, Math.max(1, Number(datos.meta) || 100));
+
+  const r = crmLeerCampanaHoja_(); // se vuelve a leer: se guarda lo que hay en la hoja ahora
+  if (!r.planes.length) throw new Error('La hoja "' + CRM_HOJA_CAMPANAS + '" ya no tiene planes de la cartera.');
+  const lista = r.planes.map(function (p) { return p.solicitud; }).join(',');
+  if (lista.length > 49000) throw new Error('Son demasiados planes para una campaña (máximo unos 5.000). Dividila en dos.');
+
+  const ss = crmDatos_();
+  const hoja = crmHoja_(ss, CRM_HOJA_OBJETIVOS, CRM_ENC_OBJETIVOS);
+  const colSol = CRM_ENC_OBJETIVOS.indexOf('Solicitudes') + 1;
+  if (hoja.getRange(1, colSol).getValue() !== 'Solicitudes') hoja.getRange(1, colSol).setValue('Solicitudes').setFontWeight('bold');
+  hoja.appendRow([Utilities.getUuid().slice(0, 8), titulo, '*', '', '', meta,
+    crmFecha(datos.desde), crmFecha(datos.hasta), email || 'Planilla', true, lista]);
+  cache.remove('campana_' + codigo);
+  crmAuditar_(ss, email || 'Planilla', 'Alta campaña', titulo + ' → ' + r.planes.length + ' planes');
+  return { planes: r.planes.length, porResponsable: r.porResponsable };
+}
+
+/**
+ * Solicitudes pegadas en la hoja Campañas, cruzadas con la cartera del CRM.
+ * Busca la columna "SOLICITUD" en las primeras filas; si no hay encabezados, usa la B.
+ */
+function crmLeerCampanaHoja_() {
+  const hoja = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(CRM_HOJA_CAMPANAS);
+  const valores = hoja && hoja.getLastRow() ? hoja.getDataRange().getValues() : [];
+  let col = CRM_COL_SOLICITUD - 1, desde = 0;
+  for (let r = 0; r < Math.min(5, valores.length); r++) {
+    const c = valores[r].findIndex(function (v) { return /SOLICITUD/i.test(String(v)); });
+    if (c >= 0) { col = c; desde = r + 1; break; }
+  }
+  const ctx = crmContexto_(true);
+  const porSolicitud = {};
+  ctx.planes.forEach(function (p) { porSolicitud[p.solicitud] = p; });
+  const vistas = {}, planes = [], noEncontradas = [], porResponsable = {};
+  let fueraDeCartera = 0;
+  for (let r = desde; r < valores.length; r++) {
+    const sol = String(valores[r][col] === undefined ? '' : valores[r][col]).trim();
+    if (!/^\d+$/.test(sol) || vistas[sol]) continue;
+    vistas[sol] = true;
+    const p = porSolicitud[sol];
+    if (!p) { noEncontradas.push(sol); continue; }
+    if (!crmEsActiva(p.situacion.codigo)) { fueraDeCartera++; continue; } // rescindidos y bajas no se trabajan
+    planes.push(p);
+    const quien = p.responsableNombre || '(sin asignar)';
+    porResponsable[quien] = (porResponsable[quien] || 0) + 1;
+  }
+  return { planes: planes, noEncontradas: noEncontradas, fueraDeCartera: fueraDeCartera, porResponsable: porResponsable };
+}
+
+/** Desde la planilla: sólo un supervisor del CRM (si Google informa quién es). Devuelve su mail. */
+function crmExigirSupervisorHoja_() {
+  const email = String(Session.getActiveUser().getEmail() || '').toLowerCase();
+  if (!email) return '';
+  const u = crmLeerUsuarios_(crmDatos_()).filter(function (x) { return x.email === email; })[0];
+  if (!u || !u.activo || u.rol !== CRM_ROL_SUPERVISOR) throw new Error('Sólo un supervisor del CRM puede crear campañas.');
+  return email;
+}
+
+function crmFormularioCampana_(r, codigo, hoy, fin) {
+  const e = function (t) { return String(t).replace(/[&<>"']/g, function (c) { return '&#' + c.charCodeAt(0) + ';'; }); };
+  const filas = Object.keys(r.porResponsable).sort().map(function (k) {
+    return '<tr><td>' + e(k) + '</td><td style="text-align:right"><b>' + r.porResponsable[k] + '</b></td></tr>';
+  }).join('');
+  const avisos = (r.fueraDeCartera ? '<li>' + r.fueraDeCartera + ' rescindidos o bajas quedan afuera.</li>' : '') +
+    (r.noEncontradas.length ? '<li>' + r.noEncontradas.length + ' solicitudes no están en BASE: ' + e(r.noEncontradas.slice(0, 8).join(', ')) + (r.noEncontradas.length > 8 ? '…' : '') + '</li>' : '');
+  return '<!DOCTYPE html><html><head><base target="_top"><style>' +
+    'body{font:14px system-ui,Segoe UI,Roboto,sans-serif;margin:0;padding:4px 2px;color:#1c2333}label{display:block;margin:10px 0 4px;font-weight:600;font-size:13px}' +
+    'input{width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid #d0d5dd;border-radius:8px;font:inherit}.dos{display:flex;gap:10px}.dos>div{flex:1}' +
+    'table{width:100%;border-collapse:collapse;margin-top:6px}td{padding:4px 2px;border-bottom:1px solid #eaecf0}.res{background:#f4f6fa;border-radius:10px;padding:10px 12px}' +
+    'ul{margin:8px 0 0;padding-left:18px;color:#b54708;font-size:13px}button{margin-top:16px;padding:9px 16px;border:0;border-radius:8px;background:#2e5bff;color:#fff;font:inherit;font-weight:700;cursor:pointer}' +
+    'button[disabled]{opacity:.5}.err{color:#b42318;margin-top:10px}.ok{color:#067647;margin-top:10px;font-weight:600}</style></head><body>' +
+    '<div class="res"><b>' + r.planes.length + ' planes</b> de la cartera entran en la campaña<table>' + filas + '</table>' + (avisos ? '<ul>' + avisos + '</ul>' : '') + '</div>' +
+    '<form id="f"><label>Nombre de la campaña</label><input name="titulo" required placeholder="Ej.: Avance 5 · regularizar antes del 30/11">' +
+    '<div class="dos"><div><label>Desde</label><input type="date" name="desde" value="' + hoy + '" required></div><div><label>Hasta</label><input type="date" name="hasta" value="' + fin + '" required></div></div>' +
+    '<label>Meta (% de planes gestionados)</label><input type="number" name="meta" min="1" max="100" value="100" required>' +
+    '<button id="b">Crear campaña</button><div id="m"></div></form>' +
+    '<script>var f=document.getElementById("f"),m=document.getElementById("m"),b=document.getElementById("b");' +
+    'f.onsubmit=function(ev){ev.preventDefault();b.disabled=true;m.className="";m.textContent="Guardando…";' +
+    'google.script.run.withSuccessHandler(function(x){m.className="ok";m.textContent="Listo: campaña creada con "+x.planes+" planes. Ya la ven en el CRM.";setTimeout(function(){google.script.host.close()},2500);})' +
+    '.withFailureHandler(function(e){b.disabled=false;m.className="err";m.textContent=e.message||e;})' +
+    '.crmGuardarCampanaHoja(' + JSON.stringify(codigo) + ',{titulo:f.titulo.value,desde:f.desde.value,hasta:f.hasta.value,meta:f.meta.value});};</script></body></html>';
 }
 
 /** Supervisor: da de baja un objetivo (queda en la hoja como inactivo). */

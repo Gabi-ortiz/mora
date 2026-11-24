@@ -252,7 +252,7 @@
 
 <script>
 // Tiene que ser igual a CRM_VERSION en crm_mora.gs.
-var VERSION = '2026-11-24.1';
+var VERSION = '2026-11-24.2';
 var S = {
   token: null, ini: null, planes: [], vista: 'cartera', limite: 200,
   filtro: { texto: '', situacion: '', estado: '', resp: '', avance: '', objetivo: '' }, seleccion: {}, objetivos: [],
@@ -446,6 +446,10 @@ function cargarObjetivos() {
 }
 // ¿El plan entra en el objetivo? (responsable, avance y prioridad)
 function enObjetivo(p, o) {
+  if (o.solicitudes && o.solicitudes.length) { // campaña: lista fija de planes
+    if (!o._sol) { o._sol = {}; o.solicitudes.forEach(function (s) { o._sol[s] = true; }); }
+    return !!o._sol[p.solicitud] && (o.responsableEmail === '*' || o.responsableEmail === p.responsableEmail);
+  }
   return (o.responsableEmail === '*' || o.responsableEmail === p.responsableEmail) &&
     (!o.avances.length || o.avances.indexOf(p.avance) >= 0) && o.situaciones.indexOf(p.situacion.codigo) >= 0;
 }
@@ -878,6 +882,7 @@ function enlazarReasignar(p) {
 
 // ---------- Objetivos ----------
 function textoObjetivo(o) {
+  if (o.solicitudes && o.solicitudes.length) return 'Campaña · ' + o.solicitudes.length + ' planes · del ' + ddmm(o.desde) + ' al ' + ddmm(o.hasta);
   var sit = o.situaciones.join(' + '), av = o.avances.length ? 'avance ' + o.avances.join(', ') : 'todos los avances';
   return sit + ' · ' + av + ' · del ' + ddmm(o.desde) + ' al ' + ddmm(o.hasta);
 }
@@ -911,7 +916,7 @@ function renderObjetivos(m) {
     '<div class="acciones"><span class="muted" id="objPrev"></span><button class="btn pri" type="submit">Crear objetivo</button></div></form></div>';
 
   var lista = S.objetivos.slice().sort(function (a, b) { return a.vencido - b.vencido || a.hasta.localeCompare(b.hasta); });
-  h += '<div class="card"><div class="card-h"><h3>Objetivos activos (' + lista.length + ')</h3><div class="d">Avance = casos del grupo con al menos una gestión desde la fecha de inicio. Los que se regularizan (quedan al día) salen del grupo.</div></div><div class="pad">' +
+  h += '<div class="card"><div class="card-h"><h3>Objetivos activos (' + lista.length + ')</h3><div class="d">Avance = casos del grupo con al menos una gestión desde la fecha de inicio. Los que se regularizan (quedan al día) salen del grupo. Las campañas (lista fija de planes) se crean desde la hoja Campañas de la planilla: Mora → CRM: crear campaña.</div></div><div class="pad">' +
     (lista.length ? lista.map(function (o) {
       var quienes = o.responsableEmail === '*' ? resp : resp.filter(function (r) { return r.email === o.responsableEmail; });
       return '<div class="ob" style="margin-bottom:12px;box-shadow:none;border:1px solid var(--line);border-left:4px solid ' + (o.vencido ? '#98a2b3' : '#7a5af8') + '">' +
