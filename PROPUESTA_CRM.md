@@ -120,7 +120,7 @@ para que el estado no dependa solo de lo que carga el responsable.
 - Lista final de resultados de contacto (hoy es una propuesta, se cambia
   en `crm_mora.gs`). Los estados del caso ya están definidos (30/09/2026):
   Contactado · Contactado - no paga · Licita · Promesa de pago ·
-  Pagó (A Verificar) · Incontactable ("Sin gestionar" es automático). Los motivos de no pago ya son
+  Pagó (A Verificar) · Transferencia en CC · Incontactable ("Sin gestionar" es automático). Los motivos de no pago ya son
   los códigos del equipo (P/E, S/C, M/V, T/U, P/P, A/C, TR, T/P, A/A, S/G,
   C/C).
 - Qué más mostrar en el Tablero supervisor (hoy: proyección de lo que

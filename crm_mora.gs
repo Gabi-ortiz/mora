@@ -21,7 +21,7 @@
 // --- CONFIGURACIÓN CRM ---
 // Tiene que ser igual a VERSION en crm_index.html: si no, la pantalla avisa
 // que los archivos pegados en Apps Script son de versiones distintas.
-const CRM_VERSION = '2026-10-09.3';
+const CRM_VERSION = '2026-11-24.1';
 // Archivo donde se guardan las hojas CRM_* (el ID es lo que está entre /d/ y
 // /edit en la URL). BASE se sigue leyendo de la planilla a la que está
 // pegado este script.
@@ -105,7 +105,7 @@ const CRM_ESTADOS_BAJA = ['Rescindido', 'Renunciado', 'Cancelado'];
 // Listas del formulario de gestión (a ajustar juntos).
 // "Sin gestionar" no se elige: es el estado de un plan sin gestiones.
 const CRM_ESTADOS_CASO = ['Contactado', 'Contactado - no paga', 'Licita', 'Promesa de pago',
-  'Pagó (A Verificar)', 'Incontactable'];
+  'Pagó (A Verificar)', 'Transferencia en CC', 'Incontactable'];
 const CRM_CANALES = ['Llamada', 'WhatsApp', 'SMS', 'Mail', 'Presencial', 'Sin contacto (solo actualización)'];
 const CRM_RESULTADOS = ['Atendió', 'No atendió', 'Buzón / apagado', 'Mensaje enviado',
   'Respondió mensaje', 'Número erróneo', 'N/A'];
